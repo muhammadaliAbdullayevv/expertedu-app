@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/router/app_router.dart';
+import 'app/theme/app_theme.dart';
 import 'core/extensions/build_context_x.dart';
 import 'core/widgets/update_banner.dart';
 import 'services/updates/app_update_controller.dart';
@@ -19,9 +20,7 @@ class MyApp extends ConsumerWidget {
     ref.watch(appUpdateControllerProvider);
     return MaterialApp.router(
       onGenerateTitle: (context) => context.strings.appName,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-      ),
+      theme: AppTheme.light(),
       routerConfig: router,
       builder: (context, child) => Column(
         children: <Widget>[

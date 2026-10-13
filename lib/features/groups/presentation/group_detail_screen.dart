@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/formatters/currency_formatter.dart';
+import '../../../core/widgets/bordered_list_tile.dart';
 import '../../billing/presentation/transaction_history_screen.dart';
 import '../../enrollments/data/enrollments_repository.dart';
 import '../../enrollments/presentation/enroll_student_sheet.dart';
@@ -76,13 +77,25 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
                   return const Center(child: Text('Hali o\'quvchilar yo\'q'));
                 }
                 return ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 16),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 8,
+                  ).copyWith(bottom: 16),
                   itemCount: roster.length,
                   itemBuilder: (context, index) {
                     final entry = roster[index];
                     final owesMoney = entry.balance > 0;
-                    return ListTile(
-                      leading: const CircleAvatar(child: Icon(Icons.school)),
+                    return BorderedListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: owesMoney
+                            ? Theme.of(context).colorScheme.errorContainer
+                            : Colors.green.withValues(alpha: 0.15),
+                        child: Icon(
+                          Icons.school,
+                          color: owesMoney
+                              ? Theme.of(context).colorScheme.error
+                              : Colors.green,
+                        ),
+                      ),
                       title: Text(entry.studentFullName),
                       subtitle: Text(
                         owesMoney

@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../../app/theme/app_theme.dart';
 import '../extensions/build_context_x.dart';
-import 'section_card.dart';
+import 'pressable.dart';
 
-/// A single icon+title+subtitle row inside a [SectionCard] -- the shared
-/// look for a tappable settings row, used by both the staff Settings
-/// screen (its own private copy, predating this one) and the customer
-/// portal's Settings tab.
+/// A single icon+title+subtitle row inside a bordered card -- the shared
+/// look for a tappable settings row.
 class SettingsTile extends StatelessWidget {
   const SettingsTile({
     super.key,
@@ -25,26 +24,34 @@ class SettingsTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SectionCard(
-      padding: EdgeInsets.zero,
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 18,
-          vertical: 10,
+    return Pressable(
+      onTap: onTap,
+      child: Card(
+        margin: EdgeInsets.zero,
+        elevation: 0,
+        color: context.colors.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.card),
+          side: BorderSide(color: context.colors.outlineVariant),
         ),
-        leading: Container(
-          width: 46,
-          height: 46,
-          decoration: BoxDecoration(
-            color: context.colors.primary.withValues(alpha: 0.09),
-            borderRadius: BorderRadius.circular(18),
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 10,
           ),
-          child: Icon(icon, color: context.colors.primary),
+          leading: Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: context.colors.primary.withValues(alpha: 0.09),
+              borderRadius: BorderRadius.circular(AppRadius.field),
+            ),
+            child: Icon(icon, color: context.colors.primary),
+          ),
+          title: Text(title, style: context.textTheme.titleSmall),
+          subtitle: Text(subtitle),
+          trailing: trailing,
         ),
-        title: Text(title, style: context.textTheme.titleSmall),
-        subtitle: Text(subtitle),
-        trailing: trailing,
-        onTap: onTap,
       ),
     );
   }
