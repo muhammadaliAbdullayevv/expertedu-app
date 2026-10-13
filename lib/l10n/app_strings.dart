@@ -17,4 +17,10 @@ class AppStrings {
   String get requiredField => 'Bu maydon majburiy';
 
   String get logout => 'Chiqish';
+
+  String get updateAvailable => 'Yangilanish mavjud';
+
+  String get downloadingUpdate => 'Yuklab olinmoqda';
+
+  String get update => 'Yangilash';
 }
