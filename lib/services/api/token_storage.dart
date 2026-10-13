@@ -21,7 +21,8 @@ class TokenStorage {
 
   Future<String?> readToken() => _storage.read(key: _tokenKey);
 
-  Future<void> saveToken(String token) => _storage.write(key: _tokenKey, value: token);
+  Future<void> saveToken(String token) =>
+      _storage.write(key: _tokenKey, value: token);
 
   Future<void> clearToken() => _storage.delete(key: _tokenKey);
 
@@ -29,21 +30,26 @@ class TokenStorage {
   /// string here (encode/decode lives in AuthRepository, which owns the
   /// SavedAccount shape) so this class stays a plain key/value store like
   /// the rest of it.
-  Future<String?> readSavedAccountsRaw() => _storage.read(key: _savedAccountsKey);
+  Future<String?> readSavedAccountsRaw() =>
+      _storage.read(key: _savedAccountsKey);
 
   Future<void> saveSavedAccountsRaw(String json) =>
       _storage.write(key: _savedAccountsKey, value: json);
 
   Future<String?> readGatewayKey() => _storage.read(key: _gatewayKeyKey);
 
-  Future<void> saveGatewayKey(String key) => _storage.write(key: _gatewayKeyKey, value: key);
+  Future<void> saveGatewayKey(String key) =>
+      _storage.write(key: _gatewayKeyKey, value: key);
 
   Future<bool> readGatewayEnabled() async {
     return (await _storage.read(key: _gatewayEnabledKey)) == 'true';
   }
 
   Future<void> saveGatewayEnabled(bool enabled) {
-    return _storage.write(key: _gatewayEnabledKey, value: enabled ? 'true' : 'false');
+    return _storage.write(
+      key: _gatewayEnabledKey,
+      value: enabled ? 'true' : 'false',
+    );
   }
 
   /// The FCM token this device last successfully registered with the
@@ -68,6 +74,9 @@ class TokenStorage {
   }
 
   Future<void> saveUseDynamicColor(bool enabled) {
-    return _storage.write(key: _useDynamicColorKey, value: enabled ? 'true' : 'false');
+    return _storage.write(
+      key: _useDynamicColorKey,
+      value: enabled ? 'true' : 'false',
+    );
   }
 }

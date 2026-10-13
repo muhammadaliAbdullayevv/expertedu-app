@@ -7,8 +7,18 @@ class DateFormatters {
   // 'uz', which isn't reliably bundled) so "10 iyul 2026" always renders
   // correctly regardless of what locale data happens to be initialized.
   static const List<String> _monthNames = <String>[
-    'yanvar', 'fevral', 'mart', 'aprel', 'may', 'iyun',
-    'iyul', 'avgust', 'sentyabr', 'oktyabr', 'noyabr', 'dekabr',
+    'yanvar',
+    'fevral',
+    'mart',
+    'aprel',
+    'may',
+    'iyun',
+    'iyul',
+    'avgust',
+    'sentyabr',
+    'oktyabr',
+    'noyabr',
+    'dekabr',
   ];
   static final DateFormat _time = DateFormat('HH:mm');
 
@@ -25,7 +35,8 @@ class DateFormatters {
     return '${name[0].toUpperCase()}${name.substring(1)} ${local.year}';
   }
 
-  static String dateTime(DateTime value) => '${date(value)} ${_time.format(value.toLocal())}';
+  static String dateTime(DateTime value) =>
+      '${date(value)} ${_time.format(value.toLocal())}';
 
   static String time(DateTime value) => _time.format(value.toLocal());
 
@@ -58,7 +69,9 @@ class DateFormatters {
   static String relativeDateTime(DateTime value) {
     final local = value.toLocal();
     final now = DateTime.now();
-    if (local.year == now.year && local.month == now.month && local.day == now.day) {
+    if (local.year == now.year &&
+        local.month == now.month &&
+        local.day == now.day) {
       return 'Bugun, ${dateTime(value)}';
     }
     return dateTime(value);
@@ -68,9 +81,11 @@ class DateFormatters {
   static String dateGroupLabel(DateTime value) {
     final local = value.toLocal();
     final today = DateTime.now();
-    final diffDays = DateTime(today.year, today.month, today.day)
-        .difference(DateTime(local.year, local.month, local.day))
-        .inDays;
+    final diffDays = DateTime(
+      today.year,
+      today.month,
+      today.day,
+    ).difference(DateTime(local.year, local.month, local.day)).inDays;
     if (diffDays == 0) return 'Bugun';
     if (diffDays == 1) return 'Kecha';
     return date(value);
@@ -87,9 +102,11 @@ class DateFormatters {
   static String chatListTimestamp(DateTime value) {
     final local = value.toLocal();
     final now = DateTime.now();
-    final diffDays = DateTime(now.year, now.month, now.day)
-        .difference(DateTime(local.year, local.month, local.day))
-        .inDays;
+    final diffDays = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).difference(DateTime(local.year, local.month, local.day)).inDays;
     if (diffDays == 0) return _time.format(local);
     if (diffDays == 1) return 'Kecha';
     return date(value);

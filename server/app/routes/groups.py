@@ -16,12 +16,17 @@ async def list_groups(include_inactive: bool = False):
 
 @router.post("", response_model=Group, status_code=status.HTTP_201_CREATED)
 async def create_group(payload: CreateGroupRequest):
+    subject_exists = await db.pool().fetchval("select 1 from subjects where id = $1", payload.subject_id)
+    if not subject_exists:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Fan topilmadi.")
+
     row = await db.pool().fetchrow(
         """
-        insert into groups (name, teacher_name, fee_amount, due_day, note)
-        values ($1, $2, $3, $4, $5)
+        insert into groups (subject_id, name, teacher_name, fee_amount, due_day, note)
+        values ($1, $2, $3, $4, $5, $6)
         returning *
         """,
+        payload.subject_id,
         payload.name.strip(),
         payload.teacher_name.strip() if payload.teacher_name else None,
         payload.fee_amount,

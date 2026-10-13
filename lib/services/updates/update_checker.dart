@@ -67,19 +67,27 @@ class UpdateChecker {
     // under the real applicationId, which Android's installer won't accept
     // as an update to a *different* installed package.
     final packageInfo = await PackageInfo.fromPlatform();
-    final versionFile = packageInfo.packageName.endsWith('.dev') ? 'version-dev.json' : 'version.json';
+    final versionFile = packageInfo.packageName.endsWith('.dev')
+        ? 'version-dev.json'
+        : 'version.json';
     final response = await _http
         .get(Uri.parse('${ApiConfig.baseUrl}/uploads/app/$versionFile'))
         .timeout(const Duration(seconds: 10));
     if (response.statusCode != 200) {
-      throw Exception('Versiyani tekshirish muvaffaqiyatsiz: ${response.statusCode}');
+      throw Exception(
+        'Versiyani tekshirish muvaffaqiyatsiz: ${response.statusCode}',
+      );
     }
-    final json = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
+    final json =
+        jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
     return AppUpdateInfo.fromJson(json, ApiConfig.baseUrl);
   }
 
   /// Downloads [update]'s APK to a cache file and returns its path.
-  Future<String> download(AppUpdateInfo update, {void Function(double)? onProgress}) async {
+  Future<String> download(
+    AppUpdateInfo update, {
+    void Function(double)? onProgress,
+  }) async {
     final request = http.Request('GET', Uri.parse(update.apkUrl));
     final response = await _http.send(request);
     if (response.statusCode != 200) {
@@ -92,13 +100,15 @@ class UpdateChecker {
     final sink = file.openWrite();
     var received = 0;
 
-    await response.stream.map((chunk) {
-      received += chunk.length;
-      if (total > 0) {
-        onProgress?.call(received / total);
-      }
-      return chunk;
-    }).pipe(sink);
+    await response.stream
+        .map((chunk) {
+          received += chunk.length;
+          if (total > 0) {
+            onProgress?.call(received / total);
+          }
+          return chunk;
+        })
+        .pipe(sink);
 
     return file.path;
   }

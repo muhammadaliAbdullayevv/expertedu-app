@@ -46,7 +46,9 @@ class LocalDatabase {
             created_at text not null
           )
         ''');
-        await db.execute('create index idx_outbox_status on outbox(status, seq)');
+        await db.execute(
+          'create index idx_outbox_status on outbox(status, seq)',
+        );
       },
     );
     _db = db;
@@ -68,7 +70,11 @@ class LocalDatabase {
 
   Future<dynamic> readBlob(String key) async {
     final db = await _open();
-    final rows = await db.query('cache_blobs', where: 'key = ?', whereArgs: [key]);
+    final rows = await db.query(
+      'cache_blobs',
+      where: 'key = ?',
+      whereArgs: [key],
+    );
     if (rows.isEmpty) return null;
     return jsonDecode(rows.first['json'] as String);
   }

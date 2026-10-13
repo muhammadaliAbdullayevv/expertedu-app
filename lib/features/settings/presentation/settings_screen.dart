@@ -33,9 +33,11 @@ class SettingsScreen extends ConsumerWidget {
           onTap: () async {
             await ref.read(authRepositoryProvider).revokeMySessions();
             if (context.mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('Barcha sessiyalar bekor qilindi')));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Barcha sessiyalar bekor qilindi'),
+                ),
+              );
             }
           },
         ),
@@ -74,11 +76,17 @@ class _AppVersionTile extends ConsumerWidget {
           title: 'Ilova versiyasi',
           subtitle: subtitle,
           trailing: busy
-              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
               : const Icon(Icons.chevron_right_rounded),
           onTap: busy
               ? null
-              : () => controller.available != null ? controller.downloadAndInstall() : controller.checkNow(),
+              : () => controller.available != null
+                    ? controller.downloadAndInstall()
+                    : controller.checkNow(),
         );
       },
     );

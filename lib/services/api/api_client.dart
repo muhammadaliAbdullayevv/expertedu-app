@@ -52,7 +52,11 @@ class ApiClient {
 
   static const Duration _timeout = Duration(seconds: 15);
 
-  Future<dynamic> get(String path, {Map<String, String>? query, Duration? timeout}) {
+  Future<dynamic> get(
+    String path, {
+    Map<String, String>? query,
+    Duration? timeout,
+  }) {
     return _guarded(() async {
       final response = await _http
           .get(_uri(path, query), headers: await _headers())
@@ -61,7 +65,12 @@ class ApiClient {
     });
   }
 
-  Future<dynamic> post(String path, {Object? body, bool withAuth = true, Duration? timeout}) {
+  Future<dynamic> post(
+    String path, {
+    Object? body,
+    bool withAuth = true,
+    Duration? timeout,
+  }) {
     return _guarded(() async {
       final response = await _http
           .post(
@@ -89,21 +98,30 @@ class ApiClient {
 
   Future<void> delete(String path, {Map<String, String>? query}) {
     return _guarded(() async {
-      final response =
-          await _http.delete(_uri(path, query), headers: await _headers()).timeout(_timeout);
+      final response = await _http
+          .delete(_uri(path, query), headers: await _headers())
+          .timeout(_timeout);
       _decode(response);
     });
   }
 
   /// Uploads a file as multipart/form-data (field name "file").
-  Future<dynamic> uploadFile(String path, {required List<int> bytes, required String filename}) {
+  Future<dynamic> uploadFile(
+    String path, {
+    required List<int> bytes,
+    required String filename,
+  }) {
     return _guarded(() async {
       final headers = await _headers();
       headers.remove('Content-Type');
       final request = http.MultipartRequest('POST', _uri(path))
         ..headers.addAll(headers)
-        ..files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
-      final streamedResponse = await _http.send(request).timeout(const Duration(seconds: 30));
+        ..files.add(
+          http.MultipartFile.fromBytes('file', bytes, filename: filename),
+        );
+      final streamedResponse = await _http
+          .send(request)
+          .timeout(const Duration(seconds: 30));
       final response = await http.Response.fromStream(streamedResponse);
       return _decode(response);
     });
@@ -121,12 +139,17 @@ class ApiClient {
     } on ApiException {
       rethrow;
     } catch (_) {
-      throw ApiException(0, 'Serverga ulanib bo\'lmadi. Internetni tekshiring.');
+      throw ApiException(
+        0,
+        'Serverga ulanib bo\'lmadi. Internetni tekshiring.',
+      );
     }
   }
 
   Uri _uri(String path, [Map<String, String>? query]) {
-    return Uri.parse('${ApiConfig.baseUrl}$path').replace(queryParameters: query);
+    return Uri.parse(
+      '${ApiConfig.baseUrl}$path',
+    ).replace(queryParameters: query);
   }
 
   Future<Map<String, String>> _headers({bool withAuth = true}) async {

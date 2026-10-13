@@ -26,7 +26,10 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
   }
 
   void _reload() {
-    setState(() => _future = ref.read(groupsRepositoryProvider).roster(widget.group.id));
+    setState(
+      () =>
+          _future = ref.read(groupsRepositoryProvider).roster(widget.group.id),
+    );
   }
 
   @override
@@ -36,7 +39,10 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
       appBar: AppBar(title: Text(group.name)),
       floatingActionButton: FloatingActionButton(
         onPressed: () async {
-          final enrolled = await showEnrollStudentSheet(context, groupId: group.id);
+          final enrolled = await showEnrollStudentSheet(
+            context,
+            groupId: group.id,
+          );
           if (enrolled == true) _reload();
         },
         child: const Icon(Icons.person_add_alt_1),
@@ -48,7 +54,8 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
             child: Text(
               [
-                if (group.teacherName != null && group.teacherName!.isNotEmpty) 'O\'qituvchi: ${group.teacherName}',
+                if (group.teacherName != null && group.teacherName!.isNotEmpty)
+                  'O\'qituvchi: ${group.teacherName}',
                 'Har oyning ${group.dueDay}-kuni',
               ].join(' • '),
               style: Theme.of(context).textTheme.bodyMedium,
@@ -78,9 +85,13 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
                       leading: const CircleAvatar(child: Icon(Icons.school)),
                       title: Text(entry.studentFullName),
                       subtitle: Text(
-                        owesMoney ? 'Qarz: ${CurrencyFormatter.format(entry.balance)}' : 'To\'langan',
+                        owesMoney
+                            ? 'Qarz: ${CurrencyFormatter.format(entry.balance)}'
+                            : 'To\'langan',
                         style: TextStyle(
-                          color: owesMoney ? Theme.of(context).colorScheme.error : Colors.green,
+                          color: owesMoney
+                              ? Theme.of(context).colorScheme.error
+                              : Colors.green,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
@@ -118,8 +129,14 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
         title: const Text('O\'quvchini chiqarish'),
         content: Text('${entry.studentFullName} shu guruhdan chiqarilsinmi?'),
         actions: <Widget>[
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Yo\'q')),
-          FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Ha')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Yo\'q'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Ha'),
+          ),
         ],
       ),
     );

@@ -13,6 +13,7 @@ class Student {
     required this.phone,
     this.telegramUsername,
     this.note,
+    this.balance = 0,
   });
 
   final int id;
@@ -21,12 +22,17 @@ class Student {
   final String? telegramUsername;
   final String? note;
 
+  /// Sum of this student's balance across every enrollment -- positive
+  /// means they owe money overall.
+  final int balance;
+
   factory Student.fromJson(Map<String, dynamic> json) => Student(
     id: json['id'] as int,
     fullName: json['full_name'] as String,
     phone: json['phone'] as String,
     telegramUsername: json['telegram_username'] as String?,
     note: json['note'] as String?,
+    balance: json['balance'] as int? ?? 0,
   );
 }
 
@@ -37,11 +43,21 @@ class StudentsRepository {
 
   Future<List<Student>> list({String? query}) async {
     final json =
-        await _api.get('/students', query: query == null || query.isEmpty ? null : {'q': query}) as List<dynamic>;
-    return json.map((e) => Student.fromJson(e as Map<String, dynamic>)).toList();
+        await _api.get(
+              '/students',
+              query: query == null || query.isEmpty ? null : {'q': query},
+            )
+            as List<dynamic>;
+    return json
+        .map((e) => Student.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
-  Future<Student> create({required String fullName, required String phone, String? telegramUsername}) async {
+  Future<Student> create({
+    required String fullName,
+    required String phone,
+    String? telegramUsername,
+  }) async {
     final json =
         await _api.post(
               '/students',

@@ -28,7 +28,10 @@ class SettingsTile extends StatelessWidget {
     return SectionCard(
       padding: EdgeInsets.zero,
       child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 18,
+          vertical: 10,
+        ),
         leading: Container(
           width: 46,
           height: 46,

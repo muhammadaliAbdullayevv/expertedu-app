@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../groups/presentation/groups_list_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../../stats/presentation/stats_screen.dart';
 import '../../students/presentation/students_list_screen.dart';
+import '../../subjects/presentation/subjects_list_screen.dart';
 import 'dashboard_screen.dart';
 
 class HomeShell extends ConsumerStatefulWidget {
@@ -19,18 +19,28 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   int _currentIndex = 0;
 
   final _dashboardKey = GlobalKey<DashboardScreenState>();
-  final _groupsKey = GlobalKey<GroupsListScreenState>();
+  final _subjectsKey = GlobalKey<SubjectsListScreenState>();
   final _studentsKey = GlobalKey<StudentsListScreenState>();
 
   late final List<Widget> _pages = <Widget>[
     DashboardScreen(key: _dashboardKey),
-    GroupsListScreen(key: _groupsKey),
+    SubjectsListScreen(key: _subjectsKey),
     StudentsListScreen(key: _studentsKey),
     const StatsScreen(),
     const SettingsScreen(),
   ];
 
-  static const _titles = <String>['Bosh sahifa', 'Guruhlar', 'O\'quvchilar', 'Statistika', 'Sozlamalar'];
+  static const _titles = <String>[
+    'Bosh sahifa',
+    'Fanlar',
+    'O\'quvchilar',
+    'Statistika',
+    'Sozlamalar',
+  ];
+
+  // Only the tabs with their own searchable list show the search icon --
+  // Home/Stats/Settings don't have one to search.
+  bool get _currentTabHasSearch => _currentIndex == 1 || _currentIndex == 2;
 
   @override
   Widget build(BuildContext context) {
@@ -43,6 +53,27 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       child: Scaffold(
         appBar: AppBar(
           title: Text(_titles[_currentIndex]),
+          // A visible bottom border instead of just elevation -- also
+          // where a notification bell will sit once that exists, next to
+          // the search icon below.
+          shape: Border(
+            bottom: BorderSide(
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
+          ),
+          actions: <Widget>[
+            if (_currentTabHasSearch)
+              IconButton(
+                icon: const Icon(Icons.search),
+                onPressed: () {
+                  if (_currentIndex == 1) {
+                    _subjectsKey.currentState?.toggleSearch();
+                  } else {
+                    _studentsKey.currentState?.toggleSearch();
+                  }
+                },
+              ),
+          ],
         ),
         body: SafeArea(
           top: false,
@@ -54,7 +85,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                 onPressed: () {
                   HapticFeedback.mediumImpact();
                   if (_currentIndex == 1) {
-                    _groupsKey.currentState?.showCreateSheet();
+                    _subjectsKey.currentState?.showCreateSheet();
                   } else {
                     _studentsKey.currentState?.showCreateSheet();
                   }
@@ -81,9 +112,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                   label: 'Bosh sahifa',
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.groups_outlined),
-                  selectedIcon: Icon(Icons.groups_rounded),
-                  label: 'Guruhlar',
+                  icon: Icon(Icons.menu_book_outlined),
+                  selectedIcon: Icon(Icons.menu_book_rounded),
+                  label: 'Fanlar',
                 ),
                 NavigationDestination(
                   icon: Icon(Icons.school_outlined),
@@ -111,6 +142,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   void _handleBackPressed() {
     final cleared = switch (_currentIndex) {
       0 => _dashboardKey.currentState?.clearSearchIfActive() ?? false,
+      1 => _subjectsKey.currentState?.clearSearchIfActive() ?? false,
       2 => _studentsKey.currentState?.clearSearchIfActive() ?? false,
       _ => false,
     };

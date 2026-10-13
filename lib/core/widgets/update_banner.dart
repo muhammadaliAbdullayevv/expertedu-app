@@ -29,14 +29,22 @@ class UpdateBanner extends ConsumerWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Row(
                 children: <Widget>[
-                  const Icon(Icons.system_update_rounded, size: 16, color: Colors.white),
+                  const Icon(
+                    Icons.system_update_rounded,
+                    size: 16,
+                    color: Colors.white,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       busy
                           ? '${context.strings.downloadingUpdate} ${(progress * 100).toStringAsFixed(0)}%'
                           : '${context.strings.updateAvailable}: v${update.versionName}',
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 13),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                      ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -49,7 +57,10 @@ class UpdateBanner extends ConsumerWidget {
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                       onPressed: controller.downloadAndInstall,
-                      child: Text(context.strings.update, style: const TextStyle(fontWeight: FontWeight.w800)),
+                      child: Text(
+                        context.strings.update,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
                     ),
                 ],
               ),

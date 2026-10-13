@@ -6,5 +6,6 @@ class ApiConfig {
     defaultValue: 'https://expertedu-api.ai-student-helper.site',
   );
 
-  static String? resolveUrl(String? path) => path == null ? null : '$baseUrl$path';
+  static String? resolveUrl(String? path) =>
+      path == null ? null : '$baseUrl$path';
 }

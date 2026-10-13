@@ -16,8 +16,19 @@ create table if not exists users (
   created_at timestamptz not null default now()
 );
 
+-- A subject (e.g. "Ingliz tili") can have several groups under it (e.g.
+-- Beginner/Intermediate cohorts) -- the home screen browses subjects
+-- first, then that subject's groups, then a group's own roster.
+create table if not exists subjects (
+  id bigserial primary key,
+  name text not null unique,
+  created_by bigint references users(id),
+  created_at timestamptz not null default now()
+);
+
 create table if not exists groups (
   id bigserial primary key,
+  subject_id bigint references subjects(id),
   name text not null,
   teacher_name text,
   fee_amount bigint not null,

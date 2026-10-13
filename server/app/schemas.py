@@ -23,7 +23,25 @@ class MeResponse(BaseModel):
     role: str
 
 
+class CreateSubjectRequest(BaseModel):
+    name: str
+
+
+class Subject(BaseModel):
+    id: int
+    name: str
+    created_at: datetime
+
+
+class SubjectWithCount(BaseModel):
+    id: int
+    name: str
+    group_count: int
+    created_at: datetime
+
+
 class CreateGroupRequest(BaseModel):
+    subject_id: int
     name: str
     teacher_name: str | None = None
     fee_amount: int
@@ -42,6 +60,7 @@ class UpdateGroupRequest(BaseModel):
 
 class Group(BaseModel):
     id: int
+    subject_id: int | None
     name: str
     teacher_name: str | None
     fee_amount: int
@@ -49,6 +68,19 @@ class Group(BaseModel):
     is_active: bool
     note: str | None
     created_at: datetime
+
+
+class GroupWithStudentCount(BaseModel):
+    id: int
+    subject_id: int | None
+    name: str
+    teacher_name: str | None
+    fee_amount: int
+    due_day: int
+    is_active: bool
+    note: str | None
+    created_at: datetime
+    student_count: int
 
 
 class CreateStudentRequest(BaseModel):
@@ -72,6 +104,21 @@ class Student(BaseModel):
     telegram_username: str | None
     note: str | None
     created_at: datetime
+
+
+class StudentListItem(BaseModel):
+    """Student plus their total balance across every enrollment -- only the
+    list endpoint joins/aggregates this, so it's a separate model from
+    [Student] rather than a field every other student response has to
+    fake with 0."""
+
+    id: int
+    full_name: str
+    phone: str
+    telegram_username: str | None
+    note: str | None
+    created_at: datetime
+    balance: int
 
 
 class CreateEnrollmentRequest(BaseModel):

@@ -9,15 +9,18 @@ final groupsRepositoryProvider = Provider<GroupsRepository>((ref) {
 class Group {
   const Group({
     required this.id,
+    this.subjectId,
     required this.name,
     this.teacherName,
     required this.feeAmount,
     required this.dueDay,
     required this.isActive,
     this.note,
+    this.studentCount,
   });
 
   final int id;
+  final int? subjectId;
   final String name;
   final String? teacherName;
   final int feeAmount;
@@ -25,14 +28,19 @@ class Group {
   final bool isActive;
   final String? note;
 
+  /// Only populated when fetched via [GroupsRepository.listBySubject].
+  final int? studentCount;
+
   factory Group.fromJson(Map<String, dynamic> json) => Group(
     id: json['id'] as int,
+    subjectId: json['subject_id'] as int?,
     name: json['name'] as String,
     teacherName: json['teacher_name'] as String?,
     feeAmount: json['fee_amount'] as int,
     dueDay: json['due_day'] as int,
     isActive: json['is_active'] as bool,
     note: json['note'] as String?,
+    studentCount: json['student_count'] as int?,
   );
 }
 
@@ -76,11 +84,21 @@ class GroupsRepository {
 
   Future<List<Group>> list({bool includeInactive = false}) async {
     final json =
-        await _api.get('/groups', query: {'include_inactive': includeInactive.toString()}) as List<dynamic>;
+        await _api.get(
+              '/groups',
+              query: {'include_inactive': includeInactive.toString()},
+            )
+            as List<dynamic>;
+    return json.map((e) => Group.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
+  Future<List<Group>> listBySubject(int subjectId) async {
+    final json = await _api.get('/subjects/$subjectId/groups') as List<dynamic>;
     return json.map((e) => Group.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<Group> create({
+    required int subjectId,
     required String name,
     String? teacherName,
     required int feeAmount,
@@ -91,6 +109,7 @@ class GroupsRepository {
         await _api.post(
               '/groups',
               body: <String, dynamic>{
+                'subject_id': subjectId,
                 'name': name,
                 'teacher_name': teacherName,
                 'fee_amount': feeAmount,
@@ -104,6 +123,8 @@ class GroupsRepository {
 
   Future<List<RosterEntry>> roster(int groupId) async {
     final json = await _api.get('/groups/$groupId/roster') as List<dynamic>;
-    return json.map((e) => RosterEntry.fromJson(e as Map<String, dynamic>)).toList();
+    return json
+        .map((e) => RosterEntry.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 }

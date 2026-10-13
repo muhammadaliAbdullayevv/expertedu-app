@@ -5,7 +5,10 @@ import '../../students/data/students_repository.dart';
 import '../data/enrollments_repository.dart';
 
 /// Returns true if a student was enrolled.
-Future<bool?> showEnrollStudentSheet(BuildContext context, {required int groupId}) {
+Future<bool?> showEnrollStudentSheet(
+  BuildContext context, {
+  required int groupId,
+}) {
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
@@ -19,7 +22,8 @@ class _EnrollStudentSheet extends ConsumerStatefulWidget {
   final int groupId;
 
   @override
-  ConsumerState<_EnrollStudentSheet> createState() => _EnrollStudentSheetState();
+  ConsumerState<_EnrollStudentSheet> createState() =>
+      _EnrollStudentSheetState();
 }
 
 class _EnrollStudentSheetState extends ConsumerState<_EnrollStudentSheet> {
@@ -42,72 +46,92 @@ class _EnrollStudentSheetState extends ConsumerState<_EnrollStudentSheet> {
   }
 
   void _search(String query) {
-    setState(() => _future = ref.read(studentsRepositoryProvider).list(query: query));
+    setState(
+      () => _future = ref.read(studentsRepositoryProvider).list(query: query),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
-        top: 16,
-        bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Text('O\'quvchi qo\'shish', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _searchController,
-            decoration: const InputDecoration(hintText: 'Qidirish...', prefixIcon: Icon(Icons.search)),
-            onChanged: _search,
-          ),
-          const SizedBox(height: 8),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 260),
-            child: FutureBuilder<List<Student>>(
-              future: _future,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                final students = snapshot.data ?? const <Student>[];
-                if (students.isEmpty) {
-                  return const Center(child: Text('Topilmadi'));
-                }
-                return ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: students.length,
-                  itemBuilder: (context, index) {
-                    final student = students[index];
-                    final selected = _selected?.id == student.id;
-                    return ListTile(
-                      selected: selected,
-                      leading: Icon(selected ? Icons.check_circle : Icons.circle_outlined),
-                      title: Text(student.fullName),
-                      subtitle: Text(student.phone),
-                      onTap: () => setState(() => _selected = student),
-                    );
-                  },
-                );
-              },
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 16,
+          bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(
+              'O\'quvchi qo\'shish',
+              style: Theme.of(context).textTheme.titleLarge,
             ),
-          ),
-          if (_error != null) ...<Widget>[
+            const SizedBox(height: 12),
+            TextField(
+              controller: _searchController,
+              decoration: const InputDecoration(
+                hintText: 'Qidirish...',
+                prefixIcon: Icon(Icons.search),
+              ),
+              onChanged: _search,
+            ),
             const SizedBox(height: 8),
-            Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 260),
+              child: FutureBuilder<List<Student>>(
+                future: _future,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  final students = snapshot.data ?? const <Student>[];
+                  if (students.isEmpty) {
+                    return const Center(child: Text('Topilmadi'));
+                  }
+                  return ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: students.length,
+                    itemBuilder: (context, index) {
+                      final student = students[index];
+                      final selected = _selected?.id == student.id;
+                      return ListTile(
+                        selected: selected,
+                        leading: Icon(
+                          selected ? Icons.check_circle : Icons.circle_outlined,
+                        ),
+                        title: Text(student.fullName),
+                        subtitle: Text(student.phone),
+                        onTap: () => setState(() => _selected = student),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+            if (_error != null) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: _selected == null || _submitting ? null : _submit,
+              child: _submitting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Qo\'shish'),
+            ),
           ],
-          const SizedBox(height: 16),
-          FilledButton(
-            onPressed: _selected == null || _submitting ? null : _submit,
-            child: _submitting
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('Qo\'shish'),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -120,7 +144,11 @@ class _EnrollStudentSheetState extends ConsumerState<_EnrollStudentSheet> {
     try {
       await ref
           .read(enrollmentsRepositoryProvider)
-          .create(studentId: _selected!.id, groupId: widget.groupId, joinedAt: DateTime.now());
+          .create(
+            studentId: _selected!.id,
+            groupId: widget.groupId,
+            joinedAt: DateTime.now(),
+          );
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       setState(() => _error = e.toString());

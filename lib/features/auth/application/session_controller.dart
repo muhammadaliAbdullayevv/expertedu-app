@@ -7,7 +7,10 @@ import '../../../services/api/api_client.dart';
 import '../data/auth_repository.dart';
 
 final sessionControllerProvider = Provider<SessionController>((ref) {
-  final controller = SessionController(ref.watch(authRepositoryProvider), ref.watch(apiClientProvider));
+  final controller = SessionController(
+    ref.watch(authRepositoryProvider),
+    ref.watch(apiClientProvider),
+  );
   ref.onDispose(controller.dispose);
   return controller;
 });
@@ -57,7 +60,8 @@ class SessionController extends ChangeNotifier {
           .login(phone: phone, password: password)
           .timeout(
             const Duration(seconds: 20),
-            onTimeout: () => throw ApiException(0, 'Vaqt tugadi, qayta urinib ko\'ring.'),
+            onTimeout: () =>
+                throw ApiException(0, 'Vaqt tugadi, qayta urinib ko\'ring.'),
           );
       _errorText = null;
       _savedAccounts = await _repository.listSavedAccounts();
@@ -77,14 +81,18 @@ class SessionController extends ChangeNotifier {
   /// Logs a *second* account into the switcher (see [SavedAccount]) without
   /// making it the active session. Tapping it in the switcher calls
   /// [switchAccount] instead.
-  Future<String?> addAccount({required String phone, required String password}) async {
+  Future<String?> addAccount({
+    required String phone,
+    required String password,
+  }) async {
     _apiClient.resetAuthBlock();
     try {
       await _repository
           .addAccount(phone: phone, password: password)
           .timeout(
             const Duration(seconds: 20),
-            onTimeout: () => throw ApiException(0, 'Vaqt tugadi, qayta urinib ko\'ring.'),
+            onTimeout: () =>
+                throw ApiException(0, 'Vaqt tugadi, qayta urinib ko\'ring.'),
           );
       _savedAccounts = await _repository.listSavedAccounts();
       notifyListeners();

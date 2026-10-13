@@ -19,7 +19,9 @@ class MyApp extends ConsumerWidget {
     ref.watch(appUpdateControllerProvider);
     return MaterialApp.router(
       onGenerateTitle: (context) => context.strings.appName,
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple)),
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+      ),
       routerConfig: router,
       builder: (context, child) => Column(
         children: <Widget>[

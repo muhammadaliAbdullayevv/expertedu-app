@@ -8,10 +8,14 @@ final androidFileBridgeProvider = Provider<AndroidFileBridge>((ref) {
 class AndroidFileBridge {
   const AndroidFileBridge();
 
-  static const MethodChannel _channel = MethodChannel('uz.expertedu.expert_edu_center/files');
+  static const MethodChannel _channel = MethodChannel(
+    'uz.expertedu.expert_edu_center/files',
+  );
 
   /// Hands a downloaded update APK to the system installer.
   Future<void> installApk(String path) {
-    return _channel.invokeMethod<void>('installApk', <String, Object?>{'path': path});
+    return _channel.invokeMethod<void>('installApk', <String, Object?>{
+      'path': path,
+    });
   }
 }

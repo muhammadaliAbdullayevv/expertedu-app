@@ -8,26 +8,38 @@ import '../data/transactions_repository.dart';
 import 'record_payment_sheet.dart';
 
 class TransactionHistoryScreen extends ConsumerStatefulWidget {
-  const TransactionHistoryScreen({super.key, required this.enrollmentId, required this.studentName});
+  const TransactionHistoryScreen({
+    super.key,
+    required this.enrollmentId,
+    required this.studentName,
+  });
 
   final int enrollmentId;
   final String studentName;
 
   @override
-  ConsumerState<TransactionHistoryScreen> createState() => _TransactionHistoryScreenState();
+  ConsumerState<TransactionHistoryScreen> createState() =>
+      _TransactionHistoryScreenState();
 }
 
-class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScreen> {
+class _TransactionHistoryScreenState
+    extends ConsumerState<TransactionHistoryScreen> {
   late Future<List<Transaction>> _future;
 
   @override
   void initState() {
     super.initState();
-    _future = ref.read(transactionsRepositoryProvider).listForEnrollment(widget.enrollmentId);
+    _future = ref
+        .read(transactionsRepositoryProvider)
+        .listForEnrollment(widget.enrollmentId);
   }
 
   void _reload() {
-    setState(() => _future = ref.read(transactionsRepositoryProvider).listForEnrollment(widget.enrollmentId));
+    setState(
+      () => _future = ref
+          .read(transactionsRepositoryProvider)
+          .listForEnrollment(widget.enrollmentId),
+    );
   }
 
   @override
@@ -46,11 +58,16 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
           final transactions = snapshot.data ?? const <Transaction>[];
           final ledger = calculateEnrollmentLedger(
             transactions.map(
-              (t) => LedgerTransaction(kind: t.kind, amount: t.amount, occurredAt: t.occurredAt),
+              (t) => LedgerTransaction(
+                kind: t.kind,
+                amount: t.amount,
+                occurredAt: t.occurredAt,
+              ),
             ),
           );
-          final payments = transactions.where((t) => t.kind == 'payment').toList()
-            ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
+          final payments =
+              transactions.where((t) => t.kind == 'payment').toList()
+                ..sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
 
           return Column(
             children: <Widget>[
@@ -60,10 +77,15 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
                   children: <Widget>[
                     Expanded(
                       child: Text(
-                        ledger.balance > 0 ? 'Qarz: ${CurrencyFormatter.format(ledger.balance)}' : 'Qarzi yo\'q',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: ledger.balance > 0 ? Theme.of(context).colorScheme.error : null,
-                        ),
+                        ledger.balance > 0
+                            ? 'Qarz: ${CurrencyFormatter.format(ledger.balance)}'
+                            : 'Qarzi yo\'q',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: ledger.balance > 0
+                                  ? Theme.of(context).colorScheme.error
+                                  : null,
+                            ),
                       ),
                     ),
                     FilledButton.icon(
@@ -95,26 +117,38 @@ class _TransactionHistoryScreenState extends ConsumerState<TransactionHistoryScr
                           color: switch (charge.status) {
                             ChargeStatus.paid => Colors.green,
                             ChargeStatus.partial => Colors.orange,
-                            ChargeStatus.unpaid => Theme.of(context).colorScheme.error,
+                            ChargeStatus.unpaid => Theme.of(
+                              context,
+                            ).colorScheme.error,
                           },
                         ),
                         title: Text(
                           CurrencyFormatter.format(charge.transaction.amount) +
-                              (charge.transaction.amount != charge.amountPaid && charge.status != ChargeStatus.unpaid
+                              (charge.transaction.amount != charge.amountPaid &&
+                                      charge.status != ChargeStatus.unpaid
                                   ? ' (${CurrencyFormatter.format(charge.amountPaid)} to\'landi)'
                                   : ''),
                         ),
-                        subtitle: Text(DateFormatters.date(charge.transaction.occurredAt)),
+                        subtitle: Text(
+                          DateFormatters.date(charge.transaction.occurredAt),
+                        ),
                       ),
                     ),
                     if (payments.isNotEmpty) const Divider(),
                     ...payments.map(
                       (payment) => ListTile(
-                        leading: const Icon(Icons.arrow_downward, color: Colors.green),
-                        title: Text('+ ${CurrencyFormatter.format(payment.amount)}'),
+                        leading: const Icon(
+                          Icons.arrow_downward,
+                          color: Colors.green,
+                        ),
+                        title: Text(
+                          '+ ${CurrencyFormatter.format(payment.amount)}',
+                        ),
                         subtitle: Text(
-                          [DateFormatters.date(payment.occurredAt), if (payment.note != null) payment.note!]
-                              .join(' • '),
+                          [
+                            DateFormatters.date(payment.occurredAt),
+                            if (payment.note != null) payment.note!,
+                          ].join(' • '),
                         ),
                       ),
                     ),

@@ -25,10 +25,12 @@ class OutboxItem {
   final int seq;
   final String localId;
   final String entity; // 'customer' | 'transaction'
-  final String op; // 'create' | 'update' | 'delete' | 'archive' | 'unarchive' | 'clear_debt'
+  final String
+  op; // 'create' | 'update' | 'delete' | 'archive' | 'unarchive' | 'clear_debt'
   final Map<String, dynamic> payload;
   final int? dependsOnSeq;
-  final String status; // 'pending' | 'in_flight' | 'failed' | 'held' | 'discarded' | 'done'
+  final String
+  status; // 'pending' | 'in_flight' | 'failed' | 'held' | 'discarded' | 'done'
   final int attemptCount;
   final String? lastError;
 
@@ -84,7 +86,10 @@ class OutboxStore {
   /// Finds a still-unsynced `create` for [entity]/[targetId], if any -- used
   /// to make a later op against that same (still-local) id wait for its own
   /// create to land first.
-  Future<int?> findOpenCreateSeq({required String entity, required String targetId}) async {
+  Future<int?> findOpenCreateSeq({
+    required String entity,
+    required String targetId,
+  }) async {
     final db = await _localDb.outboxDb();
     final rows = await db.query(
       'outbox',
@@ -123,7 +128,12 @@ class OutboxStore {
   /// at the pending-actions sheet.
   Future<void> markHeld(int seq) async {
     final db = await _localDb.outboxDb();
-    await db.update('outbox', {'status': 'held'}, where: 'seq = ?', whereArgs: [seq]);
+    await db.update(
+      'outbox',
+      {'status': 'held'},
+      where: 'seq = ?',
+      whereArgs: [seq],
+    );
   }
 
   /// Staff reviewed a held row and confirmed it should still go out --
@@ -148,7 +158,12 @@ class OutboxStore {
   /// record of what was queued and discarded, same spirit as `failed`.
   Future<void> discard(int seq) async {
     final db = await _localDb.outboxDb();
-    await db.update('outbox', {'status': 'discarded'}, where: 'seq = ?', whereArgs: [seq]);
+    await db.update(
+      'outbox',
+      {'status': 'discarded'},
+      where: 'seq = ?',
+      whereArgs: [seq],
+    );
   }
 
   /// Recovers any row left stuck at `in_flight` by a previous app process
@@ -165,17 +180,29 @@ class OutboxStore {
   /// process ever looking at that row at the time.
   Future<void> resetStaleInFlight() async {
     final db = await _localDb.outboxDb();
-    await db.update('outbox', {'status': 'pending'}, where: "status = 'in_flight'");
+    await db.update('outbox', {
+      'status': 'pending',
+    }, where: "status = 'in_flight'");
   }
 
   Future<void> markInFlight(int seq) async {
     final db = await _localDb.outboxDb();
-    await db.update('outbox', {'status': 'in_flight'}, where: 'seq = ?', whereArgs: [seq]);
+    await db.update(
+      'outbox',
+      {'status': 'in_flight'},
+      where: 'seq = ?',
+      whereArgs: [seq],
+    );
   }
 
   Future<void> markDone(int seq) async {
     final db = await _localDb.outboxDb();
-    await db.update('outbox', {'status': 'done'}, where: 'seq = ?', whereArgs: [seq]);
+    await db.update(
+      'outbox',
+      {'status': 'done'},
+      where: 'seq = ?',
+      whereArgs: [seq],
+    );
   }
 
   Future<void> markPendingRetry(int seq) async {
@@ -190,7 +217,11 @@ class OutboxStore {
     final db = await _localDb.outboxDb();
     await db.update(
       'outbox',
-      {'status': 'failed', 'last_error': error, 'attempt_count': 1 + await _attemptCount(seq)},
+      {
+        'status': 'failed',
+        'last_error': error,
+        'attempt_count': 1 + await _attemptCount(seq),
+      },
       where: 'seq = ?',
       whereArgs: [seq],
     );
@@ -198,19 +229,29 @@ class OutboxStore {
 
   Future<int> _attemptCount(int seq) async {
     final db = await _localDb.outboxDb();
-    final rows = await db.query('outbox', columns: ['attempt_count'], where: 'seq = ?', whereArgs: [seq]);
+    final rows = await db.query(
+      'outbox',
+      columns: ['attempt_count'],
+      where: 'seq = ?',
+      whereArgs: [seq],
+    );
     return rows.isEmpty ? 0 : rows.first['attempt_count'] as int;
   }
 
   /// After a `create` for [entity] resolves from [oldId] (the client-generated
   /// id) to [newId] (the real server id), point any other still-open row
   /// targeting [oldId] at the real id instead.
-  Future<void> rewriteLocalId({required String entity, required String oldId, required String newId}) async {
+  Future<void> rewriteLocalId({
+    required String entity,
+    required String oldId,
+    required String newId,
+  }) async {
     final db = await _localDb.outboxDb();
     await db.update(
       'outbox',
       {'local_id': newId},
-      where: "entity = ? and local_id = ? and op != 'create' and status in ('pending', 'failed', 'held')",
+      where:
+          "entity = ? and local_id = ? and op != 'create' and status in ('pending', 'failed', 'held')",
       whereArgs: [entity, oldId],
     );
   }
@@ -236,11 +277,15 @@ class OutboxStore {
   /// Whether [entity]/[targetId] has any not-yet-synced write queued against
   /// it (used to decide whether a write just returned "queued" rather than
   /// confirmed).
-  Future<bool> hasOpenWriteFor({required String entity, required String targetId}) async {
+  Future<bool> hasOpenWriteFor({
+    required String entity,
+    required String targetId,
+  }) async {
     final db = await _localDb.outboxDb();
     final rows = await db.query(
       'outbox',
-      where: "entity = ? and local_id = ? and status in ('pending', 'in_flight', 'failed', 'held')",
+      where:
+          "entity = ? and local_id = ? and status in ('pending', 'in_flight', 'failed', 'held')",
       whereArgs: [entity, targetId],
       limit: 1,
     );

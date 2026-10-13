@@ -26,7 +26,10 @@ class ThousandsInputFormatter extends TextInputFormatter {
     // Track the cursor by "how many digits precede it", not a fixed
     // character offset, since inserted separators shift positions around.
     final cursorIndex = newValue.selection.end.clamp(0, newValue.text.length);
-    final digitsBeforeCursor = newValue.text.substring(0, cursorIndex).replaceAll(_nonDigits, '').length;
+    final digitsBeforeCursor = newValue.text
+        .substring(0, cursorIndex)
+        .replaceAll(_nonDigits, '')
+        .length;
 
     var seen = 0;
     var cursorOffset = formatted.length;

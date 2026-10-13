@@ -3,21 +3,32 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from .. import db
 from ..deps import get_current_user
 from ..phone import normalize
-from ..schemas import CreateStudentRequest, Student, UpdateStudentRequest
+from ..schemas import CreateStudentRequest, Student, StudentListItem, UpdateStudentRequest
 
 router = APIRouter(prefix="/students", tags=["students"], dependencies=[Depends(get_current_user)])
 
+_BALANCE_EXPR = """
+coalesce(sum(case when t.kind = 'charge' then t.amount when t.kind = 'payment' then -t.amount else 0 end), 0)
+"""
 
-@router.get("", response_model=list[Student])
+
+@router.get("", response_model=list[StudentListItem])
 async def list_students(q: str | None = None):
-    if q:
-        rows = await db.pool().fetch(
-            "select * from students where full_name ilike $1 or phone ilike $1 order by full_name asc",
-            f"%{q.strip()}%",
-        )
-    else:
-        rows = await db.pool().fetch("select * from students order by full_name asc")
-    return [Student(**row) for row in rows]
+    where = "where s.full_name ilike $1 or s.phone ilike $1" if q else ""
+    args = [f"%{q.strip()}%"] if q else []
+    rows = await db.pool().fetch(
+        f"""
+        select s.*, {_BALANCE_EXPR} as balance
+        from students s
+        left join enrollments e on e.student_id = s.id
+        left join transactions t on t.enrollment_id = e.id
+        {where}
+        group by s.id
+        order by s.full_name asc
+        """,
+        *args,
+    )
+    return [StudentListItem(**row) for row in rows]
 
 
 @router.post("", response_model=Student, status_code=status.HTTP_201_CREATED)

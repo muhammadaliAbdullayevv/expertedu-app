@@ -6,7 +6,10 @@ import '../../../services/api/api_client.dart';
 import '../../../services/api/token_storage.dart';
 
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
-  return AuthRepository(ref.watch(apiClientProvider), ref.watch(tokenStorageProvider));
+  return AuthRepository(
+    ref.watch(apiClientProvider),
+    ref.watch(tokenStorageProvider),
+  );
 });
 
 /// One entry in the on-device account switcher -- lets an owner/admin stay
@@ -47,13 +50,14 @@ class SavedAccount {
     role: json['role'] as String,
   );
 
-  factory SavedAccount.fromAuthUser(AuthUser user, String token) => SavedAccount(
-    token: token,
-    userId: user.id,
-    phone: user.phone,
-    fullName: user.fullName,
-    role: user.role,
-  );
+  factory SavedAccount.fromAuthUser(AuthUser user, String token) =>
+      SavedAccount(
+        token: token,
+        userId: user.id,
+        phone: user.phone,
+        fullName: user.fullName,
+        role: user.role,
+      );
 }
 
 class AuthUser {
@@ -87,7 +91,10 @@ class AuthRepository {
   final ApiClient _api;
   final TokenStorage _tokenStorage;
 
-  Future<AuthUser> login({required String phone, required String password}) async {
+  Future<AuthUser> login({
+    required String phone,
+    required String password,
+  }) async {
     final json =
         await _api.post(
               '/auth/login',
@@ -110,7 +117,10 @@ class AuthRepository {
 
   /// Logs into a *second* account for the switcher without making it the
   /// active session -- use [switchAccount] afterward to actually activate it.
-  Future<SavedAccount> addAccount({required String phone, required String password}) async {
+  Future<SavedAccount> addAccount({
+    required String phone,
+    required String password,
+  }) async {
     final json =
         await _api.post(
               '/auth/login',
@@ -174,14 +184,18 @@ class AuthRepository {
   Future<void> removeSavedAccount(String phone) async {
     final accounts = await _readSavedAccountsSafe();
     accounts.removeWhere((a) => a.phone == phone);
-    await _tokenStorage.saveSavedAccountsRaw(jsonEncode(accounts.map((a) => a.toJson()).toList()));
+    await _tokenStorage.saveSavedAccountsRaw(
+      jsonEncode(accounts.map((a) => a.toJson()).toList()),
+    );
   }
 
   Future<void> _upsertSavedAccount(SavedAccount account) async {
     final accounts = await _readSavedAccountsSafe();
     accounts.removeWhere((a) => a.phone == account.phone);
     accounts.add(account);
-    await _tokenStorage.saveSavedAccountsRaw(jsonEncode(accounts.map((a) => a.toJson()).toList()));
+    await _tokenStorage.saveSavedAccountsRaw(
+      jsonEncode(accounts.map((a) => a.toJson()).toList()),
+    );
   }
 
   /// Makes [account] the active session -- verifies its saved token still

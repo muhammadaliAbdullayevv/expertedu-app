@@ -38,8 +38,12 @@ class Transaction {
     enrollmentId: json['enrollment_id'] as int,
     kind: json['kind'] as String,
     amount: json['amount'] as int,
-    periodStart: json['period_start'] == null ? null : DateTime.parse(json['period_start'] as String),
-    dueDate: json['due_date'] == null ? null : DateTime.parse(json['due_date'] as String),
+    periodStart: json['period_start'] == null
+        ? null
+        : DateTime.parse(json['period_start'] as String),
+    dueDate: json['due_date'] == null
+        ? null
+        : DateTime.parse(json['due_date'] as String),
     isProrated: json['is_prorated'] as bool,
     source: json['source'] as String,
     note: json['note'] as String?,
@@ -53,11 +57,22 @@ class TransactionsRepository {
   final ApiClient _api;
 
   Future<List<Transaction>> listForEnrollment(int enrollmentId) async {
-    final json = await _api.get('/enrollments/$enrollmentId/transactions') as List<dynamic>;
-    return json.map((e) => Transaction.fromJson(e as Map<String, dynamic>)).toList();
+    final json =
+        await _api.get('/enrollments/$enrollmentId/transactions')
+            as List<dynamic>;
+    return json
+        .map((e) => Transaction.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
-  Future<void> recordPayment({required int enrollmentId, required int amount, String? note}) {
-    return _api.post('/enrollments/$enrollmentId/payments', body: <String, dynamic>{'amount': amount, 'note': note});
+  Future<void> recordPayment({
+    required int enrollmentId,
+    required int amount,
+    String? note,
+  }) {
+    return _api.post(
+      '/enrollments/$enrollmentId/payments',
+      body: <String, dynamic>{'amount': amount, 'note': note},
+    );
   }
 }

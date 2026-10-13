@@ -7,7 +7,11 @@
 library;
 
 class LedgerTransaction {
-  const LedgerTransaction({required this.kind, required this.amount, required this.occurredAt});
+  const LedgerTransaction({
+    required this.kind,
+    required this.amount,
+    required this.occurredAt,
+  });
 
   /// 'charge' | 'payment'.
   final String kind;
@@ -18,7 +22,11 @@ class LedgerTransaction {
 enum ChargeStatus { paid, partial, unpaid }
 
 class AnnotatedCharge {
-  const AnnotatedCharge({required this.transaction, required this.status, required this.amountPaid});
+  const AnnotatedCharge({
+    required this.transaction,
+    required this.status,
+    required this.amountPaid,
+  });
 
   final LedgerTransaction transaction;
   final ChargeStatus status;
@@ -38,8 +46,11 @@ class EnrollmentLedger {
   final int balance;
 }
 
-EnrollmentLedger calculateEnrollmentLedger(Iterable<LedgerTransaction> transactions) {
-  final sorted = transactions.toList()..sort((a, b) => a.occurredAt.compareTo(b.occurredAt));
+EnrollmentLedger calculateEnrollmentLedger(
+  Iterable<LedgerTransaction> transactions,
+) {
+  final sorted = transactions.toList()
+    ..sort((a, b) => a.occurredAt.compareTo(b.occurredAt));
   final charges = sorted.where((t) => t.kind == 'charge').toList();
   final payments = sorted.where((t) => t.kind == 'payment').toList();
 
@@ -53,11 +64,16 @@ EnrollmentLedger calculateEnrollmentLedger(Iterable<LedgerTransaction> transacti
         : applied < charge.amount
         ? ChargeStatus.partial
         : ChargeStatus.paid;
-    annotated.add(AnnotatedCharge(transaction: charge, status: status, amountPaid: applied));
+    annotated.add(
+      AnnotatedCharge(transaction: charge, status: status, amountPaid: applied),
+    );
   }
 
   final totalCharges = charges.fold<int>(0, (sum, t) => sum + t.amount);
   final totalPayments = payments.fold<int>(0, (sum, t) => sum + t.amount);
 
-  return EnrollmentLedger(charges: annotated, balance: totalCharges - totalPayments);
+  return EnrollmentLedger(
+    charges: annotated,
+    balance: totalCharges - totalPayments,
+  );
 }

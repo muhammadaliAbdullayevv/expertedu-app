@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/extensions/build_context_x.dart';
-import '../../../core/widgets/section_card.dart';
 import '../../auth/application/session_controller.dart';
 import '../../groups/data/groups_repository.dart';
 import '../../students/data/students_repository.dart';
@@ -40,7 +39,10 @@ class DashboardScreenState extends ConsumerState<DashboardScreen> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
         children: <Widget>[
-          Text('Salom, ${session.user?.fullName ?? ''}', style: context.textTheme.titleMedium),
+          Text(
+            'Salom, ${session.user?.fullName ?? ''}',
+            style: context.textTheme.titleMedium,
+          ),
           const SizedBox(height: 16),
           FutureBuilder<_Counts>(
             future: _future,
@@ -81,7 +83,11 @@ class _Counts {
 }
 
 class _StatCard extends StatelessWidget {
-  const _StatCard({required this.icon, required this.label, required this.value});
+  const _StatCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
   final IconData icon;
   final String label;
@@ -89,15 +95,24 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SectionCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Icon(icon, color: context.colors.primary),
-          const SizedBox(height: 8),
-          Text(value, style: context.textTheme.headlineSmall),
-          Text(label, style: context.textTheme.bodySmall),
-        ],
+    return Card(
+      elevation: 0,
+      color: context.colors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: context.colors.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(icon, color: context.colors.primary),
+            const SizedBox(height: 8),
+            Text(value, style: context.textTheme.headlineSmall),
+            Text(label, style: context.textTheme.bodySmall),
+          ],
+        ),
       ),
     );
   }
