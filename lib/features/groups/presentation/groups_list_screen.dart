@@ -9,10 +9,10 @@ class GroupsListScreen extends ConsumerStatefulWidget {
   const GroupsListScreen({super.key});
 
   @override
-  ConsumerState<GroupsListScreen> createState() => _GroupsListScreenState();
+  ConsumerState<GroupsListScreen> createState() => GroupsListScreenState();
 }
 
-class _GroupsListScreenState extends ConsumerState<GroupsListScreen> {
+class GroupsListScreenState extends ConsumerState<GroupsListScreen> {
   late Future<List<Group>> _future;
 
   @override
@@ -27,41 +27,38 @@ class _GroupsListScreenState extends ConsumerState<GroupsListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Guruhlar')),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showCreateSheet(context),
-        child: const Icon(Icons.add),
-      ),
-      body: FutureBuilder<List<Group>>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(child: Text('Xatolik: ${snapshot.error}'));
-          }
-          final groups = snapshot.data ?? const <Group>[];
-          if (groups.isEmpty) {
-            return const Center(child: Text('Hali guruhlar yo\'q'));
-          }
-          return ListView.builder(
-            itemCount: groups.length,
-            itemBuilder: (context, index) {
-              final group = groups[index];
-              return ListTile(
-                title: Text(group.name),
-                subtitle: Text('${CurrencyFormatter.format(group.feeAmount)} -- har oyning ${group.dueDay}-kuni'),
-              );
-            },
-          );
-        },
-      ),
+    return FutureBuilder<List<Group>>(
+      future: _future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (snapshot.hasError) {
+          return Center(child: Text('Xatolik: ${snapshot.error}'));
+        }
+        final groups = snapshot.data ?? const <Group>[];
+        if (groups.isEmpty) {
+          return const Center(child: Text('Hali guruhlar yo\'q'));
+        }
+        return ListView.builder(
+          padding: const EdgeInsets.only(bottom: 88),
+          itemCount: groups.length,
+          itemBuilder: (context, index) {
+            final group = groups[index];
+            return ListTile(
+              leading: const CircleAvatar(child: Icon(Icons.groups)),
+              title: Text(group.name),
+              subtitle: Text('${CurrencyFormatter.format(group.feeAmount)} -- har oyning ${group.dueDay}-kuni'),
+            );
+          },
+        );
+      },
     );
   }
 
-  Future<void> _showCreateSheet(BuildContext context) async {
+  /// Called from HomeShell's shared FAB -- see its GlobalKey\<GroupsListScreenState\>.
+  Future<void> showCreateSheet() async {
+    final context = this.context;
     final nameController = TextEditingController();
     final feeController = TextEditingController();
     final dueDayController = TextEditingController();

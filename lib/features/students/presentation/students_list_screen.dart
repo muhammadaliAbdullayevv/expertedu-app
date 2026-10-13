@@ -8,10 +8,11 @@ class StudentsListScreen extends ConsumerStatefulWidget {
   const StudentsListScreen({super.key});
 
   @override
-  ConsumerState<StudentsListScreen> createState() => _StudentsListScreenState();
+  ConsumerState<StudentsListScreen> createState() => StudentsListScreenState();
 }
 
-class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
+class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
+  final _searchController = TextEditingController();
   late Future<List<Student>> _future;
   String _query = '';
 
@@ -21,6 +22,12 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     _future = ref.read(studentsRepositoryProvider).list();
   }
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   void _reload({String? query}) {
     setState(() {
       _query = query ?? _query;
@@ -28,57 +35,68 @@ class _StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     });
   }
 
+  /// True (and search cleared) if there was something to clear -- lets
+  /// HomeShell's back-button handling behave like the shop app's.
+  bool clearSearchIfActive() {
+    if (_searchController.text.isEmpty) return false;
+    _searchController.clear();
+    _reload(query: '');
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('O\'quvchilar'),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(56),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-            child: TextField(
-              decoration: const InputDecoration(
-                hintText: 'Qidirish...',
-                prefixIcon: Icon(Icons.search),
-                isDense: true,
-                filled: true,
-              ),
-              onChanged: (value) => _reload(query: value),
+    return Column(
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          child: TextField(
+            controller: _searchController,
+            decoration: const InputDecoration(
+              hintText: 'Qidirish...',
+              prefixIcon: Icon(Icons.search),
+              isDense: true,
+              filled: true,
             ),
+            onChanged: (value) => _reload(query: value),
           ),
         ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => _showCreateSheet(context),
-        child: const Icon(Icons.add),
-      ),
-      body: FutureBuilder<List<Student>>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(child: Text('Xatolik: ${snapshot.error}'));
-          }
-          final students = snapshot.data ?? const <Student>[];
-          if (students.isEmpty) {
-            return const Center(child: Text('Hali o\'quvchilar yo\'q'));
-          }
-          return ListView.builder(
-            itemCount: students.length,
-            itemBuilder: (context, index) {
-              final student = students[index];
-              return ListTile(title: Text(student.fullName), subtitle: Text(student.phone));
+        Expanded(
+          child: FutureBuilder<List<Student>>(
+            future: _future,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Center(child: Text('Xatolik: ${snapshot.error}'));
+              }
+              final students = snapshot.data ?? const <Student>[];
+              if (students.isEmpty) {
+                return const Center(child: Text('Hali o\'quvchilar yo\'q'));
+              }
+              return ListView.builder(
+                padding: const EdgeInsets.only(bottom: 88),
+                itemCount: students.length,
+                itemBuilder: (context, index) {
+                  final student = students[index];
+                  return ListTile(
+                    leading: const CircleAvatar(child: Icon(Icons.school)),
+                    title: Text(student.fullName),
+                    subtitle: Text(student.phone),
+                  );
+                },
+              );
             },
-          );
-        },
-      ),
+          ),
+        ),
+      ],
     );
   }
 
-  Future<void> _showCreateSheet(BuildContext context) async {
+  /// Called from HomeShell's shared FAB -- see its GlobalKey\<StudentsListScreenState\>.
+  Future<void> showCreateSheet() async {
+    final context = this.context;
     final nameController = TextEditingController();
     final phoneController = TextEditingController();
     final formKey = GlobalKey<FormState>();
