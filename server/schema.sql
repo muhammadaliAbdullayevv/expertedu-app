@@ -19,6 +19,7 @@ create table if not exists users (
 create table if not exists groups (
   id bigserial primary key,
   name text not null,
+  teacher_name text,
   fee_amount bigint not null,
   due_day smallint not null check (due_day between 1 and 31),
   is_active boolean not null default true,

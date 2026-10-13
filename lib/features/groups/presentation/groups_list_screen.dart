@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/formatters/currency_formatter.dart';
 import '../../../core/formatters/thousands_input_formatter.dart';
 import '../data/groups_repository.dart';
+import 'group_detail_screen.dart';
 
 class GroupsListScreen extends ConsumerStatefulWidget {
   const GroupsListScreen({super.key});
@@ -45,10 +46,20 @@ class GroupsListScreenState extends ConsumerState<GroupsListScreen> {
           itemCount: groups.length,
           itemBuilder: (context, index) {
             final group = groups[index];
+            final subtitle = [
+              CurrencyFormatter.format(group.feeAmount),
+              if (group.teacherName != null && group.teacherName!.isNotEmpty) group.teacherName!,
+              'har oyning ${group.dueDay}-kuni',
+            ].join(' • ');
             return ListTile(
               leading: const CircleAvatar(child: Icon(Icons.groups)),
               title: Text(group.name),
-              subtitle: Text('${CurrencyFormatter.format(group.feeAmount)} -- har oyning ${group.dueDay}-kuni'),
+              subtitle: Text(subtitle),
+              onTap: () async {
+                await Navigator.of(context).push<void>(
+                  MaterialPageRoute(builder: (context) => GroupDetailScreen(group: group)),
+                );
+              },
             );
           },
         );
@@ -60,6 +71,7 @@ class GroupsListScreenState extends ConsumerState<GroupsListScreen> {
   Future<void> showCreateSheet() async {
     final context = this.context;
     final nameController = TextEditingController();
+    final teacherController = TextEditingController();
     final feeController = TextEditingController();
     final dueDayController = TextEditingController();
     final formKey = GlobalKey<FormState>();
@@ -90,6 +102,11 @@ class GroupsListScreenState extends ConsumerState<GroupsListScreen> {
                 ),
                 const SizedBox(height: 12),
                 TextFormField(
+                  controller: teacherController,
+                  decoration: const InputDecoration(labelText: 'O\'qituvchi (ixtiyoriy)'),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
                   controller: feeController,
                   decoration: const InputDecoration(labelText: 'Oylik to\'lov (so\'m)'),
                   keyboardType: TextInputType.number,
@@ -113,6 +130,7 @@ class GroupsListScreenState extends ConsumerState<GroupsListScreen> {
                     if (!formKey.currentState!.validate()) return;
                     await ref.read(groupsRepositoryProvider).create(
                       name: nameController.text,
+                      teacherName: teacherController.text.trim().isEmpty ? null : teacherController.text.trim(),
                       feeAmount: ThousandsInputFormatter.unformat(feeController.text) ?? 0,
                       dueDay: int.parse(dueDayController.text),
                     );

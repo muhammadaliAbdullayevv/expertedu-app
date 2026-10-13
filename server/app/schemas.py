@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel
 
@@ -25,6 +25,7 @@ class MeResponse(BaseModel):
 
 class CreateGroupRequest(BaseModel):
     name: str
+    teacher_name: str | None = None
     fee_amount: int
     due_day: int
     note: str | None = None
@@ -32,6 +33,7 @@ class CreateGroupRequest(BaseModel):
 
 class UpdateGroupRequest(BaseModel):
     name: str | None = None
+    teacher_name: str | None = None
     fee_amount: int | None = None
     due_day: int | None = None
     note: str | None = None
@@ -41,6 +43,7 @@ class UpdateGroupRequest(BaseModel):
 class Group(BaseModel):
     id: int
     name: str
+    teacher_name: str | None
     fee_amount: int
     due_day: int
     is_active: bool
@@ -69,3 +72,43 @@ class Student(BaseModel):
     telegram_username: str | None
     note: str | None
     created_at: datetime
+
+
+class CreateEnrollmentRequest(BaseModel):
+    student_id: int
+    group_id: int
+    joined_at: date
+
+
+class Enrollment(BaseModel):
+    id: int
+    student_id: int
+    group_id: int
+    joined_at: date
+    status: str
+    ended_at: date | None
+    created_at: datetime
+
+
+class RosterEntry(BaseModel):
+    """One row on a group's roster -- an enrollment joined with its
+    student's identity, since the roster screen never needs to look up
+    the student separately."""
+
+    enrollment_id: int
+    student_id: int
+    student_full_name: str
+    student_phone: str
+    joined_at: date
+    status: str
+
+
+class StudentEnrollment(BaseModel):
+    """One row on a student's profile -- the mirror of RosterEntry, joined
+    with the group's identity instead."""
+
+    enrollment_id: int
+    group_id: int
+    group_name: str
+    joined_at: date
+    status: str
