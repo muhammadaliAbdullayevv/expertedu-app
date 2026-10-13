@@ -93,7 +93,7 @@ class Enrollment(BaseModel):
 class RosterEntry(BaseModel):
     """One row on a group's roster -- an enrollment joined with its
     student's identity, since the roster screen never needs to look up
-    the student separately."""
+    the student separately. balance > 0 means the student owes money."""
 
     enrollment_id: int
     student_id: int
@@ -101,6 +101,7 @@ class RosterEntry(BaseModel):
     student_phone: str
     joined_at: date
     status: str
+    balance: int
 
 
 class StudentEnrollment(BaseModel):
@@ -112,3 +113,22 @@ class StudentEnrollment(BaseModel):
     group_name: str
     joined_at: date
     status: str
+    balance: int
+
+
+class CreatePaymentRequest(BaseModel):
+    amount: int
+    note: str | None = None
+
+
+class Transaction(BaseModel):
+    id: int
+    enrollment_id: int
+    kind: str
+    amount: int
+    period_start: date | None
+    due_date: date | None
+    is_prorated: bool
+    source: str
+    note: str | None
+    occurred_at: datetime

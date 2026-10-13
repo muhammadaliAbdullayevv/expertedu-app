@@ -60,16 +60,23 @@ async def update_group(group_id: int, payload: UpdateGroupRequest):
     return Group(**row)
 
 
+_BALANCE_EXPR = """
+coalesce(sum(case when t.kind = 'charge' then t.amount when t.kind = 'payment' then -t.amount else 0 end), 0)
+"""
+
+
 @router.get("/{group_id}/roster", response_model=list[RosterEntry])
 async def get_roster(group_id: int, include_withdrawn: bool = False):
     where = "" if include_withdrawn else "and e.status = 'active'"
     rows = await db.pool().fetch(
         f"""
         select e.id as enrollment_id, e.student_id, s.full_name as student_full_name,
-               s.phone as student_phone, e.joined_at, e.status
+               s.phone as student_phone, e.joined_at, e.status, {_BALANCE_EXPR} as balance
         from enrollments e
         join students s on s.id = e.student_id
+        left join transactions t on t.enrollment_id = e.id
         where e.group_id = $1 {where}
+        group by e.id, s.full_name, s.phone
         order by s.full_name asc
         """,
         group_id,

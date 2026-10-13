@@ -44,6 +44,7 @@ class RosterEntry {
     required this.studentPhone,
     required this.joinedAt,
     required this.status,
+    required this.balance,
   });
 
   final int enrollmentId;
@@ -53,6 +54,10 @@ class RosterEntry {
   final DateTime joinedAt;
   final String status;
 
+  /// Total charges minus total payments for this enrollment -- positive
+  /// means the student still owes money.
+  final int balance;
+
   factory RosterEntry.fromJson(Map<String, dynamic> json) => RosterEntry(
     enrollmentId: json['enrollment_id'] as int,
     studentId: json['student_id'] as int,
@@ -60,6 +65,7 @@ class RosterEntry {
     studentPhone: json['student_phone'] as String,
     joinedAt: DateTime.parse(json['joined_at'] as String),
     status: json['status'] as String,
+    balance: json['balance'] as int,
   );
 }
 

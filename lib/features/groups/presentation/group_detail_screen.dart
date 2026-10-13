@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/formatters/currency_formatter.dart';
+import '../../billing/presentation/transaction_history_screen.dart';
 import '../../enrollments/data/enrollments_repository.dart';
 import '../../enrollments/presentation/enroll_student_sheet.dart';
 import '../data/groups_repository.dart';
@@ -71,15 +73,33 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
                   itemCount: roster.length,
                   itemBuilder: (context, index) {
                     final entry = roster[index];
+                    final owesMoney = entry.balance > 0;
                     return ListTile(
                       leading: const CircleAvatar(child: Icon(Icons.school)),
                       title: Text(entry.studentFullName),
-                      subtitle: Text(entry.studentPhone),
+                      subtitle: Text(
+                        owesMoney ? 'Qarz: ${CurrencyFormatter.format(entry.balance)}' : 'To\'langan',
+                        style: TextStyle(
+                          color: owesMoney ? Theme.of(context).colorScheme.error : Colors.green,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                       trailing: IconButton(
                         icon: const Icon(Icons.person_remove_outlined),
                         tooltip: 'Chiqarish',
                         onPressed: () => _confirmWithdraw(entry),
                       ),
+                      onTap: () async {
+                        await Navigator.of(context).push<void>(
+                          MaterialPageRoute(
+                            builder: (context) => TransactionHistoryScreen(
+                              enrollmentId: entry.enrollmentId,
+                              studentName: entry.studentFullName,
+                            ),
+                          ),
+                        );
+                        _reload();
+                      },
                     );
                   },
                 );
