@@ -1,0 +1,59 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from .. import db
+from ..deps import get_current_user
+from ..schemas import CreateGroupRequest, Group, UpdateGroupRequest
+
+router = APIRouter(prefix="/groups", tags=["groups"], dependencies=[Depends(get_current_user)])
+
+
+@router.get("", response_model=list[Group])
+async def list_groups(include_inactive: bool = False):
+    where = "" if include_inactive else "where is_active"
+    rows = await db.pool().fetch(f"select * from groups {where} order by name asc")
+    return [Group(**row) for row in rows]
+
+
+@router.post("", response_model=Group, status_code=status.HTTP_201_CREATED)
+async def create_group(payload: CreateGroupRequest):
+    row = await db.pool().fetchrow(
+        """
+        insert into groups (name, fee_amount, due_day, note)
+        values ($1, $2, $3, $4)
+        returning *
+        """,
+        payload.name.strip(),
+        payload.fee_amount,
+        payload.due_day,
+        payload.note,
+    )
+    return Group(**row)
+
+
+@router.get("/{group_id}", response_model=Group)
+async def get_group(group_id: int):
+    row = await db.pool().fetchrow("select * from groups where id = $1", group_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
+    return Group(**row)
+
+
+@router.patch("/{group_id}", response_model=Group)
+async def update_group(group_id: int, payload: UpdateGroupRequest):
+    existing = await db.pool().fetchrow("select * from groups where id = $1", group_id)
+    if existing is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if not updates:
+        return Group(**existing)
+
+    fields = list(updates.keys())
+    values = list(updates.values())
+    set_clause = ", ".join(f"{field} = ${i + 2}" for i, field in enumerate(fields))
+    row = await db.pool().fetchrow(
+        f"update groups set {set_clause} where id = $1 returning *",
+        group_id,
+        *values,
+    )
+    return Group(**row)
