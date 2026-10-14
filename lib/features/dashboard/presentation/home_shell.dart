@@ -80,17 +80,20 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           bottom: false,
           child: IndexedStack(index: _currentIndex, children: _pages),
         ),
-        floatingActionButton: (_currentIndex == 1 || _currentIndex == 2)
+        floatingActionButton: _currentIndex <= 2
             ? FloatingActionButton(
                 onPressed: () {
                   HapticFeedback.mediumImpact();
-                  if (_currentIndex == 1) {
-                    _subjectsKey.currentState?.showCreateSheet();
-                  } else {
-                    _studentsKey.currentState?.showCreateSheet();
+                  switch (_currentIndex) {
+                    case 0:
+                      _dashboardKey.currentState?.showCreateSheet();
+                    case 1:
+                      _subjectsKey.currentState?.showCreateSheet();
+                    case 2:
+                      _studentsKey.currentState?.showCreateSheet();
                   }
                 },
-                child: const Icon(Icons.add),
+                child: Icon(_currentIndex == 0 ? Icons.add_call : Icons.add),
               )
             : null,
         bottomNavigationBar: Padding(

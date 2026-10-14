@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from . import db
-from .routes import auth, enrollments, groups, health, students, subjects, transactions
+from .routes import auth, enrollments, groups, health, inquiries, students, subjects, transactions
 
 _UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
 
@@ -29,3 +29,4 @@ app.include_router(groups.router)
 app.include_router(students.router)
 app.include_router(enrollments.router)
 app.include_router(transactions.router)
+app.include_router(inquiries.router)

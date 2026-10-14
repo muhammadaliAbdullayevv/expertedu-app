@@ -88,6 +88,23 @@ create unique index if not exists uq_charge_enrollment_due_date
   on transactions (enrollment_id, due_date) where kind = 'charge';
 create index if not exists idx_transactions_enrollment on transactions(enrollment_id);
 
+-- A phone/walk-in inquiry -- lighter-weight than a Student, logged the
+-- moment an operator takes the call, before anyone has committed to a
+-- group. Converting one creates a real Student (see routes/inquiries.py).
+create table if not exists inquiries (
+  id bigserial primary key,
+  full_name text not null,
+  phone text not null,
+  note text,
+  subject_id bigint references subjects(id),
+  trial_date date,
+  status text not null check (status in ('new','contacted','scheduled','converted','lost')) default 'new',
+  converted_student_id bigint references students(id),
+  created_by bigint references users(id),
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_inquiries_status on inquiries(status);
+
 create table if not exists sms_log (
   id bigserial primary key,
   enrollment_id bigint references enrollments(id),

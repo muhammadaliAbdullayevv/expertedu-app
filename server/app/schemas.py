@@ -179,3 +179,31 @@ class Transaction(BaseModel):
     source: str
     note: str | None
     occurred_at: datetime
+
+
+class CreateInquiryRequest(BaseModel):
+    full_name: str
+    phone: str
+    note: str | None = None
+    subject_id: int | None = None
+    trial_date: date | None = None
+
+
+class UpdateInquiryRequest(BaseModel):
+    note: str | None = None
+    subject_id: int | None = None
+    trial_date: date | None = None
+    status: str | None = None
+
+
+class Inquiry(BaseModel):
+    id: int
+    full_name: str
+    phone: str
+    note: str | None
+    subject_id: int | None
+    subject_name: str | None = None
+    trial_date: date | None
+    status: str
+    converted_student_id: int | None
+    created_at: datetime
