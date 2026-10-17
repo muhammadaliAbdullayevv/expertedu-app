@@ -23,7 +23,7 @@ void refreshAdmissions(WidgetRef ref) =>
 /// once enrolled, grey once closed. Only these few tones next to the
 /// interface blue -- the board stays calm.
 Color stageColor(String stage) => switch (stage) {
-  LeadStage.newLead => const Color(0xFF2563EB),
+  LeadStage.newLead => AppColors.accent,
   LeadStage.contacted => const Color(0xFF7C3AED),
   LeadStage.trialScheduled => const Color(0xFFD97706),
   LeadStage.trialCompleted => const Color(0xFF0D9488),

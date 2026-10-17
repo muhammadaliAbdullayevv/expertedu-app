@@ -2,49 +2,67 @@ import 'package:flutter/material.dart';
 
 /// Shared corner-radius tokens so every card/button/field/sheet in the app
 /// rounds the same amount instead of each screen picking its own number.
+/// (V2 design: cards 14, buttons and inputs 10, chips are pills.)
 class AppRadius {
   AppRadius._();
 
-  static const double card = 16;
-  static const double button = 12;
-  static const double field = 12;
-  static const double sheet = 24;
+  static const double card = 14;
+  static const double button = 10;
+  static const double field = 10;
+  static const double sheet = 22;
+  static const double chip = 12;
 }
 
-/// The palette: cool slate neutrals on a faintly blue canvas, with one
-/// blue for everything interactive -- the main action, the selected item,
-/// focus. The logo keeps its own yellow; nothing else uses it. Everything
-/// colour-related in the app comes from here or from the ColorScheme built
-/// on it below, so a re-theme is a change to this one file.
+/// The palette (V2 design, docs/v2-design/README.md): warm neutrals on an
+/// off-white page, with ONE accent for everything interactive -- the main
+/// action, the selected item, focus. Change [accent] and [accentSoft] /
+/// [accentText] to re-theme the whole app; nothing else hard-codes it.
+/// Everything colour-related comes from here or from the ColorScheme built
+/// on it below.
 class AppColors {
   AppColors._();
 
   /// The logo's yellow -- the logo only.
-  static const Color brandYellow = Color(0xFFFECA26);
+  static const Color brandYellow = Color(0xFFF2B705);
 
-  /// The interactive colour: main buttons, selection, focus, links.
-  static const Color accent = Color(0xFF2563EB);
-  static const Color accentHover = Color(0xFF1D4ED8);
+  /// The one accent: main buttons, selection, focus, links.
+  static const Color accent = Color(0xFF5B4DDB);
+  static const Color accentHover = Color(0xFF4A3DC4);
 
-  /// Tinted backgrounds for selected items and highlights.
-  static const Color accentSoft = Color(0xFFEAF1FF);
+  /// Tinted background for selected items and highlights, and the text
+  /// colour that goes on it.
+  static const Color accentSoft = Color(0xFFEFEDFD);
+  static const Color accentText = Color(0xFF3B2FA8);
 
   /// Primary text.
-  static const Color ink = Color(0xFF0F172A);
-  static const Color inkSecondary = Color(0xFF475569);
-  static const Color inkMuted = Color(0xFF64748B);
+  static const Color ink = Color(0xFF17171A);
+  static const Color inkSecondary = Color(0xFF44444C);
+  static const Color inkMuted = Color(0xFF62626B);
 
-  static const Color canvas = Color(0xFFF3F6FB);
+  static const Color canvas = Color(0xFFF7F7F5);
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color border = Color(0xFFE2E8F0);
+  static const Color border = Color(0xFFE8E8E4);
+  static const Color borderStrong = Color(0xFFD9D9D4);
+  static const Color divider = Color(0xFFEFEFEC);
 
   /// The desktop sidebar: white, like the cards, set off by a border.
   static const Color sidebar = surface;
-  static const Color sidebarHover = Color(0xFFF1F5F9);
+  static const Color sidebarHover = divider;
   static const Color sidebarText = inkSecondary;
 
-  static const Color danger = Color(0xFFDC2626);
+  static const Color danger = Color(0xFFD92D20);
   static const Color success = Color(0xFF16A34A);
+
+  /// Status chip colours: background and text, always shown with a text
+  /// label -- colour alone never carries the meaning.
+  static const Color okBg = Color(0xFFE4F5EC);
+  static const Color okText = Color(0xFF0B5C3B);
+  static const Color warnBg = Color(0xFFFFF1D6);
+  static const Color warnText = Color(0xFF7A4800);
+  static const Color dangerBg = Color(0xFFFDECEA);
+  static const Color dangerText = Color(0xFF8F1D16);
+  static const Color neutralBg = Color(0xFFEFEFEC);
+  static const Color neutralText = Color(0xFF44444C);
 }
 
 class AppTheme {
@@ -65,23 +83,23 @@ class AppTheme {
       onTertiary: Colors.white,
       error: AppColors.danger,
       onError: Colors.white,
-      errorContainer: Color(0xFFFEE2E2),
-      onErrorContainer: Color(0xFF7F1D1D),
+      errorContainer: AppColors.dangerBg,
+      onErrorContainer: AppColors.dangerText,
       surface: AppColors.surface,
       onSurface: AppColors.ink,
       onSurfaceVariant: AppColors.inkSecondary,
-      surfaceDim: Color(0xFFE2E8F0),
+      surfaceDim: AppColors.border,
       surfaceBright: AppColors.surface,
       surfaceContainerLowest: AppColors.surface,
-      surfaceContainerLow: Color(0xFFF8FAFC),
+      surfaceContainerLow: Color(0xFFFAFAF8),
       surfaceContainer: AppColors.canvas,
-      surfaceContainerHigh: Color(0xFFEEF2F7),
+      surfaceContainerHigh: AppColors.divider,
       surfaceContainerHighest: AppColors.border,
-      outline: Color(0xFF94A3B8),
+      outline: AppColors.borderStrong,
       outlineVariant: AppColors.border,
       inverseSurface: AppColors.ink,
       onInverseSurface: Colors.white,
-      inversePrimary: Color(0xFF93C5FD),
+      inversePrimary: Color(0xFFB8B0F5),
       shadow: Colors.black,
       scrim: Colors.black,
       surfaceTint: Colors.transparent,
@@ -90,7 +108,7 @@ class AppTheme {
     final base = ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
-      fontFamily: 'Inter',
+      fontFamily: 'DM Sans',
     );
     final text = base.textTheme;
     final textTheme = text.copyWith(

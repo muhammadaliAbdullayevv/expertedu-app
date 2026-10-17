@@ -73,6 +73,15 @@ flutter:
   # Inter (SIL OFL 1.1, assets/fonts/inter/OFL.txt) -- bundled, so every
   # platform renders the same text, offline too.
   fonts:
+    - family: DM Sans
+      fonts:
+        - asset: assets/fonts/dm_sans/DMSans-400.ttf
+        - asset: assets/fonts/dm_sans/DMSans-500.ttf
+          weight: 500
+        - asset: assets/fonts/dm_sans/DMSans-600.ttf
+          weight: 600
+        - asset: assets/fonts/dm_sans/DMSans-700.ttf
+          weight: 700
     - family: Inter
       fonts:
         - asset: assets/fonts/inter/Inter-Regular.ttf
