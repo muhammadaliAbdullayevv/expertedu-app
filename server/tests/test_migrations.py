@@ -143,6 +143,102 @@ async def test_0011_credits_existing_payments_to_their_groups_teacher(server):
         await conn.close()
 
 
+async def test_0013_moves_charges_and_payments_into_the_money_tables(server):
+    conn = await _fresh_db(server, "money_check")
+    try:
+        for path in MIGRATIONS:
+            if path.name.startswith("0013"):
+                break
+            await _apply(conn, path)
+        await conn.execute(
+            """
+            insert into teachers (full_name) values ('Dilnoza'), ('Jasur');
+            insert into subjects (name) values ('Ingliz tili');
+            insert into groups (subject_id, name, teacher_id, fee_amount, due_day) values
+              (1, 'IELTS', 1, 400000, 5), (1, 'Speaking', 2, 300000, 5);
+            insert into students (full_name, phone) values ('Aziz', '998901000001'), ('Bobur', '998901000002');
+            insert into enrollments (student_id, group_id, joined_at) values
+              (1, 1, '2026-09-03'), (1, 2, '2026-09-20'), (2, 1, '2026-09-20');
+            insert into transactions (enrollment_id, kind, amount, period_start, due_date, is_prorated, source, occurred_at) values
+              -- Joined Sep 3 (due day 5): prorated first charge, then the due day, both in September.
+              (1, 'charge', 100000, '2026-09-03', '2026-09-03', true, 'auto_recurring', '2026-09-03 10:00+05'),
+              (1, 'charge', 400000, '2026-09-05', '2026-09-05', false, 'auto_recurring', '2026-09-05 00:00+05'),
+              (1, 'charge', 400000, '2026-10-05', '2026-10-05', false, 'auto_recurring', '2026-10-05 00:00+05'),
+              (2, 'charge', 200000, '2026-09-20', '2026-09-20', true, 'auto_recurring', '2026-09-20 10:00+05'),
+              (3, 'charge', 100000, '2026-09-20', '2026-09-20', true, 'auto_recurring', '2026-09-20 10:00+05'),
+              (1, 'payment', 450000, null, null, false, 'manual', '2026-09-06 12:00+05'),
+              (2, 'payment', 300000, null, null, false, 'manual', '2026-10-06 12:00+05'),
+              (3, 'payment', 999, null, null, false, 'manual', '2026-10-07 12:00+05');
+            update transactions set method = 'cash' where kind = 'payment' and amount = 450000;
+            """
+        )
+        before = await conn.fetchval("select sum(amount) from transactions where kind = 'charge'")
+
+        await _apply(conn, SERVER_DIR / "migrations" / "0013_money_core.sql")
+
+        # Aziz's two September charges for IELTS became one; no money lost.
+        charges = await conn.fetch(
+            "select enrollment_id, period_month::text, amount, is_prorated from charges order by enrollment_id, period_month"
+        )
+        assert [tuple(c) for c in charges] == [
+            (1, "2026-09-01", 500000, True), (1, "2026-10-01", 400000, False),
+            (2, "2026-09-01", 200000, True), (3, "2026-09-01", 100000, True),
+        ]
+        assert await conn.fetchval("select sum(amount) from charges") == before
+        merged = await conn.fetchrow("select reason, after->>'amount' as total from audit_log where action = 'migrated_merge'")
+        assert merged["total"] == "500000"
+
+        # Payments, numbered in the order they were received.
+        payments = await conn.fetch("select student_id, amount, method, receipt_no from payments order by receipt_no")
+        assert [tuple(p) for p in payments] == [
+            (1, 450000, "cash", "R-000001"), (1, 300000, None, "R-000002"), (2, 999, None, "R-000003")
+        ]
+        assert await conn.fetchval("select nextval('payment_receipt_seq')") == 4
+
+        # Allocation is per student, oldest charge first: Aziz's 750 000 pays
+        # his three charges (500 000 + 200 000 + 400 000) in order -- 50 000 short.
+        balances = {r["student_id"]: dict(r) for r in await conn.fetch("select * from student_balances")}
+        assert (balances[1]["paid"], balances[1]["charged"], balances[1]["balance"]) == (750000, 1100000, -350000)
+        assert balances[2]["balance"] == 999 - 100000
+        owed = {r["enrollment_id"]: r["owed"] for r in await conn.fetch("select enrollment_id, owed from enrollment_balances")}
+        assert owed == {1: 350000, 2: 0, 3: 100000 - 999}
+        teachers = await conn.fetch(
+            "select teacher_id, sum(amount) from payment_allocations where payment_id <= 2 group by teacher_id order by 1"
+        )
+        assert [tuple(t) for t in teachers] == [(1, 550000), (2, 200000)]
+
+        await _apply(conn, SERVER_DIR / "migrations" / "rollback" / "0013_money_core.sql")
+        assert await conn.fetchval("select count(*) from transactions") == 8
+        assert await conn.fetchval("select to_regclass('charges')") is None
+    finally:
+        await conn.close()
+
+
+async def test_0014_turns_salary_expenses_into_payouts(server):
+    conn = await _fresh_db(server, "salary_check")
+    try:
+        for path in MIGRATIONS:
+            if path.name.startswith("0014"):
+                break
+            await _apply(conn, path)
+        await conn.execute(
+            """
+            insert into users (phone, password_hash, full_name, role) values ('998900000001', 'x', 'Owner', 'owner');
+            insert into teachers (full_name) values ('Dilnoza');
+            insert into expenses (category, amount, spent_on, teacher_id, salary_month, method, created_by) values
+              ('salary', 100000, '2026-10-05', 1, '2026-09-01', 'cash', 1),
+              ('rent', 500000, '2026-10-01', null, null, null, 1);
+            """
+        )
+        await _apply(conn, SERVER_DIR / "migrations" / "0014_salary.sql")
+        rows = await conn.fetch("select teacher_id, month::text, amount, expense_id, paid_by from salary_payouts")
+        assert [tuple(r) for r in rows] == [(1, "2026-09-01", 100000, 1, 1)]
+        await _apply(conn, SERVER_DIR / "migrations" / "rollback" / "0014_salary.sql")
+        assert await conn.fetchval("select count(*) from expenses") == 2
+    finally:
+        await conn.close()
+
+
 def test_migration_files_are_numbered_in_order():
     numbers = [int(path.name[:4]) for path in MIGRATIONS]
     assert numbers == list(range(1, len(numbers) + 1)), [path.name for path in MIGRATIONS]
