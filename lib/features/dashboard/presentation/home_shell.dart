@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
+import '../../../core/widgets/back_gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -314,7 +315,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         if (didPop) return;
         _handleBackPressed(current);
       },
-      child: Focus(autofocus: true, child: shell),
+      // Esc is caught above the focus node: key events travel up from
+      // whatever has focus, so the catcher must be its ancestor.
+      child: BackGestures(
+        onBack: () => _stepBack(current),
+        child: Focus(autofocus: true, child: shell),
+      ),
     );
   }
 
@@ -348,13 +354,16 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     );
   }
 
-  void _handleBackPressed(Destination current) {
+  /// One step back inside the current page: a group goes back to its course,
+  /// a course to the list, an open search is cleared. False when there is
+  /// nothing to step back from. This is what Esc and the touchpad swipe do.
+  bool _stepBack(Destination current) {
     if (current == Destination.groups &&
         (_groupsNav.currentState?.canPop() ?? false)) {
       _groupsNav.currentState!.pop();
-      return;
+      return true;
     }
-    final cleared = switch (current) {
+    return switch (current) {
       Destination.today =>
         _dashboardKey.currentState?.clearSearchIfActive() ?? false,
       Destination.groups =>
@@ -363,7 +372,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         _studentsKey.currentState?.clearSearchIfActive() ?? false,
       _ => false,
     };
-    if (cleared) return;
+  }
+
+  void _handleBackPressed(Destination current) {
+    if (_stepBack(current)) return;
     if (current != Destination.today) {
       setState(() => _current = Destination.today);
       return;
