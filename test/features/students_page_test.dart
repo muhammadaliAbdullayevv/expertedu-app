@@ -508,7 +508,7 @@ void main() {
           findsOneWidget,
         );
         expect(find.text('Qarzdor'), findsOneWidget);
-        expect(find.text('Xavf ostida'), findsWidgets);
+        expect(find.text('Davomat past'), findsWidgets);
         // A second group is hinted, a student with none is "Guruhsiz".
         expect(find.text('Fransuz tili, A1 +1'), findsOneWidget);
         // Newly joined students are marked.
@@ -580,31 +580,67 @@ void main() {
       },
     );
 
-    testWidgets('ten to a page, with Oldingi and Keyingi', (tester) async {
-      final many = [for (var i = 1; i <= 12; i++) row(i, 'Talaba $i')];
+    testWidgets('there is no paging: every student is in one scrolling list', (
+      tester,
+    ) async {
+      final many = [for (var i = 1; i <= 60; i++) row(i, 'Talaba $i')];
       final profiles = {
-        for (var i = 1; i <= 12; i++) i: profile(i, 'Talaba $i', balance: 0),
+        for (var i = 1; i <= 60; i++) i: profile(i, 'Talaba $i', balance: 0),
       };
       await pump(tester, Rig(rows: many, profiles: profiles));
-      expect(
-        tester.widget<Text>(find.byKey(const ValueKey('paging'))).data,
-        '1–10 / 12',
+      expect(find.byKey(const ValueKey('paging')), findsNothing);
+      expect(find.text('Oldingi'), findsNothing);
+      expect(find.text('Keyingi'), findsNothing);
+      expect(find.byKey(const ValueKey('student-1')), findsOneWidget);
+      // Row 60 is far below: it is reached by scrolling the list.
+      expect(find.byKey(const ValueKey('student-60')), findsNothing);
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('student-60')),
+        500,
+        scrollable: find.descendant(
+          of: find.byKey(const ValueKey('students-list')),
+          matching: find.byType(Scrollable),
+        ),
       );
-      expect(find.byKey(const ValueKey('student-11')), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('page-next')));
-      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('student-60')), findsOneWidget);
+      // The tab number counts everyone, not one page.
       expect(
-        tester.widget<Text>(find.byKey(const ValueKey('paging'))).data,
-        '11–12 / 12',
-      );
-      expect(find.byKey(const ValueKey('student-11')), findsOneWidget);
-      expect(
-        tester
-            .widget<OutlinedButton>(find.byKey(const ValueKey('page-next')))
-            .onPressed,
-        isNull,
+        tester.widget<Text>(find.byKey(const ValueKey('count-all'))).data,
+        '60',
       );
     });
+
+    testWidgets(
+      'a low-attendance student is marked by lessons, and says there is no debt',
+      (tester) async {
+        final rig = Rig(
+          rows: [
+            row(
+              1,
+              'Feruza Rahmonov',
+              balance: -150000,
+              atRisk: true,
+              rate: 0.6,
+            ),
+          ],
+          profiles: {1: profile(1, 'Feruza Rahmonov', balance: -150000)},
+        );
+        await pump(tester, rig);
+        expect(find.text('Davomat past'), findsOneWidget);
+        expect(find.text('Qarzdor'), findsNothing);
+        expect(
+          find.text('Xavf ostida'),
+          findsOneWidget,
+        ); // only the tab keeps the design's name
+        await tester.longPress(find.text('Davomat past'));
+        await tester.pump(const Duration(milliseconds: 600));
+        expect(
+          find.textContaining('Oxirgi 10 darsda davomat 60%'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('Qarzi yo\'q'), findsWidgets);
+      },
+    );
 
     testWidgets(
       'the first student is open on the right; clicking another switches the profile',

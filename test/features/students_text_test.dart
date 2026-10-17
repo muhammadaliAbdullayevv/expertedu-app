@@ -106,7 +106,9 @@ void main() {
   test('the status chip', () {
     expect(statusOf(row(1, debtor: true)).text, 'Qarzdor');
     expect(statusOf(row(1, debtor: true)).tone, StatusTone.danger);
-    expect(statusOf(row(2, atRisk: true)).text, 'Xavf ostida');
+    expect(statusOf(row(2, atRisk: true)).text, 'Davomat past');
+    // It says it is about lessons, and that there is no debt.
+    expect(statusOf(row(2, atRisk: true)).hint, contains('Qarzi yo\'q'));
     expect(statusOf(row(3)).text, 'To\'langan');
     expect(statusOf(row(4, active: false)).text, 'Arxiv');
     // A debt outweighs the risk.

@@ -16,7 +16,8 @@ import 'open_student.dart';
 import 'student_panel.dart';
 import 'student_text.dart';
 
-const _pageSize = 10;
+/// One table row's height, to scroll a student into view.
+const _rowExtent = 66.0;
 
 /// O'quvchilar (desktop): the students in a table -- group and teacher,
 /// attendance of the last lessons, balance, status -- with the selected
@@ -37,7 +38,7 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
   int? _subjectId;
   int? _groupId;
   int? _teacherId;
-  int _page = 0;
+  final _scroll = ScrollController();
   int? _selected;
   bool _searchVisible = false;
 
@@ -58,6 +59,7 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
   void dispose() {
     _open.removeListener(_onOpenRequest);
     _search.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -86,7 +88,6 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     setState(() {
       _searchVisible = true;
       _search.text = query;
-      _page = 0;
       _tab = StudentTab.all;
     });
   }
@@ -95,7 +96,6 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     if (_search.text.isEmpty) return false;
     setState(() {
       _search.clear();
-      _page = 0;
     });
     return true;
   }
@@ -127,7 +127,13 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
           : StudentTab.all;
       final list = filterStudents(rows, tab: _tab);
       final at = list.indexWhere((s) => s.id == id);
-      _page = at < 0 ? 0 : at ~/ _pageSize;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (at >= 0 && _scroll.hasClients) {
+          _scroll.jumpTo(
+            (at * _rowExtent).clamp(0.0, _scroll.position.maxScrollExtent),
+          );
+        }
+      });
     });
   }
 
@@ -166,9 +172,7 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
         }
         final counts = tabCounts(rows);
         final list = _visible(rows);
-        final pages = (list.length / _pageSize).ceil().clamp(1, 1 << 30);
-        final page = _page.clamp(0, pages - 1);
-        final shown = list.skip(page * _pageSize).take(_pageSize).toList();
+        final shown = list;
         // The profile follows the selection; with nothing chosen, the first row.
         final selected = list.any((s) => s.id == _selected)
             ? _selected
@@ -186,9 +190,7 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
-                    Expanded(
-                      child: _table(shown, list.length, page, pages, selected),
-                    ),
+                    Expanded(child: _table(shown, selected)),
                     const SizedBox(width: 16),
                     SizedBox(
                       width: 440,
@@ -222,7 +224,6 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
               key: ValueKey('tab-${tab.name}'),
               onTap: () => setState(() {
                 _tab = tab;
-                _page = 0;
               }),
               child: Container(
                 height: 44,
@@ -318,7 +319,7 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
               prefixIcon: Icon(Icons.search, size: 20),
               hintText: 'Ism, telefon yoki guruh',
             ),
-            onChanged: (_) => setState(() => _page = 0),
+            onChanged: (_) => setState(() {}),
           ),
         ),
         const SizedBox(width: 10),
@@ -329,7 +330,6 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
           options: subjects,
           onPick: (id) => setState(() {
             _subjectId = id;
-            _page = 0;
           }),
         ),
         const SizedBox(width: 8),
@@ -340,7 +340,6 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
           options: {for (final g in groups.values) g.groupId: g.name},
           onPick: (id) => setState(() {
             _groupId = id;
-            _page = 0;
           }),
         ),
         const SizedBox(width: 8),
@@ -351,7 +350,6 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
           options: teachers,
           onPick: (id) => setState(() {
             _teacherId = id;
-            _page = 0;
           }),
         ),
         if (any)
@@ -359,7 +357,6 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
             key: const ValueKey('filters-clear'),
             onPressed: () => setState(() {
               _subjectId = _groupId = _teacherId = null;
-              _page = 0;
             }),
             child: const Text('Tozalash'),
           ),
@@ -367,13 +364,7 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     );
   }
 
-  Widget _table(
-    List<StudentRow> shown,
-    int total,
-    int page,
-    int pages,
-    int? selected,
-  ) {
+  Widget _table(List<StudentRow> shown, int? selected) {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -394,6 +385,8 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
                     ),
                   )
                 : ListView.separated(
+                    key: const ValueKey('students-list'),
+                    controller: _scroll,
                     itemCount: shown.length,
                     separatorBuilder: (_, _) =>
                         const Divider(height: 1, color: AppColors.divider),
@@ -404,41 +397,6 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
                       onTap: () => setState(() => _selected = shown[i].id),
                     ),
                   ),
-          ),
-          const Divider(height: 1, color: AppColors.divider),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-            child: Row(
-              children: <Widget>[
-                Expanded(
-                  child: Text(
-                    total == 0
-                        ? '0'
-                        : '${page * _pageSize + 1}–${page * _pageSize + shown.length} / $total',
-                    key: const ValueKey('paging'),
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: AppColors.inkMuted,
-                    ),
-                  ),
-                ),
-                OutlinedButton(
-                  key: const ValueKey('page-prev'),
-                  onPressed: page == 0
-                      ? null
-                      : () => setState(() => _page = page - 1),
-                  child: const Text('Oldingi'),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton(
-                  key: const ValueKey('page-next'),
-                  onPressed: page >= pages - 1
-                      ? null
-                      : () => setState(() => _page = page + 1),
-                  child: const Text('Keyingi'),
-                ),
-              ],
-            ),
           ),
         ],
       ),
@@ -700,7 +658,10 @@ class _StudentRowView extends StatelessWidget {
                 padding: const EdgeInsets.only(left: 14),
                 child: Align(
                   alignment: Alignment.centerLeft,
-                  child: StatusChip(status.text, tone: status.tone),
+                  child: Tooltip(
+                    message: status.hint,
+                    child: StatusChip(status.text, tone: status.tone),
+                  ),
                 ),
               ),
             ),

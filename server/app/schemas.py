@@ -1256,3 +1256,49 @@ class AddedToGroup(BaseModel):
 
 StudentProfile.model_rebuild()
 StudentListItem.model_rebuild()
+
+
+class GroupTeacher(BaseModel):
+    id: int
+    full_name: str
+    phone: str | None = None
+
+
+class GroupWaiting(BaseModel):
+    """Someone who asked for this group in Qabul but is not a student yet: no
+    seat, no charge, and not counted in the group's students."""
+
+    lead_id: int
+    full_name: str
+    phone: str
+    created_at: datetime
+    trial_at: datetime | None = None
+
+
+class GroupProfile(BaseModel):
+    """A group's profile page in one answer: who teaches it, how full it is,
+    who has paid, how they attend, when it meets, when it bills, and how much
+    of what was expected has come in."""
+
+    group: Group
+    subject_name: str | None
+    teacher: GroupTeacher | None
+    schedule: list[ScheduleSlot] = []
+    # Active students; a full group that took one more simply has more than its capacity.
+    student_count: int
+    capacity: int | None = None
+    free_seats: int | None = None
+    # Students who owe nothing on this group / who owe something.
+    paid_count: int
+    unpaid_count: int
+    # Attendance of all this group's marked lessons.
+    attendance: ProfileAttendance
+    # This billing period: what was charged and what was paid toward it.
+    expected: int
+    collected: int
+    # Everything still unpaid on this group, however old.
+    debt_total: int
+    # The next billing day (null for a group that bills each student on their own day).
+    next_billing_date: date | None = None
+    next_lessons: list[datetime] = []
+    waiting: list[GroupWaiting] = []

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from datetime import datetime, timedelta
 
-from .. import course_finder, db, schedule
+from .. import admissions, clock, course_finder, db, schedule
 from ..deps import CurrentUser, get_current_user
 from ..money import rules, service as money
 from ..schemas import (
@@ -10,7 +10,11 @@ from ..schemas import (
     Group,
     GroupListItem,
     GroupMatch,
+    GroupProfile,
     GroupSearchResult,
+    GroupTeacher,
+    GroupWaiting,
+    ProfileAttendance,
     RosterEntry,
     ScheduleSlot,
     TrialDate,
@@ -265,6 +269,97 @@ async def upcoming_trial_dates(conn, group_id: int, count: int) -> list[TrialDat
             )
         )
     return result
+
+
+def _attendance(marks: list[str]) -> ProfileAttendance:
+    counts = {key: marks.count(key) for key in ("present", "late", "absent", "excused")}
+    expected = len(marks) - counts["excused"]
+    came = counts["present"] + counts["late"]
+    return ProfileAttendance(
+        **counts, total=len(marks), rate=round(came / expected, 4) if expected else None, recent=marks[-10:]
+    )
+
+
+@router.get("/{group_id}/profile", response_model=GroupProfile)
+async def group_profile(group_id: int):
+    """The group's profile page: teacher, students, who paid, attendance, days
+    and times, billing day, and what was collected of what was expected."""
+    group = await _fetch_group(group_id)
+    today = clock.today()
+    async with db.pool().acquire() as conn:
+        subject_name = await conn.fetchval("select name from subjects where id = $1", group.subject_id)
+        teacher = None
+        if group.teacher_id is not None:
+            row = await conn.fetchrow("select id, full_name, phone from teachers where id = $1", group.teacher_id)
+            teacher = GroupTeacher(**row) if row else None
+        slots = await schedule.load_slots(conn, group_ids=[group_id], active_only=False)
+        people = await conn.fetchrow(
+            """
+            select count(*) as students,
+                   count(*) filter (where eb.owed > 0) as unpaid
+            from enrollments e join enrollment_balances eb on eb.enrollment_id = e.id
+            where e.group_id = $1 and e.status = 'active'
+            """,
+            group_id,
+        )
+        marks = await conn.fetch(
+            """
+            select a.status from attendance a join lessons l on l.id = a.lesson_id
+            join enrollments e on e.id = a.enrollment_id
+            where l.group_id = $1 and e.status = 'active' order by l.starts_at, a.id
+            """,
+            group_id,
+        )
+        money_row = await conn.fetchrow(
+            """
+            select coalesce(sum(cb.amount) filter (where cb.status = 'active'
+                              and cb.period_start <= $2 and $2 < cb.period_end), 0) as expected,
+                   coalesce(sum(cb.paid) filter (where cb.status = 'active'
+                              and cb.period_start <= $2 and $2 < cb.period_end), 0) as collected,
+                   coalesce(sum(cb.owed) filter (where cb.status = 'active' and cb.owed > 0), 0) as debt
+            from charge_balances cb join enrollments e on e.id = cb.enrollment_id
+            where cb.group_id = $1 and e.status = 'active'
+            """,
+            group_id,
+            today,
+        )
+        waiting = await conn.fetch(
+            f"{admissions.LEAD_SELECT} where l.group_id = $1 and l.stage = any($2::text[]) "
+            "order by l.created_at desc limit 50",
+            group_id,
+            list(admissions.OPEN_STAGES),
+        )
+        lessons = await upcoming_trial_dates(conn, group_id, 3)
+    next_billing = None
+    if group.billing_mode == "fixed_day":
+        next_billing = rules.next_due_date(
+            group.billing_mode, group.billing_day, today - timedelta(days=400), today, None, group.prorate_first_period
+        )
+    students = people["students"]
+    return GroupProfile(
+        group=group,
+        subject_name=subject_name,
+        teacher=teacher,
+        schedule=[ScheduleSlot(weekday=s.weekday, starts_at=s.starts_at, ends_at=s.ends_at, room=s.room) for s in slots],
+        student_count=students,
+        capacity=group.capacity,
+        free_seats=None if group.capacity is None else max(group.capacity - students, 0),
+        paid_count=students - people["unpaid"],
+        unpaid_count=people["unpaid"],
+        attendance=_attendance([m["status"] for m in marks]),
+        expected=money_row["expected"],
+        collected=money_row["collected"],
+        debt_total=money_row["debt"],
+        next_billing_date=next_billing,
+        next_lessons=[lesson.starts_at for lesson in lessons],
+        waiting=[
+            GroupWaiting(
+                lead_id=r["id"], full_name=r["full_name"], phone=r["phone"], created_at=r["created_at"],
+                trial_at=r["next_trial_at"],
+            )
+            for r in waiting
+        ],
+    )
 
 
 @router.get("/{group_id}", response_model=Group)

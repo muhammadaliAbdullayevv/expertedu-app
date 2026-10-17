@@ -57,12 +57,37 @@ String signedBalance(int owed) {
   return owed > 0 ? '−$digits' : '+$digits';
 }
 
-/// The status chip of a table row.
-({String text, StatusTone tone}) statusOf(StudentRow s) {
-  if (!s.isActive) return (text: 'Arxiv', tone: StatusTone.neutral);
-  if (s.isDebtor) return (text: 'Qarzdor', tone: StatusTone.danger);
-  if (s.isAtRisk) return (text: 'Xavf ostida', tone: StatusTone.warning);
-  return (text: 'To\'langan', tone: StatusTone.ok);
+/// The status chip of a table row, and what it means (shown on hover).
+/// "Davomat past" is about lessons missed, never about money.
+({String text, StatusTone tone, String hint}) statusOf(StudentRow s) {
+  if (!s.isActive) {
+    return (
+      text: 'Arxiv',
+      tone: StatusTone.neutral,
+      hint: 'Hech qaysi guruhda emas',
+    );
+  }
+  if (s.isDebtor) {
+    return (
+      text: 'Qarzdor',
+      tone: StatusTone.danger,
+      hint: 'To\'lanmagan hisob bor',
+    );
+  }
+  if (s.isAtRisk) {
+    return (
+      text: 'Davomat past',
+      tone: StatusTone.warning,
+      hint:
+          'Oxirgi 10 darsda davomat ${ratePercent(s.attendanceRate)} '
+          '(75% dan past). Qarzi yo\'q.',
+    );
+  }
+  return (
+    text: 'To\'langan',
+    tone: StatusTone.ok,
+    hint: 'Qarzi yo\'q, davomati yaxshi',
+  );
 }
 
 /// "92%" or "–" when no lesson was marked yet.
