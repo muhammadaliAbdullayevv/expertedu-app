@@ -585,3 +585,71 @@ async def test_the_list_filters_by_group_groupless_trial_and_archive(courses):
     assert await names(archive="true") == ["Eldor"]
     assert await names(q="9011100") == ["Aziza", "Bobur", "Dilnoza", "Sevara"]
     assert await names(q="Sev") == ["Sevara"]
+
+
+# --- address, and warnings that never block ----------------------------------------------------------
+
+
+async def test_a_saved_person_keeps_the_parent_phone_and_address(courses):
+    response = await quick(
+        courses, group_id=courses.a, parent_phone="998901110000", address="Chilonzor, 7-kvartal", level="Beginner"
+    )
+    assert response.status_code == 201, response.text
+    lead = response.json()
+    assert (lead["parent_phone"], lead["address"], lead["level"]) == ("998901110000", "Chilonzor, 7-kvartal", "Beginner")
+
+
+async def test_a_person_with_no_group_keeps_what_they_asked_for(courses):
+    response = await quick(
+        courses, subject_id=courses.french, level="A1", note="kechqurun, du-chor-ju", address="Yunusobod"
+    )
+    assert response.status_code == 201, response.text
+    lead = response.json()
+    assert (lead["group_id"], lead["subject_name"], lead["level"], lead["note"]) == (
+        None, "Fransuz tili", "A1", "kechqurun, du-chor-ju",
+    )
+
+
+async def dupes(courses, **params):
+    response = await courses.api.client.get("/leads/duplicates", params=params)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+async def test_the_duplicate_check_warns_about_a_phone_or_a_name_and_blocks_nothing(courses):
+    pool = courses.pool
+    student = await pool.fetchval(
+        "insert into students (full_name, phone) values ('Nodira Ismoilova', '998901110001') returning id"
+    )
+    await pool.execute(
+        "insert into enrollments (student_id, group_id, joined_at) values ($1, $2, current_date)", student, courses.a
+    )
+    await quick(courses, name="Sevara Tursunova", phone="998901110002", group_id=courses.b)
+
+    # A phone that belongs to a student, with the groups they study in.
+    by_phone = await dupes(courses, phone="998901110001", full_name="Boshqa Odam")
+    assert by_phone["phone_student"]["full_name"] == "Nodira Ismoilova"
+    assert by_phone["phone_student"]["group_names"] == ["Beginner A"]
+    assert by_phone["name_students"] == []
+
+    # A phone that already has an open request.
+    saved = await dupes(courses, phone="998901110002")
+    assert [x["full_name"] for x in saved["phone_leads"]] == ["Sevara Tursunova"]
+    assert saved["phone_leads"][0]["group_name"] == "Beginner B"
+
+    # The same name and surname with another phone: warned, however it is spelled.
+    by_name = await dupes(courses, phone="998901119999", full_name="  nodira   ISMOILOVA ")
+    assert [x["phone"] for x in by_name["name_students"]] == ["998901110001"]
+    by_name = await dupes(courses, phone="998901119999", full_name="sevara tursunova")
+    assert [x["phone"] for x in by_name["name_leads"]] == ["998901110002"]
+
+    # One word is not a name match; nothing found is an empty answer.
+    assert (await dupes(courses, full_name="Nodira"))["name_students"] == []
+    assert await dupes(courses, phone="998909998877", full_name="Yangi Odam") == {
+        "phone_student": None, "phone_leads": [], "name_students": [], "name_leads": [],
+    }
+
+    # And none of it blocks: the same name and a student's phone can still be saved
+    # (one person may study in several groups).
+    again = await quick(courses, name="Nodira Ismoilova", phone="998901119999", group_id=courses.b)
+    assert again.status_code == 201, again.text

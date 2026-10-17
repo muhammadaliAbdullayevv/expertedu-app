@@ -189,6 +189,8 @@ create table if not exists leads (
   level text,
   -- The group offered at the front desk (0017); null = "guruhsiz". Not an enrollment.
   group_id bigint references groups(id),
+  -- Where they live, typed by hand (0018).
+  address text,
   constraint leads_stage_check check (stage in (
     'new','contacted','trial_scheduled','trial_completed','decision_pending','follow_up_later',
     'enrolled','not_interested','unreachable'

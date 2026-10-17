@@ -191,6 +191,39 @@ String ymd(DateTime d) =>
 void main() {
   setUpAll(loadAppFonts);
 
+  testWidgets('a full group still takes the student, with a note saying so', (
+    tester,
+  ) async {
+    final full = Group(
+      id: 7,
+      subjectId: 1,
+      name: 'Fransuz tili, A1',
+      teacherName: 'Madina Karimova',
+      feeAmount: 390000,
+      billingMode: 'fixed_day',
+      billingDay: 15,
+      capacity: 16,
+      studentCount: 16,
+      isActive: true,
+      schedule: [slot(1)],
+    );
+    final o = await open(
+      tester,
+      lead: lead(groupId: 7),
+      admissions: FakeAdmissions(groupList: [full]),
+    );
+    expect(find.byKey(const ValueKey('student-full-note')), findsOneWidget);
+    expect(find.textContaining('Guruh to\'lgan (16/16)'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('student-confirm')));
+    await tester.pumpAndSettle();
+    expect(o.admissions.enrolled, hasLength(1));
+  });
+
+  testWidgets('a group with room shows no full note', (tester) async {
+    await open(tester, lead: lead(groupId: 7));
+    expect(find.byKey(const ValueKey('student-full-note')), findsNothing);
+  });
+
   testWidgets(
     'shows the design\'s dialog: group, price, start date, first bill by the group\'s rule',
     (tester) async {

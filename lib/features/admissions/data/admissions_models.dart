@@ -77,6 +77,8 @@ class Lead {
     this.preferredTrialDate,
     this.groupId,
     this.groupName,
+    this.address,
+    this.level,
     this.nextTrialAt,
     this.nextTrialBookingId,
     this.nextTaskDueAt,
@@ -114,6 +116,10 @@ class Lead {
   /// The group offered at the front desk (null = guruhsiz). Not a seat.
   final int? groupId;
   final String? groupName;
+  final String? address;
+
+  /// "Beginner", "IELTS", "A1"... -- what they asked for.
+  final String? level;
   final DateTime? nextTrialAt;
   final int? nextTrialBookingId;
   final DateTime? nextTaskDueAt;
@@ -154,6 +160,8 @@ class Lead {
     preferredTrialDate: _dateTime(json['preferred_trial_date']),
     groupId: json['group_id'] as int?,
     groupName: json['group_name'] as String?,
+    address: json['address'] as String?,
+    level: json['level'] as String?,
     nextTrialAt: _dateTime(json['next_trial_at']),
     nextTrialBookingId: json['next_trial_booking_id'] as int?,
     nextTaskDueAt: _dateTime(json['next_task_due_at']),

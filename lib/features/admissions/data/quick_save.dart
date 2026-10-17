@@ -85,6 +85,12 @@ class QuickSaveRepository {
     required String phone,
     int? groupId,
     String? groupName,
+    String? parentPhone,
+    String? address,
+    int? subjectId,
+    String? subjectName,
+    String? level,
+    String? note,
   }) async {
     final clientId = const Uuid().v4();
     await _outbox.enqueue(
@@ -100,12 +106,18 @@ class QuickSaveRepository {
           'full_name': fullName,
           'phone': phone,
           'group_id': groupId,
+          'parent_phone': parentPhone,
+          'address': address,
+          'subject_id': subjectId,
+          'level': level,
+          'note': note,
           // Nobody is there to decide when it is finally sent: a number that
           // already has an open request is added to it.
           'on_duplicate': 'merge',
         },
         // Display only, for the waiting row in the list.
         'group_name': groupName,
+        'subject_name': subjectName,
       },
     );
     await _sync.refreshCount();

@@ -442,6 +442,7 @@ class CreateLeadRequest(BaseModel):
     level: str | None = None
     # The group offered (Qabul's fast form); null = guruhsiz. Not an enrollment.
     group_id: int | None = None
+    address: str | None = None
     # A free trial at one of that group's next lessons (its start time, as
     # listed by GET /groups/{id}/trial-dates); needs group_id.
     trial_starts_at: datetime | None = None
@@ -500,6 +501,7 @@ class Lead(BaseModel):
     level: str | None = None
     group_id: int | None = None
     group_name: str | None = None
+    address: str | None = None
     next_trial_at: datetime | None = None
     next_trial_booking_id: int | None = None
     next_task_due_at: datetime | None = None
@@ -509,6 +511,26 @@ class Lead(BaseModel):
     updated_at: datetime
     # True when a create was folded into an existing open lead.
     merged: bool = False
+
+
+class SimilarLead(BaseModel):
+    id: int
+    full_name: str
+    phone: str
+    group_name: str | None
+    subject_name: str | None
+    created_at: datetime
+
+
+class DuplicateCheck(BaseModel):
+    """What the front desk should know before saving someone: a student or an
+    open request with this phone, or with exactly this name. A warning only --
+    one person may study in several groups, so nothing here blocks a save."""
+
+    phone_student: PhoneOwner | None = None
+    phone_leads: list[SimilarLead] = []
+    name_students: list[PhoneOwner] = []
+    name_leads: list[SimilarLead] = []
 
 
 class UndoLeadRequest(BaseModel):

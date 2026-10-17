@@ -203,6 +203,7 @@ class _StudentDialogState extends ConsumerState<StudentDialog> {
                       _groupPicker(groups, group),
                     if (group != null) ...<Widget>[
                       _facts(group),
+                      if (_isFull(group)) _fullNote(group),
                       const SizedBox(height: 18),
                       _startDate(group),
                       const SizedBox(height: 16),
@@ -247,7 +248,11 @@ class _StudentDialogState extends ConsumerState<StudentDialog> {
         isExpanded: true,
         decoration: const InputDecoration(labelText: 'Guruh'),
         items: <DropdownMenuItem<int>>[
-          for (final g in groups)
+          // The groups of the subject they asked for come first.
+          for (final g in [
+            ...groups.where((g) => g.subjectId == widget.lead.subjectId),
+            ...groups.where((g) => g.subjectId != widget.lead.subjectId),
+          ])
             DropdownMenuItem(
               value: g.id,
               child: Text(
@@ -293,6 +298,21 @@ class _StudentDialogState extends ConsumerState<StudentDialog> {
       ],
     );
   }
+
+  bool _isFull(Group g) =>
+      g.capacity != null && (g.studentCount ?? 0) >= g.capacity!;
+
+  /// A full group still takes the student: the count goes past the limit and
+  /// the group stays full.
+  Widget _fullNote(Group g) => Padding(
+    padding: const EdgeInsets.only(top: 10),
+    child: Text(
+      'Guruh to\'lgan (${g.studentCount}/${g.capacity}). Baribir qo\'shish mumkin: '
+      'o\'quvchilar soni oshadi, guruh to\'lgan qoladi.',
+      key: const ValueKey('student-full-note'),
+      style: const TextStyle(color: AppColors.warnText),
+    ),
+  );
 
   Widget _startDate(Group group) {
     final today = DateTime.now();

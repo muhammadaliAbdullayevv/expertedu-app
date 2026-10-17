@@ -90,6 +90,19 @@ class QabulRepository {
     return Lead.fromJson(json as Map<String, dynamic>);
   }
 
+  /// Who already has this phone or this exact name -- a warning, never a block.
+  Future<DuplicateCheck> duplicates({String? phone, String? fullName}) async {
+    final json = await _api.get(
+      '/leads/duplicates',
+      query: {
+        if (phone != null && phone.isNotEmpty) 'phone': phone,
+        if (fullName != null && fullName.trim().isNotEmpty)
+          'full_name': fullName.trim(),
+      },
+    );
+    return DuplicateCheck.fromJson(json as Map<String, dynamic>);
+  }
+
   Future<ShellCounts> shellCounts() async =>
       ShellCounts.fromJson(await _api.get('/counts') as Map<String, dynamic>);
 

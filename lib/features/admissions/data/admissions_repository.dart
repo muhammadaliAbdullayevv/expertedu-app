@@ -172,6 +172,8 @@ class AdmissionsRepository {
       source: body['source'] as String?,
       groupId: body['group_id'] as int?,
       groupName: item.payload['group_name'] as String?,
+      address: body['address'] as String?,
+      level: body['level'] as String?,
       stage: LeadStage.newLead,
       assignedTo: body['assigned_to'] as int?,
       version: 0,

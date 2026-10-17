@@ -587,7 +587,7 @@ async def test_reusing_a_key_for_different_data_is_refused(api):
     assert other.status_code == 422
 
 
-async def test_enrollment_into_a_full_group_rolls_everything_back(api):
+async def test_a_full_group_still_takes_a_student_and_stays_full(api):
     ids = await seed(api, capacity=1)
     taken_by = await api.pool.fetchval(
         "insert into students (full_name, phone) values ('Bor', '998909999999') returning id"
@@ -598,19 +598,19 @@ async def test_enrollment_into_a_full_group_rolls_everything_back(api):
         ids["group_id"],
     )
     lead = await new_lead(api)
-    before = await counts(api.pool)
-    key = uuid.uuid4()
 
-    response = await enroll(api, lead["id"], ids["group_id"], key=key)
+    response = await enroll(api, lead["id"], ids["group_id"], key=uuid.uuid4())
 
-    assert response.status_code == 409
-    assert "Guruh to'lgan" in response.json()["detail"]
-    assert await counts(api.pool) == before
-    assert (await lead_detail(api, lead["id"]))["lead"]["stage"] == "new"
-    # Nothing remembered for the key: once there's room, the same key works.
-    assert await api.pool.fetchval("select count(*) from idempotency_keys") == 0
-    await api.pool.execute("update groups set capacity = 2 where id = $1", ids["group_id"])
-    assert (await enroll(api, lead["id"], ids["group_id"], key=key)).status_code == 201
+    # The center decides, so a full group is not a refusal: it simply grows past its capacity.
+    assert response.status_code == 201, response.text
+    assert await api.pool.fetchval(
+        "select count(*) from enrollments where group_id = $1 and status = 'active'", ids["group_id"]
+    ) == 2
+    assert (await lead_detail(api, lead["id"]))["lead"]["stage"] == "enrolled"
+    # And it stays full: no free seats, never a negative number.
+    found = (await api.client.get("/groups/search")).json()
+    group = next(g for g in found["exact"] + found["near"] if g["group_id"] == ids["group_id"])
+    assert (group["enrolled"], group["free_seats"]) == (2, 0)
 
 
 async def test_failure_after_the_student_is_created_rolls_everything_back(api, monkeypatch):

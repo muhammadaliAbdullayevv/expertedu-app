@@ -167,3 +167,94 @@ class StudentSummary {
     studentsWithDebt: json['students_with_debt'] as int,
   );
 }
+
+/// An open request that looks like the person being saved.
+class SimilarLead {
+  const SimilarLead({
+    required this.id,
+    required this.fullName,
+    required this.phone,
+    this.groupName,
+    this.subjectName,
+  });
+
+  final int id;
+  final String fullName;
+  final String phone;
+  final String? groupName;
+  final String? subjectName;
+
+  factory SimilarLead.fromJson(Map<String, dynamic> json) => SimilarLead(
+    id: json['id'] as int,
+    fullName: json['full_name'] as String,
+    phone: json['phone'] as String,
+    groupName: json['group_name'] as String?,
+    subjectName: json['subject_name'] as String?,
+  );
+}
+
+/// A student who has this phone or this name, with the groups they study in.
+class SimilarStudent {
+  const SimilarStudent({
+    required this.id,
+    required this.fullName,
+    required this.phone,
+    required this.groups,
+  });
+
+  final int id;
+  final String fullName;
+  final String phone;
+  final List<String> groups;
+
+  factory SimilarStudent.fromJson(Map<String, dynamic> json) => SimilarStudent(
+    id: json['student_id'] as int,
+    fullName: json['full_name'] as String,
+    phone: json['phone'] as String,
+    groups: (json['group_names'] as List<dynamic>).cast<String>(),
+  );
+}
+
+/// What the front desk should know before saving someone. Only a warning:
+/// one person may study in several groups, so nothing here blocks a save.
+class DuplicateCheck {
+  const DuplicateCheck({
+    this.phoneStudent,
+    this.phoneLeads = const [],
+    this.nameStudents = const [],
+    this.nameLeads = const [],
+  });
+
+  static const none = DuplicateCheck();
+
+  final SimilarStudent? phoneStudent;
+  final List<SimilarLead> phoneLeads;
+  final List<SimilarStudent> nameStudents;
+  final List<SimilarLead> nameLeads;
+
+  bool get isEmpty =>
+      phoneStudent == null &&
+      phoneLeads.isEmpty &&
+      nameStudents.isEmpty &&
+      nameLeads.isEmpty;
+
+  factory DuplicateCheck.fromJson(Map<String, dynamic> json) => DuplicateCheck(
+    phoneStudent: json['phone_student'] == null
+        ? null
+        : SimilarStudent.fromJson(
+            json['phone_student'] as Map<String, dynamic>,
+          ),
+    phoneLeads: [
+      for (final e in json['phone_leads'] as List<dynamic>)
+        SimilarLead.fromJson(e as Map<String, dynamic>),
+    ],
+    nameStudents: [
+      for (final e in json['name_students'] as List<dynamic>)
+        SimilarStudent.fromJson(e as Map<String, dynamic>),
+    ],
+    nameLeads: [
+      for (final e in json['name_leads'] as List<dynamic>)
+        SimilarLead.fromJson(e as Map<String, dynamic>),
+    ],
+  );
+}

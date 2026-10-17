@@ -127,7 +127,14 @@ class _QabulListState extends ConsumerState<QabulList> {
                 if (data == null) {
                   return const Center(child: CircularProgressIndicator());
                 }
-                return _table(<Lead>[...data.$2, ...data.$1.items]);
+                final leads = <Lead>[...data.$2, ...data.$1.items];
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    _Demand(leads: leads),
+                    Expanded(child: _table(leads)),
+                  ],
+                );
               },
             ),
           ),
@@ -244,17 +251,19 @@ class _LeadRow extends StatelessWidget {
                     color: AppColors.inkMuted,
                   ),
                 ),
+                if (lead.address != null && lead.address!.isNotEmpty)
+                  Text(
+                    lead.address!,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppColors.inkMuted,
+                    ),
+                  ),
               ],
             ),
           ),
-          Expanded(
-            flex: 4,
-            child: Text(
-              lead.groupName ?? 'Guruhsiz',
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-            ),
-          ),
+          Expanded(flex: 4, child: _GroupCell(lead: lead)),
           Expanded(
             flex: 2,
             child: lead.isPending
@@ -292,6 +301,124 @@ class _LeadRow extends StatelessWidget {
                   ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The group a person asked for -- or, for someone with no group yet, a
+/// "Kutmoqda" mark with the subject, level and what they said about time.
+class _GroupCell extends StatelessWidget {
+  const _GroupCell({required this.lead});
+
+  final Lead lead;
+
+  @override
+  Widget build(BuildContext context) {
+    if (lead.groupName != null) {
+      return Text(
+        lead.groupName!,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+      );
+    }
+    final wish = demandLabel(lead);
+    final note = lead.note;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            const StatusChip('Kutmoqda', tone: StatusTone.warning),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                wish,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        if (note != null && note.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              note,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, color: AppColors.inkMuted),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// "Fransuz tili · A1" -- what a person with no group is waiting for.
+String demandLabel(Lead lead) {
+  final parts = <String>[
+    ?lead.subjectName,
+    if (lead.level != null && lead.level!.isNotEmpty) lead.level!,
+  ];
+  return parts.isEmpty ? 'Guruh tanlanmagan' : parts.join(' · ');
+}
+
+/// What the people with no group are waiting for, most wanted first -- so
+/// the center can see "5 people want French A1" before it opens a group.
+/// Hidden when nobody is waiting.
+class _Demand extends StatelessWidget {
+  const _Demand({required this.leads});
+
+  final List<Lead> leads;
+
+  @override
+  Widget build(BuildContext context) {
+    final counts = <String, int>{};
+    for (final lead in leads) {
+      if (lead.groupId != null || lead.groupName != null) continue;
+      counts.update(demandLabel(lead), (n) => n + 1, ifAbsent: () => 1);
+    }
+    if (counts.isEmpty) return const SizedBox.shrink();
+    final ordered = counts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return Padding(
+      key: const ValueKey('demand'),
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.card),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Padding(
+              padding: EdgeInsets.only(top: 4, right: 14),
+              child: Text(
+                'Guruh kutayotganlar',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+              ),
+            ),
+            Expanded(
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  for (final e in ordered)
+                    StatusChip(
+                      '${e.key}: ${e.value} kishi',
+                      tone: e.value >= 4 ? StatusTone.ok : StatusTone.neutral,
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

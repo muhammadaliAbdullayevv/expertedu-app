@@ -13,6 +13,7 @@ import 'dart:ui' as ui;
 
 import 'package:expert_edu_center/app/shell/top_bar.dart';
 import 'package:expert_edu_center/app/theme/app_theme.dart';
+import 'package:expert_edu_center/features/admissions/presentation/qabul_widgets.dart';
 import 'package:expert_edu_center/features/auth/application/session_controller.dart';
 import 'package:expert_edu_center/features/dashboard/presentation/home_shell.dart';
 import 'package:expert_edu_center/services/api/token_storage.dart';
@@ -104,23 +105,47 @@ void main() {
         .padRight(9, '0')
         .substring(0, 9);
 
+    Future<void> type(String key, String text) async {
+      await tester.enterText(find.byKey(ValueKey(key)), text);
+      await tester.pump();
+    }
+
     await tester.tap(find.text('Qabul').first);
     await shot(tester, 'qabul-add');
+    await type('qabul-group-search', 'ingliz');
+    await shot(tester, 'qabul-add-search');
     await tester.tap(firstGroup());
-    await tester.enterText(
-      find.byKey(const ValueKey('qabul-name')),
-      'Render Mijoz',
-    );
-    await tester.enterText(find.byKey(const ValueKey('qabul-phone')), phone(1));
-    await shot(tester, 'qabul-add-filled');
+    await type('qabul-first', 'Render');
+    await type('qabul-last', 'Mijoz');
+    await type('qabul-phone', '935551234'); // a student of the demo center
+    await type('qabul-parent-phone', '905550000');
+    await type('qabul-address', 'Chilonzor, 7-kvartal');
+    await settle(tester);
+    await shot(tester, 'qabul-add-warning');
+    await type('qabul-phone', phone(1));
+    await settle(tester);
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await shot(tester, 'qabul-add-saved');
+    await tester.ensureVisible(find.byKey(const ValueKey('save-groupless')));
+    await tester.tap(find.byKey(const ValueKey('save-groupless')));
+    await settle(tester);
+    await tester.tap(find.widgetWithText(OptionPill, 'Fransuz tili').first);
+    await tester.tap(find.widgetWithText(OptionPill, 'Beginner').first);
+    await type('wish-note', 'kechqurun, du-chor-ju');
+    await shot(tester, 'qabul-add-groupless');
+    await type('qabul-first', 'Kutuvchi');
+    await type('qabul-last', 'Odam');
+    await type('qabul-phone', phone(2));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await settle(tester);
     await tester.tap(find.byKey(const ValueKey('view-list')));
     await shot(tester, 'qabul-list');
-    await tester.tap(find.byKey(const ValueKey('row-student')).first);
+    await tester.tap(find.byKey(const ValueKey('view-add')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('fill-schedules')));
     await settle(tester);
     await settle(tester);
-    await shot(tester, 'qabul-student-dialog');
+    await shot(tester, 'qabul-schedules');
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await settle(tester);
   }

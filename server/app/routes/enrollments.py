@@ -59,12 +59,8 @@ async def enroll(
     if existing:
         raise HTTPException(status.HTTP_409_CONFLICT, "Bu o'quvchi allaqachon shu guruhda.")
 
-    if group["capacity"] is not None:
-        taken = await conn.fetchval(
-            "select count(*) from enrollments where group_id = $1 and status = 'active'", group_id
-        )
-        if taken >= group["capacity"]:
-            raise HTTPException(status.HTTP_409_CONFLICT, f"Guruh to'lgan ({taken}/{group['capacity']}).")
+    # A full group still takes the student: the center decides, the seat count
+    # simply goes over the capacity and the group stays full.
 
     discount_kind, discount_value = validate_discount(discount_kind, discount_value, group["fee_amount"])
     row = await conn.fetchrow(

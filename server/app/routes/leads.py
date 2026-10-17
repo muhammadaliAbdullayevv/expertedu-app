@@ -17,6 +17,8 @@ from ..schemas import (
     CreateInteractionRequest,
     CreateLeadRequest,
     CreateTrialSessionRequest,
+    DuplicateCheck,
+    SimilarLead,
     EnrollLeadRequest,
     Lead,
     LeadDetail,
@@ -193,7 +195,57 @@ async def list_leads(
     return LeadPage(items=[Lead(**row) for row in rows], total=total)
 
 
+def _name_key(name: str) -> str:
+    return " ".join(name.lower().split())
+
+
 # Declared before "/{lead_id}" so the path isn't read as an id.
+@router.get("/duplicates", response_model=DuplicateCheck)
+async def check_duplicates(phone: str = "", full_name: str = ""):
+    """The warning under the Qabul form: who already has this phone, or exactly
+    this name (a name counts once it has two words). Never blocks anything."""
+    normalized = normalize(phone)
+    name = _name_key(full_name)
+    check = DuplicateCheck()
+    async with db.pool().acquire() as conn:
+
+        async def open_leads(where: str, *args) -> list[SimilarLead]:
+            rows = await conn.fetch(
+                f"{admissions.LEAD_SELECT} where l.stage = any($1::text[]) and {where} "
+                "order by l.created_at desc limit 5",
+                list(admissions.OPEN_STAGES),
+                *args,
+            )
+            return [
+                SimilarLead(
+                    id=r["id"], full_name=r["full_name"], phone=r["phone"], group_name=r["group_name"],
+                    subject_name=r["subject_name"], created_at=r["created_at"],
+                )
+                for r in rows
+            ]
+
+        if is_valid_uzbek_phone(normalized):
+            check.phone_student = await phone_owner(conn, normalized)
+            check.phone_leads = await open_leads("l.phone = $2", normalized)
+        if len(name.split()) >= 2:
+            students = await conn.fetch(
+                "select phone from students where lower(regexp_replace(trim(full_name), '\\s+', ' ', 'g')) = $1 limit 5",
+                name,
+            )
+            for row in students:
+                owner = await phone_owner(conn, row["phone"])
+                if owner is not None and (check.phone_student is None or owner.student_id != check.phone_student.student_id):
+                    check.name_students.append(owner)
+            check.name_leads = [
+                lead
+                for lead in await open_leads(
+                    "lower(regexp_replace(trim(l.full_name), '\\s+', ' ', 'g')) = $2", name
+                )
+                if lead.phone != normalized
+            ]
+    return check
+
+
 @router.get("/lookup", response_model=PhoneLookup)
 async def lookup_phone(phone: str):
     """Step 1 of "Yangi so'rov": who is this number already? An incomplete
@@ -268,8 +320,8 @@ async def create_lead(conn, payload: CreateLeadRequest, user: CurrentUser) -> Le
                 insert into leads
                     (client_id, full_name, phone, parent_phone, subject_id, source, note, assigned_to,
                      preferred_trial_date, student_id, created_by, desired_weekdays, desired_time_of_day, level,
-                     group_id)
-                values (coalesce($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                     group_id, address)
+                values (coalesce($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                 returning id
                 """,
                 payload.client_id,
@@ -287,6 +339,7 @@ async def create_lead(conn, payload: CreateLeadRequest, user: CurrentUser) -> Le
                 time_of_day,
                 level,
                 group["id"] if group else None,
+                (payload.address or "").strip() or None,
             )
     except asyncpg.UniqueViolationError:
         # The phone lock above should make this unreachable; the index is

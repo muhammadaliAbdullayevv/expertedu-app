@@ -140,3 +140,16 @@ String groupTitle(GroupMatch g) {
 /// otherwise how many students it has ("14 o'quvchi") -- never "Cheklanmagan".
 String studentsOrSeats(GroupMatch g) =>
     g.freeSeats == null ? '${g.enrolled} o\'quvchi' : seatsLabel(g.freeSeats);
+
+/// "Du, Chor, Ju · 09:00–10:30" -- or each day with its own times when they
+/// differ. The end of the lesson is shown too.
+String slotsWithEnd(List<ScheduleSlot> slots) {
+  if (slots.isEmpty) return 'Jadval kiritilmagan';
+  final ordered = [...slots]..sort((a, b) => a.weekday.compareTo(b.weekday));
+  String range(ScheduleSlot s) => '${hhmm(s.startsAt)}–${hhmm(s.endsAt)}';
+  final ranges = {for (final s in ordered) range(s)};
+  if (ranges.length == 1) {
+    return '${daysLabel(ordered.map((s) => s.weekday))} · ${ranges.single}';
+  }
+  return ordered.map((s) => '${weekdayAbbr[s.weekday]} ${range(s)}').join(', ');
+}
