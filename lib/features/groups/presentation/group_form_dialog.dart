@@ -268,7 +268,9 @@ class _GroupFormDialogState extends ConsumerState<_GroupFormDialog> {
                   if (_billingMode == BillingMode.fixedDay)
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('Birinchi davrni kunlarga qarab hisoblash'),
+                      title: const Text(
+                        'Birinchi davrni kunlarga qarab hisoblash',
+                      ),
                       subtitle: const Text(
                         'O\'rtadan qo\'shilgan o\'quvchi keyingi to\'lov kunigacha bo\'lgan kunlar uchun to\'laydi. O\'chirilsa, to\'liq narx.',
                       ),

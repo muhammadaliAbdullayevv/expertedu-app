@@ -24,17 +24,20 @@ void main() {
     expect(menuFor(AppRole.owner), contains(Destination.settings));
   });
 
-  test('the admin sees Moliya too (paying and salary pages are open to them)', () {
-    expect(menuFor(AppRole.admin), contains(Destination.finance));
-    expect(Destination.finance.allowedFor(AppRole.admin), isTrue);
-    expect(Destination.finance.allowedFor(AppRole.teacher), isFalse);
-    expect(labels(sectionFor(AppRole.admin, NavSection.manage)), [
-      'Guruhlar',
-      'O\'qituvchilar',
-      'Moliya',
-      'Hisobotlar',
-    ]);
-  });
+  test(
+    'the admin sees Moliya too (paying and salary pages are open to them)',
+    () {
+      expect(menuFor(AppRole.admin), contains(Destination.finance));
+      expect(Destination.finance.allowedFor(AppRole.admin), isTrue);
+      expect(Destination.finance.allowedFor(AppRole.teacher), isFalse);
+      expect(labels(sectionFor(AppRole.admin, NavSection.manage)), [
+        'Guruhlar',
+        'O\'qituvchilar',
+        'Moliya',
+        'Hisobotlar',
+      ]);
+    },
+  );
 
   test('a teacher gets Bugun, Jadval and Sozlamalar only', () {
     expect(menuFor(AppRole.teacher), [

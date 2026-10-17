@@ -56,7 +56,11 @@ class _TrialsViewState extends ConsumerState<TrialsView> {
   }
 
   void _reload() {
-    if (mounted) setState(() => _sessions = _load());
+    if (mounted) {
+      setState(() {
+        _sessions = _load();
+      });
+    }
   }
 
   Future<List<TrialSession>> _load() => ref

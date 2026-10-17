@@ -89,27 +89,58 @@ void main() {
     Future<void> Function(WidgetTester, String) shot,
     Future<void> Function(WidgetTester) settle,
   ) async {
+    Finder firstGroup() => find
+        .byWidgetPredicate(
+          (w) =>
+              w.key is ValueKey<String> &&
+              (w.key! as ValueKey<String>).value.startsWith('group-') &&
+              (w.key! as ValueKey<String>).value != 'group-none',
+        )
+        .first;
+    final stamp = DateTime.now().millisecondsSinceEpoch % 100000;
+    String phone(int n) => '9${(10000000 + stamp * 10 + n) % 100000000}'
+        .padRight(9, '0')
+        .substring(0, 9);
+
     await tester.tap(find.text('Qabul').first);
-    await shot(tester, 'qabul-board');
-    await tester.tap(find.text('Jadval ko\'rinishi'));
-    await shot(tester, 'qabul-table');
-    await tester.tap(find.text('Doska ko\'rinishi'));
+    await shot(tester, 'qabul-add');
+    await tester.enterText(
+      find.byKey(const ValueKey('qabul-name')),
+      'Render Mijoz',
+    );
+    await tester.enterText(find.byKey(const ValueKey('qabul-phone')), phone(1));
+    await tester.tap(firstGroup());
+    await shot(tester, 'qabul-add-filled');
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await shot(tester, 'qabul-add-saved');
+    await tester.tap(find.byKey(const ValueKey('view-list')));
+    await shot(tester, 'qabul-list');
+    await tester.tap(find.byKey(const ValueKey('view-add')));
     await settle(tester);
-    // A card's page, with the one step that makes a lead a student.
-    await tester.tap(find.text('Nodira Ismoilova').first);
-    await shot(tester, 'qabul-card-panel');
-    await tester.tap(find.text('Guruhga qo\'shish').first);
+    // A second person, saved and then taken back.
+    await tester.enterText(find.byKey(const ValueKey('qabul-name')), 'Qaytgan');
+    await tester.enterText(find.byKey(const ValueKey('qabul-phone')), phone(2));
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await settle(tester);
+    await tester.tap(find.text('Qaytarish'));
+    await shot(tester, 'qabul-add-undone');
+    await tester.tap(find.byKey(const ValueKey('view-list')));
+    await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('qabul-archive')));
+    await shot(tester, 'qabul-archive');
+    await tester.tap(find.byKey(const ValueKey('qabul-archive')));
+    await settle(tester);
+    // The dialogs behind the list's actions.
+    await tester.tap(find.byKey(const ValueKey('row-student')).first);
     await settle(tester);
     await settle(tester);
-    await shot(tester, 'qabul-after-trial');
-    await tester.tap(find.text('Rad etildi').last);
-    await shot(tester, 'qabul-after-trial-reject');
-    await tester.tap(find.text('Bekor qilish').last);
-    await settle(tester);
+    await shot(tester, 'qabul-student-dialog');
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await settle(tester);
+    await tester.tap(find.byKey(const ValueKey('view-add')));
+    await settle(tester);
 
-    await tester.tap(find.text('Kurs qidirish'));
+    await tester.tap(find.text('Batafsil qidirish'));
     await shot(tester, 'qabul-finder');
     await tester.tap(find.text('Du · Chor · Ju'));
     await shot(tester, 'qabul-finder-days');

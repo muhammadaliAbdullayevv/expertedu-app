@@ -62,7 +62,11 @@ class _AdmissionsOverviewState extends ConsumerState<AdmissionsOverview> {
   }
 
   void _reload() {
-    if (mounted) setState(() => _report = _load());
+    if (mounted) {
+      setState(() {
+        _report = _load();
+      });
+    }
   }
 
   Future<AdmissionsReport> _load() =>

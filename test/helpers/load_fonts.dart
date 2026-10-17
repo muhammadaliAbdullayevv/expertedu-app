@@ -9,18 +9,28 @@ import 'package:flutter/services.dart';
 Future<void> loadAppFonts() async {
   final loader = FontLoader('DM Sans');
   for (final weight in const [400, 500, 600, 700]) {
-    final bytes = File('assets/fonts/dm_sans/DMSans-$weight.ttf').readAsBytesSync();
-    loader.addFont(Future.value(ByteData.view(Uint8List.fromList(bytes).buffer)));
+    final bytes = File(
+      'assets/fonts/dm_sans/DMSans-$weight.ttf',
+    ).readAsBytesSync();
+    loader.addFont(
+      Future.value(ByteData.view(Uint8List.fromList(bytes).buffer)),
+    );
   }
   await loader.load();
 
   // The icon font, so screenshots show icons instead of boxes.
   final root = Platform.environment['FLUTTER_ROOT'];
   if (root != null) {
-    final icons = File('$root/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf');
+    final icons = File(
+      '$root/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+    );
     if (icons.existsSync()) {
       final iconLoader = FontLoader('MaterialIcons')
-        ..addFont(Future.value(ByteData.view(Uint8List.fromList(icons.readAsBytesSync()).buffer)));
+        ..addFont(
+          Future.value(
+            ByteData.view(Uint8List.fromList(icons.readAsBytesSync()).buffer),
+          ),
+        );
       await iconLoader.load();
     }
   }

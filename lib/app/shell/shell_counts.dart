@@ -12,7 +12,6 @@ final shellCountsProvider = FutureProvider<Map<Destination, int>>((ref) async {
   try {
     final c = await ref.read(qabulRepositoryProvider).shellCounts();
     return {
-      Destination.admissions: c.openLeads,
       Destination.students: c.activeStudents,
       Destination.groups: c.activeGroups,
       Destination.teachers: c.activeTeachers,

@@ -36,7 +36,11 @@ class _FollowUpsViewState extends ConsumerState<FollowUpsView> {
   }
 
   void _reload() {
-    if (mounted) setState(() => _tasks = _load());
+    if (mounted) {
+      setState(() {
+        _tasks = _load();
+      });
+    }
   }
 
   Future<List<FollowUpTask>> _load() {

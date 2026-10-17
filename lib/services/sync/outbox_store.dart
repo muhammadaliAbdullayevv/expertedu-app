@@ -203,6 +203,39 @@ class OutboxStore {
     );
   }
 
+  /// The queued create for [entity]/[localId], whatever its status now.
+  Future<OutboxItem?> findCreate({
+    required String entity,
+    required String localId,
+  }) async {
+    final db = await _localDb.outboxDb();
+    final rows = await db.query(
+      'outbox',
+      where: "entity = ? and op = 'create' and local_id = ?",
+      whereArgs: [entity, localId],
+      orderBy: 'seq desc',
+      limit: 1,
+    );
+    return rows.isEmpty ? null : OutboxItem.fromRow(rows.first);
+  }
+
+  /// Drops a create that hasn't been sent (still waiting, or parked after a
+  /// refusal). False if it is on its way or already there -- the server has
+  /// to undo it then. Kept, marked discarded, not deleted.
+  Future<bool> discardUnsentCreate({
+    required String entity,
+    required String localId,
+  }) async {
+    final db = await _localDb.outboxDb();
+    final changed = await db.rawUpdate(
+      "update outbox set status = 'discarded' "
+      "where entity = ? and op = 'create' and local_id = ? "
+      "and status in ('pending', 'failed')",
+      [entity, localId],
+    );
+    return changed > 0;
+  }
+
   Future<void> _setStatus(int seq, String status) async {
     final db = await _localDb.outboxDb();
     await db.update(

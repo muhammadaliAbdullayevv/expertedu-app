@@ -1,4 +1,3 @@
-import '../../../core/widgets/status_chip.dart';
 import '../../timetable/data/timetable_models.dart';
 import '../data/qabul_models.dart';
 
@@ -67,49 +66,6 @@ String when(DateTime at, DateTime now) {
   return '$label ${clock(at)}';
 }
 
-/// The small coloured chip under a card's tags, if its stage has one.
-({String text, StatusTone tone})? stageBadge(BoardLead lead, DateTime now) {
-  switch (lead.v2Stage) {
-    case BoardStage.trial:
-      final at = lead.nextTrialAt;
-      if (at == null) return null;
-      final days = _day(at).difference(_day(now)).inDays;
-      return switch (days) {
-        0 => (text: 'Bugun sinov darsi', tone: StatusTone.warning),
-        1 => (text: 'Ertaga sinov darsi', tone: StatusTone.warning),
-        _ => null,
-      };
-    case BoardStage.awaitingDecision:
-      return (text: 'Javob kutilmoqda', tone: StatusTone.danger);
-  }
-  return null;
-}
-
-/// The line at the bottom of a card.
-String cardFooter(BoardLead lead, DateTime now) {
-  switch (lead.v2Stage) {
-    case BoardStage.trial:
-      final at = lead.nextTrialAt;
-      return at == null ? ageText(lead.stageChangedAt, now) : when(at, now);
-    case BoardStage.awaitingDecision:
-      final at = lead.lastTrialAt;
-      if (at == null) return ageText(lead.stageChangedAt, now);
-      final days = daysSince(at, now);
-      return days <= 0 ? 'Sinovdan keyin bugun' : 'Sinovdan $days kun keyin';
-    case BoardStage.joined:
-      final at = lead.enrolledAt ?? lead.stageChangedAt;
-      return dayMonth(at);
-    case BoardStage.rejected:
-      final reason = lead.lostReason;
-      final at = lead.closedAt ?? lead.stageChangedAt;
-      return reason == null || reason.isEmpty
-          ? dayMonth(at)
-          : '${dayMonth(at)} · $reason';
-    default:
-      return ageText(lead.stageChangedAt, now);
-  }
-}
-
 /// "Du, Chor, Ju".
 String daysLabel(Iterable<int> weekdays) =>
     (weekdays.toSet().toList()..sort()).map((d) => weekdayAbbr[d]).join(', ');
@@ -169,3 +125,13 @@ String seatsLabel(int? free) => switch (free) {
   0 => 'To\'lgan',
   _ => '$free bo\'sh o\'rin',
 };
+
+/// "Ingliz tili, Beginner A" -- the group's name, with its subject in front
+/// unless the name already says it.
+String groupTitle(GroupMatch g) {
+  final subject = g.subjectName;
+  if (subject == null || g.name.toLowerCase().contains(subject.toLowerCase())) {
+    return g.name;
+  }
+  return '$subject, ${g.name}';
+}

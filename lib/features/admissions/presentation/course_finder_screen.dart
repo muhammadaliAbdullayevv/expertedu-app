@@ -256,7 +256,7 @@ class _CourseFinderScreenState extends ConsumerState<CourseFinderScreen> {
                     runSpacing: 8,
                     children: <Widget>[
                       for (final s in snapshot.data ?? const <Subject>[])
-                        _Pill(
+                        OptionPill(
                           s.name,
                           selected: s.id == _subjectId,
                           onTap: () => _pickSubject(s.id),
@@ -273,7 +273,7 @@ class _CourseFinderScreenState extends ConsumerState<CourseFinderScreen> {
                     runSpacing: 8,
                     children: <Widget>[
                       for (final level in _levels)
-                        _Pill(
+                        OptionPill(
                           level,
                           selected: level == _level,
                           onTap: () {
@@ -300,7 +300,7 @@ class _CourseFinderScreenState extends ConsumerState<CourseFinderScreen> {
                   runSpacing: 8,
                   children: <Widget>[
                     for (var day = 1; day <= 7; day++)
-                      _Pill(
+                      OptionPill(
                         weekdayAbbr[day],
                         selected: _days.contains(day),
                         onTap: () {
@@ -322,7 +322,7 @@ class _CourseFinderScreenState extends ConsumerState<CourseFinderScreen> {
                   runSpacing: 8,
                   children: <Widget>[
                     for (final (label, days) in _quickPicks)
-                      _Pill(
+                      OptionPill(
                         label,
                         selected:
                             _days.length == days.length &&
@@ -349,7 +349,7 @@ class _CourseFinderScreenState extends ConsumerState<CourseFinderScreen> {
               runSpacing: 8,
               children: <Widget>[
                 for (final (key, label) in _times)
-                  _Pill(
+                  OptionPill(
                     label,
                     selected: _time == key,
                     onTap: () {
@@ -447,7 +447,7 @@ class _CourseFinderScreenState extends ConsumerState<CourseFinderScreen> {
             runSpacing: 8,
             children: <Widget>[
               for (final e in heardFromLabels.entries)
-                _Pill(
+                OptionPill(
                   e.value,
                   selected: _source == e.key,
                   onTap: () =>
@@ -480,40 +480,6 @@ class _CourseFinderScreenState extends ConsumerState<CourseFinderScreen> {
             style: TextStyle(fontSize: 12, color: AppColors.inkMuted),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _Pill extends StatelessWidget {
-  const _Pill(this.label, {required this.selected, required this.onTap});
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(10),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.accent : AppColors.surface,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: selected ? AppColors.accent : AppColors.borderStrong,
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: selected ? Colors.white : AppColors.ink,
-          ),
-        ),
       ),
     );
   }
@@ -590,7 +556,7 @@ class GroupResultCard extends StatelessWidget {
           Row(
             children: <Widget>[
               for (var day = 1; day <= 7; day++) ...<Widget>[
-                _DayChip(
+                DayPill(
                   weekdayAbbr[day],
                   inGroup: group.weekdays.contains(day),
                   wanted: highlight.contains(day),
@@ -688,43 +654,6 @@ class GroupResultCard extends StatelessWidget {
             ],
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _DayChip extends StatelessWidget {
-  const _DayChip(this.label, {required this.inGroup, required this.wanted});
-
-  final String label;
-  final bool inGroup;
-
-  /// A day the client can come.
-  final bool wanted;
-
-  @override
-  Widget build(BuildContext context) {
-    // Solid when the group meets that day (accent if the client can come
-    // too); faint otherwise.
-    final color = !inGroup
-        ? AppColors.divider
-        : (wanted ? AppColors.accent : AppColors.warnBg);
-    final text = !inGroup
-        ? AppColors.inkMuted
-        : (wanted ? Colors.white : AppColors.warnText);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-          color: text,
-        ),
       ),
     );
   }

@@ -6,7 +6,6 @@ import 'package:expert_edu_center/features/admissions/data/qabul_models.dart';
 import 'package:expert_edu_center/features/admissions/data/qabul_repository.dart';
 import 'package:expert_edu_center/features/admissions/presentation/after_trial_dialog.dart';
 import 'package:expert_edu_center/features/admissions/presentation/course_finder_screen.dart';
-import 'package:expert_edu_center/features/admissions/presentation/qabul_board.dart';
 import 'package:expert_edu_center/features/admissions/presentation/trial_booking_dialog.dart';
 import 'package:expert_edu_center/features/enrollments/data/enrollments_repository.dart';
 import 'package:expert_edu_center/features/groups/data/groups_repository.dart';
@@ -26,55 +25,6 @@ String money(int amount) => CurrencyFormatter.format(amount);
 
 final now = DateTime(2026, 10, 17, 15, 20);
 
-BoardLead card(
-  int id,
-  String name,
-  String v2, {
-  String? subject = 'Ingliz tili',
-  String? source = 'referral',
-  DateTime? nextTrial,
-  DateTime? lastTrial,
-  DateTime? enrolled,
-}) => BoardLead(
-  id: id,
-  fullName: name,
-  phone: '99890000000$id',
-  stage: 'new',
-  v2Stage: v2,
-  subjectName: subject,
-  source: source,
-  assignedToName: 'Madina Karimova',
-  createdAt: DateTime(2026, 10, 1),
-  stageChangedAt: DateTime(2026, 10, 17, 9),
-  nextTrialAt: nextTrial,
-  lastTrialAt: lastTrial,
-  enrolledAt: enrolled,
-);
-
-AdmissionsBoard board({int newCount = 2}) => AdmissionsBoard(
-  kpi: const FunnelKpi(
-    leads: 12, trialPeople: 6, joined: 4, rejected: 1, cohortSize: 12, cohortJoined: 4, conversionRate: 0.3333,
-  ),
-  columns: [
-    BoardColumn(key: 'new', label: 'Yangi', count: newCount, leads: [card(1, 'Sevara Tursunova', 'new')]),
-    BoardColumn(key: 'contacted', label: 'Bog\'lanildi', count: 0, leads: const []),
-    BoardColumn(
-      key: 'trial', label: 'Sinov darsi', count: 1,
-      leads: [card(3, 'Zilola Nurmatova', 'trial', nextTrial: DateTime(2026, 10, 18, 10, 30))],
-    ),
-    BoardColumn(
-      key: 'awaiting_decision', label: 'To\'lov kutilmoqda', count: 1,
-      leads: [card(4, 'Nodira Ismoilova', 'awaiting_decision', lastTrial: DateTime(2026, 10, 15, 10))],
-    ),
-    BoardColumn(
-      key: 'joined', label: 'Guruhga qo\'shildi', count: 4,
-      leads: [card(5, 'Laylo Karimova', 'joined', enrolled: DateTime(2026, 10, 12))],
-    ),
-    const BoardColumn(key: 'later', label: 'Keyinroq', count: 0, leads: []),
-    const BoardColumn(key: 'rejected', label: 'Rad etildi', count: 0, leads: []),
-  ],
-);
-
 ScheduleSlot slot(int weekday, int h, [int m = 0]) => ScheduleSlot(
   weekday: weekday,
   startsAt: TimeOfDay(hour: h, minute: m),
@@ -82,7 +32,12 @@ ScheduleSlot slot(int weekday, int h, [int m = 0]) => ScheduleSlot(
   room: '1-xona',
 );
 
-GroupMatch match({int? free = 2, int matched = 3, int total = 3, String mode = 'fixed_day'}) => GroupMatch(
+GroupMatch match({
+  int? free = 2,
+  int matched = 3,
+  int total = 3,
+  String mode = 'fixed_day',
+}) => GroupMatch(
   groupId: 7,
   name: 'Beginner A',
   subjectName: 'Ingliz tili',
@@ -162,12 +117,18 @@ class FakeQabul implements QabulRepository {
     Set<int> weekdays = const {},
     String? timeOfDay,
   }) async {
-    searches.add({'subject': subjectId, 'level': level, 'days': weekdays, 'time': timeOfDay});
+    searches.add({
+      'subject': subjectId,
+      'level': level,
+      'days': weekdays,
+      'time': timeOfDay,
+    });
     return GroupSearchResult(exact: groups, near: const []);
   }
 
   @override
-  Future<List<TrialDate>> trialDates(int groupId, {int count = 3}) async => dates;
+  Future<List<TrialDate>> trialDates(int groupId, {int count = 3}) async =>
+      dates;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -203,15 +164,29 @@ class FakeAdmissions implements AdmissionsRepository {
   }
 
   @override
-  Future<LeadEnrolled> enrollLead(int leadId, {required String idempotencyKey, required Map<String, dynamic> body}) async {
+  Future<LeadEnrolled> enrollLead(
+    int leadId, {
+    required String idempotencyKey,
+    required Map<String, dynamic> body,
+  }) async {
     enrolled.add((leadId: leadId, key: idempotencyKey, body: body));
     return const LeadEnrolled(
-      studentId: 9, studentName: 'Nodira Ismoilova', reusedStudent: false, enrollmentId: 5, firstCharge: 150000, firstPayment: 0,
+      studentId: 9,
+      studentName: 'Nodira Ismoilova',
+      reusedStudent: false,
+      enrollmentId: 5,
+      firstCharge: 150000,
+      firstPayment: 0,
     );
   }
 
   @override
-  Future<Lead> changeStage(Lead lead, String stage, {String? reason, DateTime? followUpAt}) async {
+  Future<Lead> changeStage(
+    Lead lead,
+    String stage, {
+    String? reason,
+    DateTime? followUpAt,
+  }) async {
     stages.add((stage: stage, reason: reason, followUpAt: followUpAt));
     return lead;
   }
@@ -250,20 +225,30 @@ class FakeEnrollments implements EnrollmentsRepository {
 
 // --- helpers ----------------------------------------------------------------------------------
 
-Future<void> pumpApp(WidgetTester tester, Widget child, {List<Override> overrides = const []}) async {
+Future<void> pumpApp(
+  WidgetTester tester,
+  Widget child, {
+  List<Override> overrides = const [],
+}) async {
   tester.view.physicalSize = const Size(1440, 1000);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(
     ProviderScope(
       overrides: overrides,
-      child: MaterialApp(theme: AppTheme.light(), home: Scaffold(body: child)),
+      child: MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(body: child),
+      ),
     ),
   );
   await tester.pump();
 }
 
-Widget opener(Future<Object?> Function(BuildContext) show, {void Function(Object?)? onResult}) => Builder(
+Widget opener(
+  Future<Object?> Function(BuildContext) show, {
+  void Function(Object?)? onResult,
+}) => Builder(
   builder: (context) => TextButton(
     onPressed: () async {
       // (Not `onResult?.call(await show(...))`: with no handler that never opens the dialog.)
@@ -277,92 +262,100 @@ Widget opener(Future<Object?> Function(BuildContext) show, {void Function(Object
 void main() {
   setUpAll(loadAppFonts);
 
-  group('the board', () {
-    testWidgets('draws the design\'s columns, the server\'s counts and the cards\' words', (tester) async {
-      await pumpApp(tester, QabulBoardView(board: board(newCount: 2), now: now, onOpenLead: (_) {}, onAdd: (_) {}));
-      for (final label in ['Yangi', 'Bog\'lanildi', 'Sinov darsi', 'To\'lov kutilmoqda', 'Guruhga qo\'shildi']) {
-        expect(find.text(label), findsOneWidget, reason: label);
-      }
-      // Counts are the server's, not the number of cards drawn.
-      expect(tester.widget<Text>(find.byKey(const ValueKey('count-new'))).data, '2');
-      expect(tester.widget<Text>(find.byKey(const ValueKey('count-joined'))).data, '4');
-      expect(find.text('va yana 1 ta'), findsOneWidget);
-      // KPI strip.
-      expect(find.text('Shu oy so\'rovlar'), findsOneWidget);
-      expect(find.text('12'), findsOneWidget);
-      expect(find.text('Sinovga kelganlar'), findsOneWidget);
-      expect(find.text('6'), findsOneWidget);
-      expect(find.text('33%'), findsOneWidget);
-      expect(find.text('Shu oy kelgan 12 tadan 4 tasi'), findsOneWidget);
-      // Cards.
-      expect(find.text('Sevara Tursunova'), findsOneWidget);
-      expect(find.text('+998 90 000 00 01'), findsOneWidget);
-      expect(find.text('Do\'st tavsiyasi'), findsWidgets);
-      expect(find.text('Ertaga sinov darsi'), findsOneWidget);
-      expect(find.text('Ertaga 10:30'), findsOneWidget);
-      expect(find.text('Javob kutilmoqda'), findsOneWidget);
-      expect(find.text('Sinovdan 2 kun keyin'), findsOneWidget);
-      expect(find.text('12-oktyabr'), findsOneWidget);
-    });
-
-    testWidgets('a tapped card opens that lead; "+ Qo\'shish" says which column', (tester) async {
-      int? opened;
-      String? added;
-      await pumpApp(
-        tester,
-        QabulBoardView(board: board(), now: now, onOpenLead: (id) => opened = id, onAdd: (key) => added = key),
-      );
-      await tester.tap(find.text('Zilola Nurmatova'));
-      expect(opened, 3);
-      await tester.tap(find.text('Qo\'shish').at(2));
-      expect(added, 'trial');
-      await tester.tap(find.text('Qo\'shish').at(4));
-      expect(added, 'joined');
-    });
-
-    testWidgets('open leads are everything but joined and rejected', (tester) async {
-      expect(board().openLeads, 2 + 0 + 1 + 1 + 0);
-    });
-  });
-
   group('the finder\'s group card', () {
-    Widget cardFor(GroupMatch g, {bool exact = true, VoidCallback? onJoin}) => SingleChildScrollView(
-      child: GroupResultCard(
-        group: g, exact: exact, now: now, highlight: const {1, 3, 5}, primaryTrial: true, onTrial: () {}, onJoin: onJoin,
-      ),
+    Widget cardFor(GroupMatch g, {bool exact = true, VoidCallback? onJoin}) =>
+        SingleChildScrollView(
+          child: GroupResultCard(
+            group: g,
+            exact: exact,
+            now: now,
+            highlight: const {1, 3, 5},
+            primaryTrial: true,
+            onTrial: () {},
+            onJoin: onJoin,
+          ),
+        );
+
+    testWidgets(
+      'an exact match shows its days, seats, price and the first-payment note',
+      (tester) async {
+        await pumpApp(tester, cardFor(match(), onJoin: () {}));
+        expect(find.text('Ingliz tili, Beginner A'), findsOneWidget);
+        expect(find.text('Madina Karimova · 1-xona'), findsOneWidget);
+        expect(find.text('Aniq mos: 3 / 3 kun'), findsOneWidget);
+        expect(find.text('09:00 – 10:30'), findsOneWidget);
+        expect(find.text('Bo\'sh o\'rin: 2'), findsOneWidget);
+        expect(find.text('14 / 16'), findsOneWidget);
+        expect(find.text('${money(310000)} / oy'), findsOneWidget);
+        expect(
+          find.textContaining('Guruh 1-sentyabrda boshlangan.'),
+          findsOneWidget,
+        );
+        expect(find.text('Guruhga qo\'shish'), findsOneWidget);
+      },
     );
 
-    testWidgets('an exact match shows its days, seats, price and the first-payment note', (tester) async {
-      await pumpApp(tester, cardFor(match(), onJoin: () {}));
-      expect(find.text('Ingliz tili, Beginner A'), findsOneWidget);
-      expect(find.text('Madina Karimova · 1-xona'), findsOneWidget);
-      expect(find.text('Aniq mos: 3 / 3 kun'), findsOneWidget);
-      expect(find.text('09:00 – 10:30'), findsOneWidget);
-      expect(find.text('Bo\'sh o\'rin: 2'), findsOneWidget);
-      expect(find.text('14 / 16'), findsOneWidget);
-      expect(find.text('${money(310000)} / oy'), findsOneWidget);
-      expect(find.textContaining('Guruh 1-sentyabrda boshlangan.'), findsOneWidget);
-      expect(find.text('Guruhga qo\'shish'), findsOneWidget);
-    });
+    testWidgets(
+      'a near miss says how many days differ; a full group cannot be joined',
+      (tester) async {
+        await pumpApp(
+          tester,
+          cardFor(match(free: 0, matched: 0), exact: false),
+        );
+        expect(find.text('Kunlari farq qiladi: 0 / 3 kun'), findsOneWidget);
+        expect(find.text('Guruh to\'lgan'), findsOneWidget);
+        expect(
+          tester
+              .widget<OutlinedButton>(
+                find.widgetWithText(OutlinedButton, 'Guruh to\'lgan'),
+              )
+              .onPressed,
+          isNull,
+        );
+      },
+    );
 
-    testWidgets('a near miss says how many days differ; a full group cannot be joined', (tester) async {
-      await pumpApp(tester, cardFor(match(free: 0, matched: 0), exact: false));
-      expect(find.text('Kunlari farq qiladi: 0 / 3 kun'), findsOneWidget);
-      expect(find.text('Guruh to\'lgan'), findsOneWidget);
-      expect(tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, 'Guruh to\'lgan')).onPressed, isNull);
-    });
-
-    testWidgets('an anniversary group says each student pays on their own day', (tester) async {
-      await pumpApp(tester, cardFor(match(mode: 'student_anniversary')));
-      expect(find.textContaining('Har bir o\'quvchi guruhga qo\'shilgan kunida to\'laydi.'), findsOneWidget);
-    });
+    testWidgets(
+      'an anniversary group says each student pays on their own day',
+      (tester) async {
+        await pumpApp(tester, cardFor(match(mode: 'student_anniversary')));
+        expect(
+          find.textContaining(
+            'Har bir o\'quvchi guruhga qo\'shilgan kunida to\'laydi.',
+          ),
+          findsOneWidget,
+        );
+      },
+    );
   });
 
   group('Sinov darsiga yozish', () {
     final dates = [
-      TrialDate(startsAt: DateTime(2026, 10, 19, 10, 30), endsAt: DateTime(2026, 10, 19, 12), guestsBooked: 1, sessionFull: false, trialSessionId: 11, suggestedCapacity: 1, freeSeats: 1),
-      TrialDate(startsAt: DateTime(2026, 10, 21, 10, 30), endsAt: DateTime(2026, 10, 21, 12), guestsBooked: 0, sessionFull: false, suggestedCapacity: 1, freeSeats: 1),
-      TrialDate(startsAt: DateTime(2026, 10, 23, 10, 30), endsAt: DateTime(2026, 10, 23, 12), guestsBooked: 3, sessionFull: true, suggestedCapacity: 1, freeSeats: 1),
+      TrialDate(
+        startsAt: DateTime(2026, 10, 19, 10, 30),
+        endsAt: DateTime(2026, 10, 19, 12),
+        guestsBooked: 1,
+        sessionFull: false,
+        trialSessionId: 11,
+        suggestedCapacity: 1,
+        freeSeats: 1,
+      ),
+      TrialDate(
+        startsAt: DateTime(2026, 10, 21, 10, 30),
+        endsAt: DateTime(2026, 10, 21, 12),
+        guestsBooked: 0,
+        sessionFull: false,
+        suggestedCapacity: 1,
+        freeSeats: 1,
+      ),
+      TrialDate(
+        startsAt: DateTime(2026, 10, 23, 10, 30),
+        endsAt: DateTime(2026, 10, 23, 12),
+        guestsBooked: 3,
+        sessionFull: true,
+        suggestedCapacity: 1,
+        freeSeats: 1,
+      ),
     ];
 
     List<Override> overrides(FakeQabul q, FakeAdmissions a) => [
@@ -370,79 +363,118 @@ void main() {
       admissionsRepositoryProvider.overrideWithValue(a),
     ];
 
-    testWidgets('lists the subject\'s groups with seats, defaults to the first lesson and books into its session', (tester) async {
-      final admissions = FakeAdmissions();
-      final qabul = FakeQabul(groups: [match(), match(free: 0)], dates: dates);
-      Object? result;
-      await pumpApp(
-        tester,
-        opener((c) => showTrialBookingDialog(c, lead: lead()), onResult: (r) => result = r),
-        overrides: overrides(qabul, admissions),
+    testWidgets(
+      'lists the subject\'s groups with seats, defaults to the first lesson and books into its session',
+      (tester) async {
+        final admissions = FakeAdmissions();
+        final qabul = FakeQabul(
+          groups: [match(), match(free: 0)],
+          dates: dates,
+        );
+        Object? result;
+        await pumpApp(
+          tester,
+          opener(
+            (c) => showTrialBookingDialog(c, lead: lead()),
+            onResult: (r) => result = r,
+          ),
+          overrides: overrides(qabul, admissions),
+        );
+        await tester.tap(find.text('ochish'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Sinov darsiga yozish'), findsWidgets);
+        expect(find.text('Nodira Ismoilova'), findsOneWidget);
+        expect(find.text('So\'rov: Ingliz tili'), findsOneWidget);
+        expect(find.text('2 bo\'sh o\'rin'), findsOneWidget);
+        expect(find.text('To\'lgan'), findsWidgets);
+        expect(qabul.searches.single['subject'], 1);
+        // 19 October 2026 is a Monday, 21st a Wednesday, 23rd a Friday.
+        for (final label in ['Du, 19-okt', 'Chor, 21-okt', 'Ju, 23-okt']) {
+          expect(find.text(label), findsOneWidget, reason: label);
+        }
+        // The first lesson is picked: the text says when the client will appear on the list.
+        expect(
+          find.textContaining(
+            'davomat ro\'yxatida "sinov" belgisi bilan ko\'rinadi',
+          ),
+          findsOneWidget,
+        );
+        expect(find.textContaining('19-oktyabr'), findsOneWidget);
+
+        await tester.tap(
+          find.widgetWithText(FilledButton, 'Sinov darsiga yozish'),
+        );
+        await tester.pumpAndSettle();
+        // It joins the session already open for that lesson, with a reminder task.
+        expect(admissions.booked.single.sessionId, 11);
+        expect(admissions.booked.single.session, isNull);
+        expect(admissions.booked.single.remind, isTrue);
+        expect(result, isTrue);
+      },
+    );
+
+    testWidgets(
+      'a lesson with no session yet opens one for the group, a full one cannot be picked',
+      (tester) async {
+        final admissions = FakeAdmissions();
+        await pumpApp(
+          tester,
+          opener((c) => showTrialBookingDialog(c, lead: lead())),
+          overrides: overrides(
+            FakeQabul(groups: [match()], dates: dates),
+            admissions,
+          ),
+        );
+        await tester.tap(find.text('ochish'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.textContaining('21-okt'));
+        await tester.pump();
+        await tester.tap(find.textContaining('23-okt')); // full: ignored
+        await tester.pump();
+        await tester.tap(find.byType(Checkbox));
+        await tester.pump();
+        await tester.tap(
+          find.widgetWithText(FilledButton, 'Sinov darsiga yozish'),
+        );
+        await tester.pumpAndSettle();
+        final booked = admissions.booked.single;
+        expect(booked.sessionId, isNull);
+        expect(booked.session!.kind, 'group_lesson');
+        expect(booked.session!.groupId, 7);
+        expect(booked.session!.startsAt, DateTime(2026, 10, 21, 10, 30));
+        expect(booked.session!.capacity, 1);
+        expect(booked.remind, isFalse);
+      },
+    );
+
+    testWidgets('a refusal from the server is shown and nothing closes', (
+      tester,
+    ) async {
+      final admissions = FakeAdmissions(
+        bookError: ApiException(
+          403,
+          'Yana bir sinovni faqat egasi belgilay oladi.',
+        ),
       );
-      await tester.tap(find.text('ochish'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Sinov darsiga yozish'), findsWidgets);
-      expect(find.text('Nodira Ismoilova'), findsOneWidget);
-      expect(find.text('So\'rov: Ingliz tili'), findsOneWidget);
-      expect(find.text('2 bo\'sh o\'rin'), findsOneWidget);
-      expect(find.text('To\'lgan'), findsWidgets);
-      expect(qabul.searches.single['subject'], 1);
-      // 19 October 2026 is a Monday, 21st a Wednesday, 23rd a Friday.
-      for (final label in ['Du, 19-okt', 'Chor, 21-okt', 'Ju, 23-okt']) {
-        expect(find.text(label), findsOneWidget, reason: label);
-      }
-      // The first lesson is picked: the text says when the client will appear on the list.
-      expect(find.textContaining('davomat ro\'yxatida "sinov" belgisi bilan ko\'rinadi'), findsOneWidget);
-      expect(find.textContaining('19-oktyabr'), findsOneWidget);
-
-      await tester.tap(find.widgetWithText(FilledButton, 'Sinov darsiga yozish'));
-      await tester.pumpAndSettle();
-      // It joins the session already open for that lesson, with a reminder task.
-      expect(admissions.booked.single.sessionId, 11);
-      expect(admissions.booked.single.session, isNull);
-      expect(admissions.booked.single.remind, isTrue);
-      expect(result, isTrue);
-    });
-
-    testWidgets('a lesson with no session yet opens one for the group, a full one cannot be picked', (tester) async {
-      final admissions = FakeAdmissions();
       await pumpApp(
         tester,
         opener((c) => showTrialBookingDialog(c, lead: lead())),
-        overrides: overrides(FakeQabul(groups: [match()], dates: dates), admissions),
+        overrides: overrides(
+          FakeQabul(groups: [match()], dates: dates),
+          admissions,
+        ),
       );
       await tester.tap(find.text('ochish'));
       await tester.pumpAndSettle();
-      await tester.tap(find.textContaining('21-okt'));
-      await tester.pump();
-      await tester.tap(find.textContaining('23-okt')); // full: ignored
-      await tester.pump();
-      await tester.tap(find.byType(Checkbox));
-      await tester.pump();
-      await tester.tap(find.widgetWithText(FilledButton, 'Sinov darsiga yozish'));
-      await tester.pumpAndSettle();
-      final booked = admissions.booked.single;
-      expect(booked.sessionId, isNull);
-      expect(booked.session!.kind, 'group_lesson');
-      expect(booked.session!.groupId, 7);
-      expect(booked.session!.startsAt, DateTime(2026, 10, 21, 10, 30));
-      expect(booked.session!.capacity, 1);
-      expect(booked.remind, isFalse);
-    });
-
-    testWidgets('a refusal from the server is shown and nothing closes', (tester) async {
-      final admissions = FakeAdmissions(bookError: ApiException(403, 'Yana bir sinovni faqat egasi belgilay oladi.'));
-      await pumpApp(
-        tester,
-        opener((c) => showTrialBookingDialog(c, lead: lead())),
-        overrides: overrides(FakeQabul(groups: [match()], dates: dates), admissions),
+      await tester.tap(
+        find.widgetWithText(FilledButton, 'Sinov darsiga yozish'),
       );
-      await tester.tap(find.text('ochish'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(FilledButton, 'Sinov darsiga yozish'));
-      await tester.pumpAndSettle();
-      expect(find.text('Yana bir sinovni faqat egasi belgilay oladi.'), findsOneWidget);
+      expect(
+        find.text('Yana bir sinovni faqat egasi belgilay oladi.'),
+        findsOneWidget,
+      );
       expect(find.text('Sinov darsiga yozish'), findsWidgets);
     });
 
@@ -455,7 +487,14 @@ void main() {
       await tester.tap(find.text('ochish'));
       await tester.pumpAndSettle();
       expect(find.textContaining('faol guruh topilmadi'), findsOneWidget);
-      expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Sinov darsiga yozish')).onPressed, isNull);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Sinov darsiga yozish'),
+            )
+            .onPressed,
+        isNull,
+      );
     });
   });
 
@@ -467,8 +506,16 @@ void main() {
       tasks: const [],
     );
 
-    ({FakeAdmissions admissions, FakeEnrollments enrollments, List<Override> overrides}) setup() {
-      final admissions = FakeAdmissions(detail: detail(), groupList: [makeGroup(7, 'Beginner A'), makeGroup(8, 'Beginner B')]);
+    ({
+      FakeAdmissions admissions,
+      FakeEnrollments enrollments,
+      List<Override> overrides,
+    })
+    setup() {
+      final admissions = FakeAdmissions(
+        detail: detail(),
+        groupList: [makeGroup(7, 'Beginner A'), makeGroup(8, 'Beginner B')],
+      );
       final enrollments = FakeEnrollments();
       return (
         admissions: admissions,
@@ -480,75 +527,105 @@ void main() {
       );
     }
 
-    testWidgets('the group they tried is chosen, and both ways to charge the first month are shown', (tester) async {
-      final s = setup();
-      await pumpApp(tester, opener((c) => showAfterTrialDialog(c, lead: lead())), overrides: s.overrides);
-      await tester.tap(find.text('ochish'));
-      await tester.pumpAndSettle();
+    testWidgets(
+      'the group they tried is chosen, and both ways to charge the first month are shown',
+      (tester) async {
+        final s = setup();
+        await pumpApp(
+          tester,
+          opener((c) => showAfterTrialDialog(c, lead: lead())),
+          overrides: s.overrides,
+        );
+        await tester.tap(find.text('ochish'));
+        await tester.pumpAndSettle();
 
-      expect(find.text('Sinov darsidan keyin'), findsOneWidget);
-      expect(find.text('Sinov darsiga keldi'), findsOneWidget);
-      expect(find.text('Qaror: kutilmoqda'), findsOneWidget);
-      expect(find.text('Guruhga qo\'shish'), findsOneWidget);
-      expect(find.text('Keyinroq bog\'lanish'), findsOneWidget);
-      expect(find.text('Rad etildi'), findsOneWidget);
-      // They attended group 8, so that one is preselected.
-      expect(s.enrollments.previews, [8]);
-      expect(find.text('Qolgan kunlar bo\'yicha'), findsOneWidget);
-      expect(find.text(money(150000)), findsWidgets);
-      expect(find.text('To\'liq oy'), findsOneWidget);
-      expect(find.text(money(310000)), findsWidgets);
-      expect(find.textContaining('(15/31 kun)'), findsOneWidget);
-      expect(find.textContaining('hisob ${money(150000)} bo\'ladi'), findsOneWidget);
-    });
+        expect(find.text('Sinov darsidan keyin'), findsOneWidget);
+        expect(find.text('Sinov darsiga keldi'), findsOneWidget);
+        expect(find.text('Qaror: kutilmoqda'), findsOneWidget);
+        expect(find.text('Guruhga qo\'shish'), findsOneWidget);
+        expect(find.text('Keyinroq bog\'lanish'), findsOneWidget);
+        expect(find.text('Rad etildi'), findsOneWidget);
+        // They attended group 8, so that one is preselected.
+        expect(s.enrollments.previews, [8]);
+        expect(find.text('Qolgan kunlar bo\'yicha'), findsOneWidget);
+        expect(find.text(money(150000)), findsWidgets);
+        expect(find.text('To\'liq oy'), findsOneWidget);
+        expect(find.text(money(310000)), findsWidgets);
+        expect(find.textContaining('(15/31 kun)'), findsOneWidget);
+        expect(
+          find.textContaining('hisob ${money(150000)} bo\'ladi'),
+          findsOneWidget,
+        );
+      },
+    );
 
-    testWidgets('confirming enrolls once, with the chosen first month and the dialog\'s own key', (tester) async {
-      final s = setup();
-      String? message;
-      await pumpApp(
-        tester,
-        opener((c) => showAfterTrialDialog(c, lead: lead()), onResult: (r) => message = r as String?),
-        overrides: s.overrides,
-      );
-      await tester.tap(find.text('ochish'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('To\'liq oy'));
-      await tester.pump();
-      expect(find.textContaining('hisob ${money(310000)} bo\'ladi'), findsOneWidget);
-      await tester.tap(find.text('Tasdiqlash'));
-      await tester.pumpAndSettle();
+    testWidgets(
+      'confirming enrolls once, with the chosen first month and the dialog\'s own key',
+      (tester) async {
+        final s = setup();
+        String? message;
+        await pumpApp(
+          tester,
+          opener(
+            (c) => showAfterTrialDialog(c, lead: lead()),
+            onResult: (r) => message = r as String?,
+          ),
+          overrides: s.overrides,
+        );
+        await tester.tap(find.text('ochish'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('To\'liq oy'));
+        await tester.pump();
+        expect(
+          find.textContaining('hisob ${money(310000)} bo\'ladi'),
+          findsOneWidget,
+        );
+        await tester.tap(find.text('Tasdiqlash'));
+        await tester.pumpAndSettle();
 
-      final call = s.admissions.enrolled.single;
-      expect(call.leadId, 4);
-      expect(call.key, matches(RegExp(r'^[0-9a-f-]{36}$')));
-      expect(call.body['group_id'], 8);
-      expect(call.body['first_month'], 'full');
-      expect(call.body['full_name'], 'Nodira Ismoilova');
-      expect(call.body['phone'], '998990000026');
-      expect(call.body['joined_at'], matches(RegExp(r'^\d{4}-\d{2}-\d{2}$')));
-      expect(message, contains('Nodira Ismoilova guruhga yozildi'));
-    });
+        final call = s.admissions.enrolled.single;
+        expect(call.leadId, 4);
+        expect(call.key, matches(RegExp(r'^[0-9a-f-]{36}$')));
+        expect(call.body['group_id'], 8);
+        expect(call.body['first_month'], 'full');
+        expect(call.body['full_name'], 'Nodira Ismoilova');
+        expect(call.body['phone'], '998990000026');
+        expect(call.body['joined_at'], matches(RegExp(r'^\d{4}-\d{2}-\d{2}$')));
+        expect(message, contains('Nodira Ismoilova guruhga yozildi'));
+      },
+    );
 
-    testWidgets('"Keyinroq" calls back on the chosen day; nothing is enrolled', (tester) async {
-      final s = setup();
-      await pumpApp(tester, opener((c) => showAfterTrialDialog(c, lead: lead())), overrides: s.overrides);
-      await tester.tap(find.text('ochish'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Keyinroq bog\'lanish'));
-      await tester.pump();
-      expect(find.textContaining('Qachon eslatamiz:'), findsOneWidget);
-      await tester.tap(find.text('Tasdiqlash'));
-      await tester.pumpAndSettle();
-      expect(s.admissions.enrolled, isEmpty);
-      final call = s.admissions.stages.single;
-      expect(call.stage, 'follow_up_later');
-      expect(call.followUpAt!.hour, 10);
-      expect(call.followUpAt!.isAfter(DateTime.now()), isTrue);
-    });
+    testWidgets(
+      '"Keyinroq" calls back on the chosen day; nothing is enrolled',
+      (tester) async {
+        final s = setup();
+        await pumpApp(
+          tester,
+          opener((c) => showAfterTrialDialog(c, lead: lead())),
+          overrides: s.overrides,
+        );
+        await tester.tap(find.text('ochish'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Keyinroq bog\'lanish'));
+        await tester.pump();
+        expect(find.textContaining('Qachon eslatamiz:'), findsOneWidget);
+        await tester.tap(find.text('Tasdiqlash'));
+        await tester.pumpAndSettle();
+        expect(s.admissions.enrolled, isEmpty);
+        final call = s.admissions.stages.single;
+        expect(call.stage, 'follow_up_later');
+        expect(call.followUpAt!.hour, 10);
+        expect(call.followUpAt!.isAfter(DateTime.now()), isTrue);
+      },
+    );
 
     testWidgets('"Rad etildi" needs a reason first', (tester) async {
       final s = setup();
-      await pumpApp(tester, opener((c) => showAfterTrialDialog(c, lead: lead())), overrides: s.overrides);
+      await pumpApp(
+        tester,
+        opener((c) => showAfterTrialDialog(c, lead: lead())),
+        overrides: s.overrides,
+      );
       await tester.tap(find.text('ochish'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Rad etildi'));
@@ -558,7 +635,10 @@ void main() {
       expect(find.text('Sababini yozing.'), findsOneWidget);
       expect(s.admissions.stages, isEmpty);
 
-      await tester.enterText(find.widgetWithText(TextField, 'Rad etish sababi'), 'Narx qimmat');
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Rad etish sababi'),
+        'Narx qimmat',
+      );
       await tester.tap(find.text('Tasdiqlash'));
       await tester.pumpAndSettle();
       final call = s.admissions.stages.single;
@@ -566,20 +646,30 @@ void main() {
       expect(s.admissions.enrolled, isEmpty);
     });
 
-    testWidgets('without a trial it is just "Guruhga qo\'shish" -- no outcome list', (tester) async {
-      final s = setup();
-      await pumpApp(
-        tester,
-        opener((c) => showAfterTrialDialog(c, lead: lead(), afterTrial: false, groupId: 7)),
-        overrides: s.overrides,
-      );
-      await tester.tap(find.text('ochish'));
-      await tester.pumpAndSettle();
-      expect(find.text('Keyinroq bog\'lanish'), findsNothing);
-      expect(find.text('Rad etildi'), findsNothing);
-      expect(find.text('Sinov darsiga keldi'), findsNothing);
-      expect(s.enrollments.previews, [7]);
-      expect(find.text('Tasdiqlash'), findsOneWidget);
-    });
+    testWidgets(
+      'without a trial it is just "Guruhga qo\'shish" -- no outcome list',
+      (tester) async {
+        final s = setup();
+        await pumpApp(
+          tester,
+          opener(
+            (c) => showAfterTrialDialog(
+              c,
+              lead: lead(),
+              afterTrial: false,
+              groupId: 7,
+            ),
+          ),
+          overrides: s.overrides,
+        );
+        await tester.tap(find.text('ochish'));
+        await tester.pumpAndSettle();
+        expect(find.text('Keyinroq bog\'lanish'), findsNothing);
+        expect(find.text('Rad etildi'), findsNothing);
+        expect(find.text('Sinov darsiga keldi'), findsNothing);
+        expect(s.enrollments.previews, [7]);
+        expect(find.text('Tasdiqlash'), findsOneWidget);
+      },
+    );
   });
 }

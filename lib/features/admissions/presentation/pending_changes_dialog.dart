@@ -33,7 +33,11 @@ class _PendingChangesState extends ConsumerState<_PendingChanges> {
   Future<void> _act(Future<void> Function() action) async {
     await action();
     refreshAdmissions(ref);
-    if (mounted) setState(() => _items = _load());
+    if (mounted) {
+      setState(() {
+        _items = _load();
+      });
+    }
   }
 
   @override

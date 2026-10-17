@@ -72,7 +72,9 @@ class AppSidebar extends StatelessWidget {
                         _NavItem(
                           destination: d,
                           selected: d == selected,
-                          count: counts[d],
+                          // Qabul is deliberately number-free: no badge, whatever
+                          // is passed in.
+                          count: d == Destination.admissions ? null : counts[d],
                           compact: compact,
                           onTap: () => onSelect(d),
                         ),

@@ -279,7 +279,11 @@ class _GroupsTabState extends ConsumerState<_GroupsTab> {
                   ),
                 ),
                 4 => Text(CurrencyFormatter.format(group.feeAmount)),
-                5 => Text(group.isAnniversary ? 'o\'quvchining kuni' : 'har oy ${group.billingDay}-sana'),
+                5 => Text(
+                  group.isAnniversary
+                      ? 'o\'quvchining kuni'
+                      : 'har oy ${group.billingDay}-sana',
+                ),
                 6 => Text('${group.studentCount ?? 0}'),
                 _ => Row(
                   mainAxisSize: MainAxisSize.min,

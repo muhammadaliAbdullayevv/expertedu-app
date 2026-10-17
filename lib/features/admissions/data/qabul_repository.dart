@@ -10,27 +10,13 @@ final qabulRepositoryProvider = Provider<QabulRepository>((ref) {
   return QabulRepository(ref.watch(apiClientProvider));
 });
 
-String _day(DateTime d) =>
-    '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-
-/// Online-only reads for the Qabul board, the course finder and the shared
-/// counts. Every number comes from the server's one definition
-/// (server/app/funnel.py); nothing here counts anything.
+/// Online-only reads for Qabul's group picker and the course finder, and the
+/// shared counts the sidebar and O'quvchilar show (from the server's one
+/// definition, server/app/funnel.py -- nothing here counts anything).
 class QabulRepository {
   QabulRepository(this._api);
 
   final ApiClient _api;
-
-  Future<AdmissionsBoard> board({DateTime? from, DateTime? to}) async {
-    final json = await _api.get(
-      '/admissions/board',
-      query: {
-        if (from != null) 'date_from': _day(from),
-        if (to != null) 'date_to': _day(to),
-      },
-    );
-    return AdmissionsBoard.fromJson(json as Map<String, dynamic>);
-  }
 
   Future<GroupSearchResult> searchGroups({
     int? subjectId,

@@ -77,5 +77,6 @@ class AppStrings {
   String get retry => 'Qayta urinish';
   String get comingSoon => 'Tez orada';
   String get phoneNotReadyTitle => 'Bu bo\'lim telefon uchun hali tayyor emas';
-  String get phoneNotReadyBody => 'Uni kompyuterda oching. Telefon uchun qulay ko\'rinish keyingi yangilanishlarda qo\'shiladi.';
+  String get phoneNotReadyBody =>
+      'Uni kompyuterda oching. Telefon uchun qulay ko\'rinish keyingi yangilanishlarda qo\'shiladi.';
 }

@@ -125,6 +125,10 @@ class AdmissionsRepository {
     String scope = 'open',
     String? query,
     int? assignedTo,
+    int? groupId,
+    bool groupless = false,
+    bool withTrial = false,
+    bool archive = false,
     int limit = 500,
   }) async {
     final params = <String, String>{
@@ -132,6 +136,10 @@ class AdmissionsRepository {
       'limit': '$limit',
       if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
       if (assignedTo != null) 'assigned_to': '$assignedTo',
+      if (groupId != null) 'group_id': '$groupId',
+      if (groupless) 'groupless': 'true',
+      if (withTrial) 'with_trial': 'true',
+      if (archive) 'archive': 'true',
     };
     // Only the unfiltered lists are worth keeping for offline use.
     final cacheable = params.length == 2;
@@ -162,6 +170,8 @@ class AdmissionsRepository {
       subjectId: body['subject_id'] as int?,
       subjectName: item.payload['subject_name'] as String?,
       source: body['source'] as String?,
+      groupId: body['group_id'] as int?,
+      groupName: item.payload['group_name'] as String?,
       stage: LeadStage.newLead,
       assignedTo: body['assigned_to'] as int?,
       version: 0,

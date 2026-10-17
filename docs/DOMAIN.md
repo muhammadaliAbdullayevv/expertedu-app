@@ -83,11 +83,35 @@ A payout is checked under a per-teacher lock, so two payouts at once cannot both
 
 A trial is free: **no charge, no debt**, and a trial person never appears in O'quvchilar. **One trial per person** (the same phone, across subjects); the limit is a setting (`app_settings.trial_limit_per_person`, default 1). Only the owner can book another, and it is written to the audit log (`extra_trial`). A trial that was cancelled, moved or missed does not use up the free one; moving a booking is not a new trial.
 
-## 3. Qabul: stages, counts and the course finder
+## 3. Qabul: two views, no numbers
+
+Qabul is one page with a segmented button: **Yangi qo'shish** (default, a fast form) and **Ro'yxat**. It shows **no stats, counters, stages or badges** (and the sidebar's Qabul item has no badge — the sidebar widget ignores a count for it even if one is passed). Speed is the priority. Reference: `docs/v2-design/02` (form), `03` (list), `04` (O'quvchi qilish dialog), `05` (Kurs qidirish).
+
+### The fast form
+
+- Fields: name, phone (`+998` prefix, masked `90 123 45 67`), group, optional free trial date, note. Tab order name → phone → group → trial → note; **Enter saves from anywhere**; the cursor starts in the name; arrow keys choose the group and the trial date.
+- **Group picker**: every active group with free seats, filtered by subject and by day pattern (Du Chor Ju / Se Pay Sha); **"guruhsiz"** (no group) is the first row and the default. A choice hidden by a filter is dropped, never kept invisibly. "Batafsil qidirish" opens the full course finder.
+- **Trial**: "Sinovsiz" or one of the group's next three lessons. A free guest seat at that lesson; no charge; one trial per person (a second only by the owner).
+- **Save without waiting**: the typed values go into the local queue first (milliseconds, no network), the form clears at once and the cursor returns to the name; the queue sends in the background and retries if the internet fails. Every send carries the same `client_id` + `Idempotency-Key`, so the person is never saved twice. If the local write itself fails, the typed text stays. A refusal from the server (full trial, second trial) is shown in red and kept in the queue with its reason.
+- **Qaytarish** (short notice after each save, no confirmation dialogs): drops the save if it was not sent yet; otherwise `POST /leads/undo {client_id}` archives the lead that save created (reason "Qaytarildi", its trial cancelled). A save that was folded into an older open request created nothing, so undo leaves that request alone. Nothing is deleted. Undo puts the person back in the form unless the next one is already being typed.
+- A saved person is **a lead, not a student**: no student row, no seat, no charge, no debt (`leads.group_id` is only the group offered).
+
+`POST /leads` takes `group_id`, `trial_starts_at` (one of that group's next lessons) and `remind`, all in one transaction: a refused trial saves no lead. A known phone with an open request for the same subject is added to it (`on_duplicate: merge`), with the new group.
+
+### The list
+
+Search (name or phone), filters **Guruh** (one group), **Guruhsiz**, **Sinov belgilangan**, **Arxiv**, and per row **Sinov darsi**, **O'quvchi qilish**, **⋯ → Arxiv**. Archive = the closed stages (`not_interested`, `unreachable`); archiving asks nothing and offers "Qaytarish"; the archive view offers "Qayta ochish". People saved offline and not yet sent are listed first as "Yuborilmagan". `GET /leads` takes `group_id`, `groupless`, `with_trial`, `archive`.
+
+**O'quvchi qilish** (mockup 04): group and monthly price, start date (Bugun / Keyingi dars / any date), "Birinchi hisob" worked out by the **group's own rule** (no per-student choice), optional "Birinchi to'lovni hozir qabul qilish" (amount = what is due, method Naqd/Karta/Click-Payme). One idempotency key per dialog: pressing twice enrolls once.
+
+### Stages and counts (still in the backend)
+
+Not shown on Qabul, but the model is unchanged and Bugun/O'quvchilar still use it. The app keeps nine lead stages and `server/app/funnel.py` is the only code that counts leads or students (`/admissions/board` is no longer used by the app).
+
 
 ### Stages — one grouping, built
 
-The app keeps nine lead stages; people see seven (V2 names). The grouping lives in one place, `server/app/funnel.py` (`STAGE_TO_V2`), and the board, the report, Bugun and the sidebar all use it:
+The app keeps nine lead stages; the V2 names group them as below. The grouping lives in one place, `server/app/funnel.py` (`STAGE_TO_V2`), and the board, the report, Bugun and the sidebar all use it:
 
 | People see | Stored stages |
 |---|---|

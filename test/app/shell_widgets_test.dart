@@ -93,8 +93,9 @@ void main() {
       ]) {
         expect(find.text(label), findsOneWidget, reason: label);
       }
-      expect(find.text('4'), findsOneWidget);
       expect(find.text('125'), findsOneWidget);
+      // Qabul never shows a number, even when one is passed in.
+      expect(find.text('4'), findsNothing);
       expect(find.text('MK'), findsOneWidget);
       expect(find.text('Madina Karimova'), findsOneWidget);
       expect(find.text('Egasi'), findsOneWidget);

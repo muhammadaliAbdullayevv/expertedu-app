@@ -143,10 +143,22 @@ String percent(double? rate) {
   return '${(rate * 100).toStringAsFixed(rate < 0.1 ? 1 : 0)}%';
 }
 
-void showSnack(BuildContext context, String message) {
+void showSnack(
+  BuildContext context,
+  String message, {
+  String? actionLabel,
+  VoidCallback? onAction,
+}) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text(message)));
+    ..showSnackBar(
+      SnackBar(
+        content: Text(message),
+        action: actionLabel == null
+            ? null
+            : SnackBarAction(label: actionLabel, onPressed: onAction ?? () {}),
+      ),
+    );
 }
 
 /// A dialog's header row: title and a close button.
