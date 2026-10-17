@@ -46,8 +46,8 @@ async def counts(pool) -> dict:
         """
         select (select count(*) from students) as students,
                (select count(*) from enrollments) as enrollments,
-               (select count(*) from transactions where kind = 'charge') as charges,
-               (select count(*) from transactions where kind = 'payment') as payments,
+               (select count(*) from charges) as charges,
+               (select count(*) from payments) as payments,
                (select count(*) from leads) as leads,
                (select count(*) from trial_bookings) as bookings
         """

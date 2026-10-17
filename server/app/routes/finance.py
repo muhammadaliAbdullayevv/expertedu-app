@@ -5,11 +5,12 @@ is an expense in the 'salary' category; profit is income minus expenses.
 All months are the center's calendar months."""
 
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from .. import clock, db
+from ..money import service as money
 from ..config import settings
 from ..deps import CurrentUser, require_owner
 from ..schemas import (
@@ -42,12 +43,6 @@ def _month_start(value: date) -> date:
 
 def _next_month(value: date) -> date:
     return date(value.year + value.month // 12, value.month % 12 + 1, 1)
-
-
-def _share(collected: int, percent: Decimal | None) -> int:
-    if percent is None:
-        return 0
-    return int((Decimal(collected) * percent / 100).quantize(Decimal(1), rounding=ROUND_HALF_UP))
 
 
 # --- Expenses --------------------------------------------------------------------
@@ -91,6 +86,17 @@ async def create_expense(payload: CreateExpenseRequest, user: CurrentUser = Depe
     async with db.pool().acquire() as conn:
         if teacher_id is not None and not await conn.fetchval("select 1 from teachers where id = $1", teacher_id):
             raise HTTPException(status.HTTP_404_NOT_FOUND, "O'qituvchi topilmadi.")
+        if payload.category == "salary":
+            # A salary payout is a payout and its expense row, made together.
+            expense_id = (
+                await money.record_payout(
+                    conn, teacher_id=teacher_id, month=salary_month, amount=payload.amount,
+                    paid_on=payload.spent_on, method=payload.method, note=(payload.note or "").strip() or None,
+                    user_id=user.id,
+                )
+            )["expense_id"]
+            row = await conn.fetchrow(f"{_EXPENSE_SELECT} where x.id = $1", expense_id)
+            return Expense(**row)
         expense_id = await conn.fetchval(
             """
             insert into expenses (category, amount, spent_on, note, method, teacher_id, salary_month, created_by)
@@ -127,6 +133,9 @@ async def void_expense(expense_id: int, payload: VoidExpenseRequest, user: Curre
             user.id,
             reason,
         )
+        if updated is not None:
+            await money.void_payout_for_expense(conn, expense_id, reason, user.id)
+            await money.audit(conn, user.id, "expense", expense_id, "void", reason=reason)
         row = await conn.fetchrow(f"{_EXPENSE_SELECT} where x.id = $1", expense_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Xarajat topilmadi.")
@@ -139,79 +148,43 @@ async def void_expense(expense_id: int, payload: VoidExpenseRequest, user: Curre
 
 
 @router.put("/finance/teachers/{teacher_id}/percent", response_model=TeacherSalary)
-async def set_salary_percent(teacher_id: int, payload: SetSalaryPercentRequest):
-    percent = payload.salary_percent
-    if percent is not None and not 0 <= percent <= 100:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Foiz 0 dan 100 gacha bo'lsin.")
+async def set_salary_percent(
+    teacher_id: int, payload: SetSalaryPercentRequest, user: CurrentUser = Depends(require_owner)
+):
+    percent = None if payload.salary_percent is None else Decimal(str(payload.salary_percent))
     async with db.pool().acquire() as conn:
-        updated = await conn.fetchval(
-            "update teachers set salary_percent = $2 where id = $1 returning id",
-            teacher_id,
-            None if percent is None else Decimal(str(percent)),
-        )
-        if updated is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "O'qituvchi topilmadi.")
+        await money.set_teacher_percent(conn, teacher_id, percent, user.id)
         month = await _salary_month(conn, _month_start(clock.today()))
     return next(t for t in month.teachers if t.teacher_id == teacher_id)
 
 
+@router.put("/finance/groups/{group_id}/percent", status_code=status.HTTP_204_NO_CONTENT)
+async def set_group_salary_percent(
+    group_id: int, payload: SetSalaryPercentRequest, user: CurrentUser = Depends(require_owner)
+):
+    """This group's own percent, instead of its teacher's (null = the teacher's)."""
+    percent = None if payload.salary_percent is None else Decimal(str(payload.salary_percent))
+    async with db.pool().acquire() as conn:
+        await money.set_group_percent(conn, group_id, percent, user.id)
+
+
 async def _salary_month(conn, month: date) -> SalaryMonth:
-    rows = await conn.fetch(
-        """
-        with collected as (
-          select teacher_id, sum(amount) as collected
-          from transactions
-          where kind = 'payment' and teacher_id is not null
-            and (occurred_at at time zone $1)::date >= $2 and (occurred_at at time zone $1)::date < $3
-          group by teacher_id
-        ), paid as (
-          select teacher_id, sum(amount) as paid
-          from expenses
-          where category = 'salary' and voided_at is null and salary_month = $2
-          group by teacher_id
-        )
-        select t.id as teacher_id, t.full_name, t.is_active, t.salary_percent,
-               coalesce(c.collected, 0) as collected, coalesce(p.paid, 0) as paid
-        from teachers t
-        left join collected c on c.teacher_id = t.id
-        left join paid p on p.teacher_id = t.id
-        where t.is_active or c.collected is not null or p.paid is not null
-        order by t.full_name
-        """,
-        settings.center_timezone,
-        month,
-        _next_month(month),
-    )
-    teachers = []
-    for row in rows:
-        earned = _share(row["collected"], row["salary_percent"])
-        teachers.append(
-            TeacherSalary(
-                teacher_id=row["teacher_id"],
-                full_name=row["full_name"],
-                is_active=row["is_active"],
-                salary_percent=None if row["salary_percent"] is None else float(row["salary_percent"]),
-                collected=row["collected"],
-                earned=earned,
-                paid=row["paid"],
-                remaining=earned - row["paid"],
-            )
-        )
-    return SalaryMonth(
-        month=month,
-        teachers=teachers,
-        total_earned=sum(t.earned for t in teachers),
-        total_paid=sum(t.paid for t in teachers),
-        total_remaining=sum(t.remaining for t in teachers),
-    )
+    return SalaryMonth(**await money.salary_month(conn, month))
 
 
 @router.get("/finance/salaries", response_model=SalaryMonth)
 async def salaries(month: date | None = None):
-    """Each teacher's share of their groups' payments in the month (any
-    day of it), and what's been paid out for that month."""
+    """Each teacher's share of what their students paid in the month (any
+    day of it), per student, and what has been paid out for that month."""
     async with db.pool().acquire() as conn:
         return await _salary_month(conn, _month_start(month or clock.today()))
+
+
+@router.post("/finance/salaries/close", response_model=SalaryMonth)
+async def close_salary_month(month: date, user: CurrentUser = Depends(require_owner)):
+    """"Oyni yopish": freezes the month so later changes can't alter it."""
+    async with db.pool().acquire() as conn:
+        return SalaryMonth(**await money.close_month(conn, month, user.id))
 
 
 # --- Summary ------------------------------------------------------------------------
@@ -229,9 +202,10 @@ async def finance_summary(months: int = Query(default=6, ge=1, le=24)):
     async with db.pool().acquire() as conn:
         income_rows = await conn.fetch(
             """
-            select date_trunc('month', occurred_at at time zone $1)::date as month, sum(amount) as amount
-            from transactions
-            where kind = 'payment' and (occurred_at at time zone $1)::date >= $2
+            select date_trunc('month', received_at at time zone $1)::date as month,
+                   sum(case when kind = 'payment' then amount else -amount end)::bigint as amount
+            from payments
+            where (received_at at time zone $1)::date >= $2
             group by 1
             """,
             tz,

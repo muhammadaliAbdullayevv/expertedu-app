@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 from .. import admissions, db, idempotency
 from ..deps import CurrentUser, get_current_user
+from ..money import service as money
 from ..phone import is_valid_uzbek_phone, normalize
 from ..schemas import (
     ChangeLeadStageRequest,
@@ -499,15 +500,13 @@ async def enroll_lead(
             discount_value=payload.discount_value,
         )
         if first_payment:
-            await conn.execute(
-                """
-                insert into transactions (enrollment_id, kind, amount, source, method, created_by)
-                values ($1, 'payment', $2, 'manual', $3, $4)
-                """,
-                enrollment["id"],
-                first_payment,
-                payload.first_payment_method,
-                user.id,
+            await money.record_payment(
+                conn,
+                student_id=student["id"],
+                enrollment_id=enrollment["id"],
+                amount=first_payment,
+                method=payload.first_payment_method,
+                user_id=user.id,
             )
 
         # Whatever was still pending for the prospect is done now.

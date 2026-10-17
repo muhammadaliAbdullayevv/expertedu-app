@@ -3,6 +3,7 @@ from datetime import date
 from fastapi import APIRouter, Depends
 
 from .. import admissions, clock, db
+from ..money import service as money
 from ..config import settings
 from ..deps import get_current_user
 from ..schemas import DashboardSummary, MonthlyRevenue, RecentPayment, TrialToday
@@ -38,10 +39,8 @@ async def get_dashboard():
               (select count(distinct student_id) from enrollments where status = 'active') as active_students,
               (select count(*) from students where (created_at at time zone $1)::date >= $2) as new_students_this_month,
               (select count(*) from groups where is_active) as active_groups,
-              (select coalesce(sum(amount), 0) from transactions
-                where kind = 'payment' and (occurred_at at time zone $1)::date >= $2) as collected_this_month,
-              (select coalesce(sum(g.fee_amount), 0) from enrollments e
-                join groups g on g.id = e.group_id where e.status = 'active') as monthly_plan
+              (select coalesce(sum(case when kind = 'payment' then amount else -amount end), 0) from payments
+                where (received_at at time zone $1)::date >= $2) as collected_this_month
             """,
             tz,
             month_start,
@@ -49,17 +48,11 @@ async def get_dashboard():
 
         debt = await conn.fetchrow(
             """
-            with balances as (
-              select e.student_id,
-                     sum(case when t.kind = 'charge' then t.amount else -t.amount end) as balance
-              from enrollments e
-              join transactions t on t.enrollment_id = e.id
-              group by e.id
-            )
-            select coalesce(sum(balance), 0) as total_debt, count(distinct student_id) as debtor_count
-            from balances where balance > 0
+            select coalesce(sum(owed), 0)::bigint as total_debt, count(distinct student_id) as debtor_count
+            from enrollment_balances where owed > 0
             """
         )
+        monthly_plan = await money.monthly_plan(conn, month_start)
 
         leads = await conn.fetchrow(
             """
@@ -77,10 +70,10 @@ async def get_dashboard():
         # charge dated today, but that's a new student joining, not a due day.
         due_today = await conn.fetchrow(
             """
-            select count(*) as due_today_count, coalesce(sum(t.amount), 0) as due_today_amount
-            from transactions t
-            join enrollments e on e.id = t.enrollment_id
-            where t.kind = 'charge' and t.due_date = $1 and e.joined_at < $1
+            select count(*) as due_today_count, coalesce(sum(c.amount), 0)::bigint as due_today_amount
+            from charges c
+            join enrollments e on e.id = c.enrollment_id
+            where c.status = 'active' and c.due_date = $1 and e.joined_at < $1
             """,
             today,
         )
@@ -101,9 +94,10 @@ async def get_dashboard():
 
         revenue_rows = await conn.fetch(
             """
-            select date_trunc('month', occurred_at at time zone $1)::date as month, sum(amount) as amount
-            from transactions
-            where kind = 'payment' and (occurred_at at time zone $1)::date >= $2
+            select date_trunc('month', received_at at time zone $1)::date as month,
+                   sum(case when kind = 'payment' then amount else -amount end)::bigint as amount
+            from payments
+            where (received_at at time zone $1)::date >= $2
             group by 1
             """,
             tz,
@@ -112,14 +106,15 @@ async def get_dashboard():
 
         recent = await conn.fetch(
             """
-            select t.id, t.enrollment_id, s.full_name as student_full_name, g.name as group_name,
-                   t.amount, t.occurred_at
-            from transactions t
-            join enrollments e on e.id = t.enrollment_id
-            join students s on s.id = e.student_id
+            select p.id, e.id as enrollment_id, s.full_name as student_full_name, g.name as group_name,
+                   p.amount, p.received_at as occurred_at
+            from payments p
+            join students s on s.id = p.student_id
+            join enrollments e on e.id = coalesce(p.enrollment_id,
+                                                  (select min(id) from enrollments where student_id = p.student_id))
             join groups g on g.id = e.group_id
-            where t.kind = 'payment'
-            order by t.occurred_at desc
+            where p.kind = 'payment' and p.status = 'valid'
+            order by p.received_at desc
             limit $1
             """,
             _RECENT_PAYMENTS,
@@ -129,6 +124,7 @@ async def get_dashboard():
     return DashboardSummary(
         today=today,
         **counts,
+        monthly_plan=monthly_plan,
         **debt,
         **leads,
         **due_today,

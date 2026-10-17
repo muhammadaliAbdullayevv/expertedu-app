@@ -14,16 +14,13 @@ from ..schemas import (
     StudentListItem,
     UpdateStudentRequest,
 )
+from ..money import service as money
 from .enrollments import enroll
 
 router = APIRouter(prefix="/students", tags=["students"], dependencies=[Depends(get_current_user)])
 
-_BALANCE_EXPR = """
-coalesce(sum(case when t.kind = 'charge' then t.amount when t.kind = 'payment' then -t.amount else 0 end), 0)
-"""
-
 HEARD_FROM = ("instagram", "telegram", "referral", "walk_in", "other")
-PAYMENT_METHODS = ("cash", "card", "click_payme")
+PAYMENT_METHODS = money.PAYMENT_METHODS
 
 
 def valid_phone(raw: str | None, label: str = "Telefon") -> str:
@@ -92,12 +89,10 @@ async def list_students(q: str | None = None):
     args = [f"%{q.strip()}%"] if q else []
     rows = await db.pool().fetch(
         f"""
-        select s.*, {_BALANCE_EXPR} as balance
+        select s.*, -sb.balance as balance
         from students s
-        left join enrollments e on e.student_id = s.id
-        left join transactions t on t.enrollment_id = e.id
+        join student_balances sb on sb.student_id = s.id
         {where}
-        group by s.id
         order by s.full_name asc
         """,
         *args,
@@ -192,15 +187,13 @@ async def create_student_with_enrollment(
                     discount_value=payload.discount_value,
                 )
                 if first_payment:
-                    await conn.execute(
-                        """
-                        insert into transactions (enrollment_id, kind, amount, source, method, created_by)
-                        values ($1, 'payment', $2, 'manual', $3, $4)
-                        """,
-                        enrollment["id"],
-                        first_payment,
-                        payload.first_payment_method,
-                        user.id,
+                    await money.record_payment(
+                        conn,
+                        student_id=student["id"],
+                        enrollment_id=enrollment["id"],
+                        amount=first_payment,
+                        method=payload.first_payment_method,
+                        user_id=user.id,
                     )
         except asyncpg.UniqueViolationError:
             raise duplicate_phone_error(await phone_owner(conn, phone))

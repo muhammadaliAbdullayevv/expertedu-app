@@ -206,6 +206,13 @@ class StudentEnrollment(BaseModel):
 class CreatePaymentRequest(BaseModel):
     amount: int
     note: str | None = None
+    # 'cash' | 'card' | 'click_payme'. Builds from before methods were
+    # recorded send none; those payments count as cash.
+    method: str | None = None
+
+
+class ReasonRequest(BaseModel):
+    reason: str
 
 
 class Transaction(BaseModel):
@@ -221,6 +228,10 @@ class Transaction(BaseModel):
     # Payments only; null for every payment recorded before methods existed.
     method: str | None = None
     occurred_at: datetime
+    # 'active'/'cancelled' for charges, 'valid'/'cancelled' for payments.
+    status: str = "active"
+    receipt_no: str | None = None
+    reason: str | None = None
 
 
 class CreateInquiryRequest(BaseModel):
@@ -265,6 +276,10 @@ class Debtor(BaseModel):
     status: str
     balance: int
     oldest_unpaid_due: date | None
+    # Days past the oldest unpaid charge's due date, and its bucket
+    # ("0-7", "8-30", "30+").
+    days_overdue: int = 0
+    age_bucket: str | None = None
 
 
 class TrialToday(BaseModel):
@@ -326,7 +341,7 @@ class CreateStudentWithEnrollmentRequest(BaseModel):
     # 'prorated' (pay only for the days left in the current period) or
     # 'full' (a whole month's fee for it). Ignored when joined_at is the
     # group's due day itself -- both come to the full fee then.
-    first_month: str = "prorated"
+    first_month: str | None = None
     discount_kind: str | None = None
     discount_value: int | None = None
     parent_phone: str | None = None
@@ -627,7 +642,7 @@ class EnrollLeadRequest(BaseModel):
     note: str | None = None
     group_id: int
     joined_at: date
-    first_month: str = "prorated"
+    first_month: str | None = None
     discount_kind: str | None = None
     discount_value: int | None = None
     first_payment_amount: int | None = None
@@ -860,6 +875,16 @@ class SetSalaryPercentRequest(BaseModel):
     salary_percent: float | None
 
 
+class SalaryLine(BaseModel):
+    student_id: int | None
+    student_name: str
+    group_id: int | None
+    group_name: str
+    collected: int
+    percent: float | None
+    share: int
+
+
 class TeacherSalary(BaseModel):
     """One teacher's month: what their groups' students paid, their share
     of it, and what has been paid out to them for that month."""
@@ -872,10 +897,14 @@ class TeacherSalary(BaseModel):
     earned: int
     paid: int
     remaining: int
+    # Who paid, how much, and the teacher's share -- one row per student and group.
+    lines: list[SalaryLine] = []
 
 
 class SalaryMonth(BaseModel):
     month: date
+    # A closed month is a frozen snapshot ("Oyni yopish").
+    closed: bool = False
     teachers: list[TeacherSalary]
     total_earned: int
     total_paid: int

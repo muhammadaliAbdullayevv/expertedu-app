@@ -2,19 +2,14 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from .. import billing, clock, db
+from .. import clock, db
+from ..money import rules, service as money
 from ..deps import CurrentUser, get_current_user
 from ..schemas import CreateEnrollmentRequest, Enrollment, FirstChargePreview, StudentEnrollment
 
 router = APIRouter(prefix="/enrollments", tags=["enrollments"], dependencies=[Depends(get_current_user)])
 
-_BALANCE_EXPR = """
-coalesce(sum(case when t.kind = 'charge' then t.amount when t.kind = 'payment' then -t.amount else 0 end), 0)
-"""
-
-
 _DISCOUNT_KINDS = ("amount", "percent")
-_FIRST_MONTH_OPTIONS = ("prorated", "full")
 
 
 def validate_discount(kind: str | None, value: int | None, fee_amount: int) -> tuple[str | None, int | None]:
@@ -43,7 +38,7 @@ async def enroll(
     group_id: int,
     joined_at: date,
     created_by: int,
-    first_month: str = "prorated",
+    first_month: str | None = None,
     discount_kind: str | None = None,
     discount_value: int | None = None,
 ) -> tuple[dict, int]:
@@ -55,8 +50,6 @@ async def enroll(
     group = await conn.fetchrow("select * from groups where id = $1 for update", group_id)
     if group is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
-    if first_month not in _FIRST_MONTH_OPTIONS:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Birinchi oy turi noto'g'ri.")
 
     existing = await conn.fetchval(
         "select 1 from enrollments where student_id = $1 and group_id = $2 and status = 'active'",
@@ -74,13 +67,6 @@ async def enroll(
             raise HTTPException(status.HTTP_409_CONFLICT, f"Guruh to'lgan ({taken}/{group['capacity']}).")
 
     discount_kind, discount_value = validate_discount(discount_kind, discount_value, group["fee_amount"])
-    fee = billing.discounted_fee(group["fee_amount"], discount_kind, discount_value)
-    amount, is_prorated = billing.first_charge_for_enrollment(
-        fee_amount=fee, due_day=group["due_day"], joined_at=joined_at
-    )
-    if first_month == "full":
-        amount, is_prorated = fee, False
-
     row = await conn.fetchrow(
         """
         insert into enrollments (student_id, group_id, joined_at, discount_kind, discount_value, created_by)
@@ -94,18 +80,7 @@ async def enroll(
         discount_value,
         created_by,
     )
-    await conn.execute(
-        """
-        insert into transactions
-            (enrollment_id, kind, amount, period_start, due_date, is_prorated, source, created_by)
-        values ($1, 'charge', $2, $3, $3, $4, 'auto_recurring', $5)
-        """,
-        row["id"],
-        amount,
-        joined_at,
-        is_prorated,
-        created_by,
-    )
+    amount = await money.issue_first_charge(conn, dict(row), dict(group), created_by, first_month)
     return row, amount
 
 
@@ -140,9 +115,10 @@ async def first_charge_preview(
     if group is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
     kind, value = validate_discount(discount_kind, discount_value, group["fee_amount"])
-    fee = billing.discounted_fee(group["fee_amount"], kind, value)
-    start, end = billing.first_period(group["due_day"], joined_at)
-    prorated, is_prorated = billing.first_charge_for_enrollment(fee, group["due_day"], joined_at)
+    fee = rules.discounted_fee(group["fee_amount"], kind, value)
+    start = rules.month_start(joined_at)
+    end = rules.next_month(start)
+    prorated, is_prorated = rules.first_month_charge(fee, joined_at, "prorated")
     return FirstChargePreview(
         monthly_fee=group["fee_amount"],
         discounted_fee=fee,
@@ -157,7 +133,7 @@ async def first_charge_preview(
 
 
 @router.post("/{enrollment_id}/withdraw", response_model=Enrollment)
-async def withdraw_enrollment(enrollment_id: int):
+async def withdraw_enrollment(enrollment_id: int, user: CurrentUser = Depends(get_current_user)):
     existing = await db.pool().fetchrow("select * from enrollments where id = $1", enrollment_id)
     if existing is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Yozilish topilmadi.")
@@ -176,34 +152,24 @@ async def withdraw_enrollment(enrollment_id: int):
                 enrollment_id,
                 ended_at,
             )
-            # Same rule the recurring-charge job follows: a period starting
-            # on or after the withdrawal date isn't owed. Only today's charge
-            # can match -- the job never charges ahead of time -- e.g. the
-            # job already billed this morning's due day before the student
-            # came in to quit.
-            await conn.execute(
-                """
-                delete from transactions
-                where enrollment_id = $1 and kind = 'charge' and source = 'auto_recurring'
-                  and due_date >= $2
-                """,
-                enrollment_id,
-                ended_at,
-            )
+            # Months after the one they left in aren't owed -- cancelled with
+            # a reason (never deleted), so the history still explains itself.
+            await money.cancel_charges_after(conn, enrollment_id, ended_at, "O'quvchi guruhdan chiqdi", user.id)
     return Enrollment(**row)
 
 
 @router.get("/by-student/{student_id}", response_model=list[StudentEnrollment])
 async def list_student_enrollments(student_id: int):
+    """`balance` is what this enrollment still owes (never negative); a
+    student's credit lives on the student, see money.student_balance."""
     rows = await db.pool().fetch(
-        f"""
+        """
         select e.id as enrollment_id, e.group_id, g.name as group_name, e.joined_at, e.status,
-               {_BALANCE_EXPR} as balance
+               eb.owed as balance
         from enrollments e
         join groups g on g.id = e.group_id
-        left join transactions t on t.enrollment_id = e.id
+        join enrollment_balances eb on eb.enrollment_id = e.id
         where e.student_id = $1
-        group by e.id, g.name
         order by e.joined_at desc
         """,
         student_id,

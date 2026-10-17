@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<title>Telefon: to'lov qabul qilish</title>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+*{box-sizing:border-box}
+.nv{display:flex;align-items:center;gap:11px;height:40px;padding:0 12px;border-radius:9px;color:#44444C;font-size:14px;font-weight:500;text-decoration:none}
+.nv:hover{background:#EFEFEC}
+.nv.on{background:#EFEDFD;color:#3B2FA8;font-weight:700}
+.nv em{margin-left:auto;font-style:normal;font-size:12px;font-weight:700;background:#E8E8E4;color:#44444C;border-radius:10px;padding:1px 8px}
+.nv.on em{background:#fff;color:#3B2FA8}
+.sec{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#62626B;padding:14px 12px 6px}
+.card{background:#fff;border:1px solid #E8E8E4;border-radius:14px}
+.chip{display:inline-flex;align-items:center;height:24px;padding:0 9px;border-radius:12px;font-size:12px;font-weight:600;white-space:nowrap}
+.ok{background:#E4F5EC;color:#0B5C3B}.wn{background:#FFF1D6;color:#7A4800}.bd{background:#FDECEA;color:#8F1D16}.inf{background:#EFEDFD;color:#3B2FA8}.mu{background:#EFEFEC;color:#44444C}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:38px;padding:0 14px;border-radius:10px;border:0;background:#17171A;color:#fff;font:600 14px 'DM Sans',sans-serif;cursor:pointer;text-decoration:none}
+.btn.ac{background:var(--ac)}
+.bo{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:38px;padding:0 14px;border-radius:10px;border:1px solid #D9D9D4;background:#fff;color:#17171A;font:600 14px 'DM Sans',sans-serif;cursor:pointer;text-decoration:none}
+.th{font-size:12px;font-weight:600;color:#62626B}
+.num{font-variant-numeric:tabular-nums}
+.av{width:36px;height:36px;border-radius:50%;background:#EFEDFD;color:#3B2FA8;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex:none}
+.rw{display:flex;align-items:center;gap:14px;padding:12px 18px;border-top:1px solid #EFEFEC}
+.tab{display:inline-flex;align-items:center;gap:8px;height:42px;margin-right:20px;font-weight:600;font-size:14px;color:#62626B;text-decoration:none;border-bottom:2px solid transparent}
+.tab.on{color:#17171A;border-bottom-color:var(--ac)}
+a{color:#3B2FA8;text-decoration:none}a:hover{text-decoration:underline}
+.nv:hover,.btn:hover,.bo:hover{text-decoration:none}
+</style>
+
+</head>
+<body>
+
+
+<div style="--ac:#5B4DDB;width:390px;height:844px;display:flex;flex-direction:column;background:#F7F7F5;font-family:'DM Sans',system-ui,sans-serif;color:#17171A;overflow:hidden;position:relative">
+<div style="flex:1;min-height:0;padding:22px 18px;opacity:.35;pointer-events:none"><h1 style="margin:0;font-size:26px;font-weight:700">Bugun</h1></div>
+<div style="position:absolute;inset:0;background:rgba(23,23,26,.45)"></div>
+<section aria-label="To'lov qabul qilish" style="position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:22px 22px 0 0;padding:12px 18px 24px;display:flex;flex-direction:column;gap:16px">
+<div style="width:40px;height:4px;border-radius:2px;background:#D9D9D4;align-self:center"></div>
+<div style="display:flex;justify-content:space-between;align-items:center"><h2 style="margin:0;font-size:20px;font-weight:700">To'lov qabul qilish</h2><a href="11-telefon-bugun.html" aria-label="Yopish" class="bo" style="width:44px;height:44px;padding:0"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;transform:rotate(45deg)"><path d="M12 5v14M5 12h14"/></svg></a></div>
+<div style="display:flex;align-items:center;gap:12px;padding:12px;border:1px solid #E8E8E4;border-radius:14px"><div class="av" aria-hidden="true">BA</div><div style="flex:1;min-width:0"><div style="font-weight:600;font-size:15px">Botir Aliyev</div><div style="font-size:12px;color:#62626B">Fransuz tili, A1 · Qarz 390 000</div></div></div>
+<div><label for="amt" class="th">Summa, so'm</label><input id="amt" value="390 000" inputmode="numeric" class="num" style="width:100%;height:64px;margin-top:6px;border:1.5px solid var(--ac);border-radius:14px;padding:0 16px;font:700 30px 'DM Sans',sans-serif;color:#17171A;background:#fff"></div>
+<div style="display:flex;gap:8px"><button type="button" class="bo" style="height:44px;flex:1;background:var(--ac);color:#fff;border-color:var(--ac)">To'liq 390 000</button><button type="button" class="bo" style="height:44px;flex:1;">Yarmi 195 000</button><button type="button" class="bo" style="height:44px;flex:1;">Boshqa</button></div>
+<div><div class="th" style="margin-bottom:6px">Usul</div><div style="display:flex;gap:8px"><button type="button" class="bo" style="height:44px;flex:1;background:var(--ac);color:#fff;border-color:var(--ac)">Naqd</button><button type="button" class="bo" style="height:44px;flex:1;">Karta</button><button type="button" class="bo" style="height:44px;flex:1;">Click</button></div></div>
+<button type="button" class="btn ac" style="height:54px;font-size:16px;border-radius:14px">Tasdiqlash va chek yuborish</button>
+</section>
+</div>
+
+
+</body>
+</html>

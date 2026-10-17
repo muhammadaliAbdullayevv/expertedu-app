@@ -152,7 +152,7 @@ async def test_attendance_is_marked_once_per_student_and_only_for_the_class(api)
     assert await api.pool.fetchval("select count(*) from lessons") == 1
     assert await api.pool.fetchval("select count(*) from attendance") == 2
     # Nothing about money or enrollment changes.
-    assert await api.pool.fetchval("select count(*) from transactions") == 0
+    assert await api.pool.fetchval("select count(*) from charges") == 0
 
     corrected = await api.client.put(
         "/lessons/attendance",
