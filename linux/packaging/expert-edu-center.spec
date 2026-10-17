@@ -18,7 +18,7 @@
 # in by path_provider_android) builds for every platform but which only
 # Android code paths ever dlopen -- without this, installing the RPM would
 # drag in an entire Java runtime the app never touches on Linux.
-%global __requires_exclude ^lib(app|dartjni|flutter_linux_gtk|flutter_secure_storage_linux_plugin|jvm)\\.so.*$
+%global __requires_exclude ^lib(app|dartjni|flutter_linux_gtk|flutter_secure_storage_linux_plugin|file_selector_linux_plugin|jvm)\\.so.*$
 
 %global app_id uz.expertedu.expert_edu_center
 
