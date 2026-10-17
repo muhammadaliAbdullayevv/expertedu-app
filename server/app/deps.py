@@ -53,10 +53,9 @@ async def get_current_user(
 
 
 async def require_owner(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
-    """Owner-only actions (managing admin accounts, archiving groups, ...)
-    -- every other authenticated endpoint is open to both owner and admin,
-    since this app has no teacher/student login at all; every account is
-    staff by definition."""
+    """Owner-only actions: staff accounts and the center's finances
+    (salaries, expenses, profit). Everything else is open to the owner and
+    admins alike -- the only two roles there are."""
     if not user.is_owner:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Faqat egasi uchun.")
     return user

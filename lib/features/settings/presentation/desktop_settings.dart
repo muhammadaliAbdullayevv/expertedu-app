@@ -8,24 +8,30 @@ import '../../../core/extensions/build_context_x.dart';
 import '../../../core/formatters/currency_formatter.dart';
 import '../../../core/formatters/phone_formatter.dart';
 import '../../../core/widgets/table_card.dart';
+import '../../auth/application/session_controller.dart';
 import '../../groups/data/groups_repository.dart';
+import '../../staff/presentation/staff_tab.dart';
 import '../../groups/presentation/group_form_dialog.dart';
 import '../../teachers/data/teachers_repository.dart';
 import '../../teachers/presentation/teacher_form_dialog.dart';
 
 /// Settings on the wide layout: the center's groups and teachers are
 /// managed here (desktop only -- the phone app adds groups from inside a
-/// subject), alongside the account options the phone also has.
-class DesktopSettings extends StatelessWidget {
+/// subject), staff accounts for the owner, and the account options the
+/// phone also has.
+class DesktopSettings extends ConsumerWidget {
   const DesktopSettings({super.key, required this.account});
 
-  /// The phone's settings list, reused as the third tab.
+  /// The phone's settings list, reused as the last tab.
   final Widget account;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isOwner = ref.watch(sessionControllerProvider).isOwner;
     return DefaultTabController(
-      length: 3,
+      // Rebuilt from scratch if the tab count changes (another account).
+      key: ValueKey<bool>(isOwner),
+      length: isOwner ? 4 : 3,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -46,10 +52,11 @@ class DesktopSettings extends StatelessWidget {
               labelColor: context.colors.onSurface,
               unselectedLabelColor: context.colors.onSurfaceVariant,
               labelStyle: context.textTheme.labelLarge,
-              tabs: const <Tab>[
-                Tab(text: 'Guruhlar'),
-                Tab(text: 'O\'qituvchilar'),
-                Tab(text: 'Hisob'),
+              tabs: <Tab>[
+                const Tab(text: 'Guruhlar'),
+                const Tab(text: 'O\'qituvchilar'),
+                if (isOwner) const Tab(text: 'Xodimlar'),
+                const Tab(text: 'Hisob'),
               ],
             ),
           ),
@@ -58,6 +65,7 @@ class DesktopSettings extends StatelessWidget {
               children: <Widget>[
                 const _GroupsTab(),
                 const _TeachersTab(),
+                if (isOwner) const StaffTab(),
                 Align(
                   alignment: Alignment.topCenter,
                   child: ConstrainedBox(

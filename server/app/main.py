@@ -18,6 +18,7 @@ from .routes import (
     health,
     inquiries,
     leads,
+    staff,
     students,
     subjects,
     teachers,
@@ -66,3 +67,4 @@ app.include_router(trials.router)
 app.include_router(follow_ups.router)
 app.include_router(admissions_report.router)
 app.include_router(users.router)
+app.include_router(staff.router)

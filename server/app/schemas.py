@@ -681,3 +681,31 @@ class AdmissionsReport(BaseModel):
     follow_ups_due_today: int
     open_by_stage: list[CountByKey]
     cohort_by_source: list[CountByKey]
+
+
+# Staff accounts --------------------------------------------------------------
+
+
+class StaffMember(BaseModel):
+    id: int
+    phone: str
+    full_name: str
+    role: str
+    is_active: bool
+    created_at: datetime
+    last_login_at: datetime | None = None
+
+
+class CreateStaffRequest(BaseModel):
+    phone: str
+    full_name: str
+    password: str
+
+
+class UpdateStaffRequest(BaseModel):
+    full_name: str | None = None
+    is_active: bool | None = None
+
+
+class ResetPasswordRequest(BaseModel):
+    password: str
