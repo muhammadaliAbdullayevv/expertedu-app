@@ -1,11 +1,26 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/formatters/currency_formatter.dart';
-import '../../../core/widgets/bordered_list_tile.dart';
+import '../../../app/shell/shell_counts.dart';
+import '../../../app/theme/app_theme.dart';
+import '../../../core/formatters/phone_formatter.dart';
+import '../../../core/widgets/status_chip.dart';
+import '../../admissions/presentation/admissions_ui.dart';
+import '../../admissions/presentation/qabul_text.dart';
+import '../data/student_models.dart';
 import '../data/students_repository.dart';
 import 'add_student_dialog.dart';
+import 'open_student.dart';
+import 'student_panel.dart';
+import 'student_text.dart';
 
+const _pageSize = 10;
+
+/// O'quvchilar (desktop): the students in a table -- group and teacher,
+/// attendance of the last lessons, balance, status -- with the selected
+/// student's profile on the right.
 class StudentsListScreen extends ConsumerStatefulWidget {
   const StudentsListScreen({super.key});
 
@@ -14,38 +29,54 @@ class StudentsListScreen extends ConsumerStatefulWidget {
 }
 
 class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
-  final _searchController = TextEditingController();
-  late Future<List<Student>> _future;
+  final _search = TextEditingController();
+  late Future<List<StudentRow>> _rows = _load();
+  late final ValueNotifier<int?> _open = ref.read(openStudentRequestProvider);
+
+  StudentTab _tab = StudentTab.all;
+  int? _subjectId;
+  int? _groupId;
+  int? _teacherId;
+  int _page = 0;
+  int? _selected;
   bool _searchVisible = false;
-  String _query = '';
+
+  Future<List<StudentRow>> _load() =>
+      ref.read(studentsRepositoryProvider).rows();
 
   @override
   void initState() {
     super.initState();
-    _future = ref.read(studentsRepositoryProvider).list();
+    _open.addListener(_onOpenRequest);
+    // Asked for before this page existed (the shell builds pages lazily).
+    if (_open.value != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _onOpenRequest());
+    }
   }
 
   @override
   void dispose() {
-    _searchController.dispose();
+    _open.removeListener(_onOpenRequest);
+    _search.dispose();
     super.dispose();
   }
 
-  void _reload({String? query}) {
+  // --- Things the shell calls ----------------------------------------------
+
+  void reload() {
+    final next = _load();
     setState(() {
-      _query = query ?? _query;
-      _future = ref.read(studentsRepositoryProvider).list(query: _query);
+      _rows = next;
     });
+    ref.invalidate(shellCountsProvider);
+    ref.invalidate(studentSummaryProvider);
   }
 
   /// Called from HomeShell's shared search icon.
   void toggleSearch() {
     setState(() {
       _searchVisible = !_searchVisible;
-      if (!_searchVisible) {
-        _searchController.clear();
-        _reload(query: '');
-      }
+      if (!_searchVisible) _search.clear();
     });
   }
 
@@ -54,118 +85,628 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
   void applySearch(String query) {
     setState(() {
       _searchVisible = true;
-      _searchController.text = query;
+      _search.text = query;
+      _page = 0;
+      _tab = StudentTab.all;
     });
-    _reload(query: query);
   }
 
-  /// True (and search cleared) if there was something to clear -- lets
-  /// HomeShell's back-button handling behave like the shop app's.
   bool clearSearchIfActive() {
-    if (!_searchVisible) return false;
-    toggleSearch();
+    if (_search.text.isEmpty) return false;
+    setState(() {
+      _search.clear();
+      _page = 0;
+    });
     return true;
+  }
+
+  /// Called from HomeShell's "Yangi o'quvchi".
+  Future<void> showCreateSheet() async {
+    final saved = await showAddStudentDialog(context);
+    if (saved == true) {
+      reload();
+      if (mounted) showSnack(context, 'O\'quvchi saqlandi');
+    }
+  }
+
+  /// Opens one student's profile: clears the filters that would hide them.
+  Future<void> _onOpenRequest() async {
+    final id = _open.value;
+    if (id == null || !mounted) return;
+    // Cleared after the other listeners (the shell) have seen it.
+    scheduleMicrotask(() => _open.value = null);
+    final rows = await _rows;
+    if (!mounted) return;
+    final student = rows.where((s) => s.id == id).firstOrNull;
+    setState(() {
+      _selected = id;
+      _search.clear();
+      _subjectId = _groupId = _teacherId = null;
+      _tab = student != null && !student.isActive
+          ? StudentTab.archive
+          : StudentTab.all;
+      final list = filterStudents(rows, tab: _tab);
+      final at = list.indexWhere((s) => s.id == id);
+      _page = at < 0 ? 0 : at ~/ _pageSize;
+    });
+  }
+
+  // --- Data -----------------------------------------------------------------
+
+  List<StudentRow> _visible(List<StudentRow> rows) {
+    final q = _search.text.trim().toLowerCase();
+    final digits = q.replaceAll(RegExp(r'\D'), '');
+    return [
+      for (final s in filterStudents(
+        rows,
+        tab: _tab,
+        subjectId: _subjectId,
+        groupId: _groupId,
+        teacherId: _teacherId,
+      ))
+        if (q.isEmpty ||
+            s.fullName.toLowerCase().contains(q) ||
+            (digits.isNotEmpty && s.phone.contains(digits)) ||
+            s.groups.any((g) => g.name.toLowerCase().contains(q)))
+          s,
+    ];
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: <Widget>[
-        if (_searchVisible)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: TextField(
-              controller: _searchController,
-              autofocus: true,
-              decoration: const InputDecoration(
-                hintText: 'Qidirish...',
-                prefixIcon: Icon(Icons.search),
-                isDense: true,
-                filled: true,
+    return FutureBuilder<List<StudentRow>>(
+      future: _rows,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return LoadFailed(error: snapshot.error!, onRetry: reload);
+        }
+        final rows = snapshot.data;
+        if (rows == null) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final counts = tabCounts(rows);
+        final list = _visible(rows);
+        final pages = (list.length / _pageSize).ceil().clamp(1, 1 << 30);
+        final page = _page.clamp(0, pages - 1);
+        final shown = list.skip(page * _pageSize).take(_pageSize).toList();
+        // The profile follows the selection; with nothing chosen, the first row.
+        final selected = list.any((s) => s.id == _selected)
+            ? _selected
+            : (shown.isEmpty ? null : shown.first.id);
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(32, 0, 32, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              _tabs(counts),
+              const SizedBox(height: 14),
+              _filters(rows),
+              const SizedBox(height: 14),
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    Expanded(
+                      child: _table(shown, list.length, page, pages, selected),
+                    ),
+                    const SizedBox(width: 16),
+                    SizedBox(
+                      width: 440,
+                      child: selected == null
+                          ? const _NothingSelected()
+                          : StudentPanel(
+                              key: ValueKey('panel-$selected'),
+                              studentId: selected,
+                              onChanged: reload,
+                            ),
+                    ),
+                  ],
+                ),
               ),
-              onChanged: (value) => _reload(query: value),
-            ),
+            ],
           ),
-        Expanded(
-          child: FutureBuilder<List<Student>>(
-            future: _future,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState != ConnectionState.done) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snapshot.hasError) {
-                return Center(child: Text('Xatolik: ${snapshot.error}'));
-              }
-              final students = snapshot.data ?? const <Student>[];
-              if (students.isEmpty) {
-                return const Center(child: Text('Hali o\'quvchilar yo\'q'));
-              }
-              return ListView.builder(
-                padding: const EdgeInsets.symmetric(
-                  vertical: 8,
-                ).copyWith(bottom: 88),
-                itemCount: students.length,
-                itemBuilder: (context, index) {
-                  final student = students[index];
-                  final owesMoney = student.balance > 0;
-                  return BorderedListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: owesMoney
-                          ? Theme.of(context).colorScheme.errorContainer
-                          : Colors.green.withValues(alpha: 0.15),
-                      child: Icon(
-                        Icons.school,
-                        color: owesMoney
-                            ? Theme.of(context).colorScheme.error
-                            : Colors.green,
+        );
+      },
+    );
+  }
+
+  Widget _tabs(Map<StudentTab, int> counts) {
+    return Container(
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: AppColors.divider)),
+      ),
+      child: Row(
+        children: <Widget>[
+          for (final tab in StudentTab.values)
+            InkWell(
+              key: ValueKey('tab-${tab.name}'),
+              onTap: () => setState(() {
+                _tab = tab;
+                _page = 0;
+              }),
+              child: Container(
+                height: 44,
+                margin: const EdgeInsets.only(right: 24),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(
+                      color: tab == _tab
+                          ? AppColors.accent
+                          : Colors.transparent,
+                      width: 2,
+                    ),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text(
+                      tab.label,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: tab == _tab ? AppColors.ink : AppColors.inkMuted,
                       ),
                     ),
-                    title: Text(student.fullName),
-                    subtitle: Text(student.phone),
-                    trailing: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: <Widget>[
-                        Icon(
-                          owesMoney
-                              ? Icons.error_outline
-                              : Icons.check_circle_outline,
-                          size: 18,
-                          color: owesMoney
-                              ? Theme.of(context).colorScheme.error
-                              : Colors.green,
+                    if (tab != StudentTab.archive) ...<Widget>[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 1,
                         ),
-                        if (owesMoney)
-                          Text(
-                            CurrencyFormatter.format(student.balance),
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Theme.of(context).colorScheme.error,
-                            ),
+                        decoration: BoxDecoration(
+                          color: AppColors.divider,
+                          borderRadius: BorderRadius.circular(AppRadius.chip),
+                        ),
+                        child: Text(
+                          '${counts[tab]}',
+                          key: ValueKey('count-${tab.name}'),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.inkSecondary,
                           ),
-                      ],
-                    ),
-                  );
-                },
-              );
-            },
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          const Spacer(),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: FilledButton.icon(
+              key: const ValueKey('new-student'),
+              onPressed: showCreateSheet,
+              icon: const Icon(Icons.add_rounded, size: 18),
+              label: const Text('Yangi o\'quvchi'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _filters(List<StudentRow> rows) {
+    final groups = <int, StudentGroupRef>{};
+    for (final s in rows) {
+      for (final g in s.groups) {
+        groups[g.groupId] = g;
+      }
+    }
+    final subjects = <int, String>{
+      for (final g in groups.values)
+        if (g.subjectId != null) g.subjectId!: g.subjectName ?? '',
+    };
+    final teachers = <int, String>{
+      for (final g in groups.values)
+        if (g.teacherId != null) g.teacherId!: g.teacherName ?? '',
+    };
+    final any = _subjectId != null || _groupId != null || _teacherId != null;
+    return Row(
+      children: <Widget>[
+        SizedBox(
+          width: 280,
+          child: TextField(
+            key: const ValueKey('students-search'),
+            controller: _search,
+            decoration: const InputDecoration(
+              isDense: true,
+              prefixIcon: Icon(Icons.search, size: 20),
+              hintText: 'Ism, telefon yoki guruh',
+            ),
+            onChanged: (_) => setState(() => _page = 0),
           ),
         ),
+        const SizedBox(width: 10),
+        _FilterMenu(
+          keyName: 'filter-subject',
+          label: 'Fan',
+          value: _subjectId == null ? null : subjects[_subjectId],
+          options: subjects,
+          onPick: (id) => setState(() {
+            _subjectId = id;
+            _page = 0;
+          }),
+        ),
+        const SizedBox(width: 8),
+        _FilterMenu(
+          keyName: 'filter-group',
+          label: 'Guruh',
+          value: _groupId == null ? null : groups[_groupId]?.name,
+          options: {for (final g in groups.values) g.groupId: g.name},
+          onPick: (id) => setState(() {
+            _groupId = id;
+            _page = 0;
+          }),
+        ),
+        const SizedBox(width: 8),
+        _FilterMenu(
+          keyName: 'filter-teacher',
+          label: 'O\'qituvchi',
+          value: _teacherId == null ? null : teachers[_teacherId],
+          options: teachers,
+          onPick: (id) => setState(() {
+            _teacherId = id;
+            _page = 0;
+          }),
+        ),
+        if (any)
+          TextButton(
+            key: const ValueKey('filters-clear'),
+            onPressed: () => setState(() {
+              _subjectId = _groupId = _teacherId = null;
+              _page = 0;
+            }),
+            child: const Text('Tozalash'),
+          ),
       ],
     );
   }
 
-  /// Called from HomeShell's shared FAB (phone) and the sidebar's
-  /// "Yangi o'quvchi" (desktop) -- see its GlobalKey\<StudentsListScreenState\>.
-  Future<void> showCreateSheet() async {
-    final saved = await showAddStudentDialog(context);
-    if (saved == true) {
-      _reload();
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('O\'quvchi saqlandi')));
-      }
-    }
+  Widget _table(
+    List<StudentRow> shown,
+    int total,
+    int page,
+    int pages,
+    int? selected,
+  ) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: AppColors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: <Widget>[
+          const _TableHeader(),
+          const Divider(height: 1, color: AppColors.divider),
+          Expanded(
+            child: shown.isEmpty
+                ? const Center(
+                    child: Text(
+                      'Hech kim topilmadi.',
+                      style: TextStyle(color: AppColors.inkMuted),
+                    ),
+                  )
+                : ListView.separated(
+                    itemCount: shown.length,
+                    separatorBuilder: (_, _) =>
+                        const Divider(height: 1, color: AppColors.divider),
+                    itemBuilder: (context, i) => _StudentRowView(
+                      key: ValueKey('student-${shown[i].id}'),
+                      row: shown[i],
+                      selected: shown[i].id == selected,
+                      onTap: () => setState(() => _selected = shown[i].id),
+                    ),
+                  ),
+          ),
+          const Divider(height: 1, color: AppColors.divider),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    total == 0
+                        ? '0'
+                        : '${page * _pageSize + 1}–${page * _pageSize + shown.length} / $total',
+                    key: const ValueKey('paging'),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppColors.inkMuted,
+                    ),
+                  ),
+                ),
+                OutlinedButton(
+                  key: const ValueKey('page-prev'),
+                  onPressed: page == 0
+                      ? null
+                      : () => setState(() => _page = page - 1),
+                  child: const Text('Oldingi'),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton(
+                  key: const ValueKey('page-next'),
+                  onPressed: page >= pages - 1
+                      ? null
+                      : () => setState(() => _page = page + 1),
+                  child: const Text('Keyingi'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NothingSelected extends StatelessWidget {
+  const _NothingSelected();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+        border: Border.all(color: AppColors.border),
+      ),
+      alignment: Alignment.center,
+      child: const Text(
+        'Profilni ko\'rish uchun o\'quvchini tanlang.',
+        style: TextStyle(color: AppColors.inkMuted),
+      ),
+    );
+  }
+}
+
+/// Fan / Guruh / O'qituvchi: "Fan  Hammasi" until one is picked.
+class _FilterMenu extends StatelessWidget {
+  const _FilterMenu({
+    required this.keyName,
+    required this.label,
+    required this.value,
+    required this.options,
+    required this.onPick,
+  });
+
+  final String keyName;
+  final String label;
+  final String? value;
+  final Map<int, String> options;
+  final ValueChanged<int?> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<int>(
+      key: ValueKey(keyName),
+      tooltip: label,
+      onSelected: (id) => onPick(id == 0 ? null : id),
+      itemBuilder: (_) => <PopupMenuEntry<int>>[
+        const PopupMenuItem(value: 0, child: Text('Hammasi')),
+        for (final e in options.entries)
+          PopupMenuItem(value: e.key, child: Text(e.value)),
+      ],
+      child: Container(
+        height: 40,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: value == null ? AppColors.surface : AppColors.accentSoft,
+          borderRadius: BorderRadius.circular(AppRadius.button),
+          border: Border.all(
+            color: value == null ? AppColors.border : AppColors.accent,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(width: 8),
+            Text(
+              value ?? 'Hammasi',
+              style: const TextStyle(color: AppColors.inkSecondary),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+const _head = TextStyle(
+  fontSize: 12,
+  fontWeight: FontWeight.w600,
+  color: AppColors.inkMuted,
+);
+
+class _TableHeader extends StatelessWidget {
+  const _TableHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      padding: EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+      child: Row(
+        children: <Widget>[
+          Expanded(flex: 34, child: Text('O\'quvchi', style: _head)),
+          Expanded(flex: 28, child: Text('Guruh va o\'qituvchi', style: _head)),
+          Expanded(flex: 22, child: Text('Davomat (10 dars)', style: _head)),
+          Expanded(
+            flex: 14,
+            child: Text('Balans', textAlign: TextAlign.right, style: _head),
+          ),
+          Expanded(
+            flex: 14,
+            child: Padding(
+              padding: EdgeInsets.only(left: 14),
+              child: Text('Holat', style: _head),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StudentRowView extends StatelessWidget {
+  const _StudentRowView({
+    super.key,
+    required this.row,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final StudentRow row;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = statusOf(row);
+    final first = row.groups.isEmpty ? null : row.groups.first;
+    final balanceColor = row.balance > 0
+        ? AppColors.dangerText
+        : row.balance < 0
+        ? AppColors.okText
+        : AppColors.inkMuted;
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        color: selected ? AppColors.accentSoft : null,
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              flex: 34,
+              child: Row(
+                children: <Widget>[
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundColor: AppColors.accentSoft,
+                    child: Text(
+                      initials(row.fullName),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.accentText,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
+                          children: <Widget>[
+                            Flexible(
+                              child: Text(
+                                row.fullName,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            if (row.isNew) ...<Widget>[
+                              const SizedBox(width: 6),
+                              const StatusChip('Yangi', tone: StatusTone.info),
+                            ],
+                          ],
+                        ),
+                        Text(
+                          PhoneFormatter.display(row.phone),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.inkMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 28,
+              child: first == null
+                  ? const Text(
+                      'Guruhsiz',
+                      style: TextStyle(color: AppColors.inkMuted),
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          row.groups.length > 1
+                              ? '${first.name} +${row.groups.length - 1}'
+                              : first.name,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          groupSubtitle(first),
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.inkMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+            Expanded(
+              flex: 22,
+              child: Row(
+                children: <Widget>[
+                  AttendanceBars(row.attendanceRecent),
+                  const SizedBox(width: 8),
+                  Text(
+                    ratePercent(row.attendanceRate),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 14,
+              child: Text(
+                signedBalance(row.balance),
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: balanceColor,
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 14,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 14),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: StatusChip(status.text, tone: status.tone),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

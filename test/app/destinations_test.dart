@@ -55,24 +55,18 @@ void main() {
     expect(reachableFor(AppRole.admin), contains(Destination.debtors));
   });
 
-  test(
-    'the phone bar: owner Moliya, admin Qabul, teacher no payment button',
-    () {
-      final owner = phoneBarFor(AppRole.owner);
-      expect(labels(owner.left), ['Bugun', 'O\'quvchilar']);
-      expect(labels(owner.right), ['Jadval', 'Moliya']);
-      expect(owner.showPaymentButton, isTrue);
-      expect(owner.left[1].shortLabel(s), 'O\'quvchi');
+  test('the phone bar: owner and admin Moliya, teacher two items', () {
+    final owner = phoneBarFor(AppRole.owner);
+    expect(labels(owner.left), ['Bugun', 'O\'quvchilar']);
+    expect(labels(owner.right), ['Jadval', 'Moliya']);
+    expect(owner.left[1].shortLabel(s), 'O\'quvchi');
 
-      final admin = phoneBarFor(AppRole.admin);
-      expect(labels(admin.right), ['Jadval', 'Moliya']);
-      expect(admin.showPaymentButton, isTrue);
+    final admin = phoneBarFor(AppRole.admin);
+    expect(labels(admin.right), ['Jadval', 'Moliya']);
 
-      final teacher = phoneBarFor(AppRole.teacher);
-      expect(teacher.showPaymentButton, isFalse);
-      expect(teacher.all, [Destination.today, Destination.timetable]);
-    },
-  );
+    final teacher = phoneBarFor(AppRole.teacher);
+    expect(teacher.all, [Destination.today, Destination.timetable]);
+  });
 
   test('every phone bar destination is one the role may open', () {
     for (final role in AppRole.values) {

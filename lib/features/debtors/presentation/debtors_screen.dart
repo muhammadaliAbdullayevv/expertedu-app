@@ -8,8 +8,7 @@ import '../../../core/extensions/build_context_x.dart';
 import '../../../core/formatters/currency_formatter.dart';
 import '../../../core/formatters/date_formatters.dart';
 import '../../../core/formatters/phone_formatter.dart';
-import '../../billing/presentation/record_payment_sheet.dart';
-import '../../billing/presentation/transaction_history_screen.dart';
+import '../../students/presentation/open_student.dart';
 import '../data/debtors_repository.dart';
 import 'overdue_label.dart';
 
@@ -81,26 +80,9 @@ class DebtorsScreenState extends ConsumerState<DebtorsScreen> {
     return rows;
   }
 
-  Future<void> _recordPayment(Debtor debtor) async {
-    final paid = await showRecordPaymentSheet(
-      context,
-      enrollmentId: debtor.enrollmentId,
-      balance: debtor.balance,
-    );
-    if (paid == true) reload();
-  }
-
-  Future<void> _openHistory(Debtor debtor) async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => TransactionHistoryScreen(
-          enrollmentId: debtor.enrollmentId,
-          studentName: debtor.studentFullName,
-        ),
-      ),
-    );
-    // A payment may have been recorded from the history screen too.
-    reload();
+  /// Payments are taken on the student's profile only.
+  void _openProfile(Debtor debtor) {
+    ref.read(openStudentRequestProvider).value = debtor.studentId;
   }
 
   void _copyPhone(String phone) {
@@ -312,7 +294,7 @@ class DebtorsScreenState extends ConsumerState<DebtorsScreen> {
       color: context.colors.onSurfaceVariant,
     );
     return InkWell(
-      onTap: () => _openHistory(debtor),
+      onTap: () => _openProfile(debtor),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         child: Row(
@@ -403,15 +385,10 @@ class DebtorsScreenState extends ConsumerState<DebtorsScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: <Widget>[
-                  IconButton(
-                    tooltip: 'To\'lovlar tarixi',
-                    onPressed: () => _openHistory(debtor),
-                    icon: const Icon(Icons.receipt_long_outlined),
-                  ),
-                  const SizedBox(width: 4),
                   FilledButton.tonal(
-                    onPressed: () => _recordPayment(debtor),
-                    child: const Text('To\'lov'),
+                    key: ValueKey('open-profile-${debtor.enrollmentId}'),
+                    onPressed: () => _openProfile(debtor),
+                    child: const Text('Profilni ochish'),
                   ),
                 ],
               ),

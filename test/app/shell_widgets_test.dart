@@ -152,11 +152,7 @@ void main() {
   });
 
   group('phone bottom bar', () {
-    Widget bar(
-      AppRole role, {
-      ValueChanged<Destination>? onSelect,
-      VoidCallback? onPayment,
-    }) => host(
+    Widget bar(AppRole role, {ValueChanged<Destination>? onSelect}) => host(
       Column(
         children: [
           const Spacer(),
@@ -164,17 +160,16 @@ void main() {
             layout: phoneBarFor(role),
             selected: Destination.today,
             onSelect: onSelect ?? (_) {},
-            onPayment: onPayment ?? () {},
           ),
         ],
       ),
     );
 
-    testWidgets('the centre + takes a payment', (tester) async {
-      var payments = 0;
-      await tester.pumpWidget(bar(AppRole.owner, onPayment: () => payments++));
-      await tester.tap(find.bySemanticsLabel('To\'lov qabul qilish'));
-      expect(payments, 1);
+    testWidgets('has the destinations and no payment button', (tester) async {
+      await tester.pumpWidget(bar(AppRole.owner));
+      // Payments are taken on a student's profile only.
+      expect(find.bySemanticsLabel('To\'lov qabul qilish'), findsNothing);
+      expect(find.text('To\'lov qabul qilish'), findsNothing);
       expect(find.text('Bugun'), findsOneWidget);
       expect(find.text('O\'quvchi'), findsOneWidget);
       expect(find.text('Moliya'), findsOneWidget);
@@ -190,10 +185,6 @@ void main() {
         );
         expect(size.height, greaterThanOrEqualTo(44), reason: label);
       }
-      expect(
-        tester.getSize(find.bySemanticsLabel('To\'lov qabul qilish')).height,
-        greaterThanOrEqualTo(44),
-      );
     });
 
     testWidgets('selecting a tab', (tester) async {

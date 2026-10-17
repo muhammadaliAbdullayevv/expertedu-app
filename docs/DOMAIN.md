@@ -147,6 +147,18 @@ Checked end to end (a new person at every step, same numbers on every screen): s
 - What the client asked for (subject, level, days, part of the day) is saved on the lead (`desired_weekdays`, `desired_time_of_day`, `level`). Groups gained `level` and `start_date`.
 - "Sinov darsiga yozish" offers the group's next lessons (`GET /groups/{id}/trial-dates`, cancelled lessons left out); several guests share one session per lesson. A reminder is a follow-up task for the evening before — the app does not send messages yet.
 
+## 3b. O'quvchilar and the student profile
+
+**The page** (design `06-oquvchilar.html`): a table on the left, the selected student's profile on the right (440 px). Tabs **Hammasi** (active students: at least one active group), **Qarzdorlar** (owes money), **Xavf ostida** (attended under 75% of their last ten marked lessons, with at least three marks; excused lessons are not held against them), **Yangi** (registered in the last 14 days) and **Arxiv** (no active group). Fan, Guruh and O'qituvchi filters, a search (name, phone, group), ten rows a page. The flags are computed once, in `GET /students`, so the tab numbers and the people in them agree.
+
+**The profile panel**: name, phones, address; **Tahrirlash** (pencil, top right) and a ⋯ menu (edit, add to another group); **To'lov qabul qilish**; **Boshqa guruhga qo'shish**; a debt card (amount, "N kun kechikdi", due date) or the money paid ahead; tabs **Umumiy** (every group with teacher, days and time, price, attendance; recent activity), **To'lovlar** (every payment with method, who took it, receipt number; cancelled ones stay, marked, with the reason), **Davomat** (share, counts, per group, last lessons), **Izohlar**. One request: `GET /students/{id}/profile`.
+
+**Payments are taken and cancelled only on the profile.** Bugun, Qarzdorlar, a group's list, the command bar and the phone bar no longer have a payment button; a debtor there opens the profile (`openStudentRequestProvider`). Cancelling needs a reason and never deletes.
+
+**Editing** (`PATCH /students/{id}`): name, phone, parent phone, address, note; a phone that belongs to another student is refused (409); every change goes to `audit_log` with what it was. **Add to another group** (`POST /students/{id}/add-to-group`): the seat, the first bill by the group's own rule and the optional first payment, in one transaction; a full group still takes the student (the count goes past capacity and the group stays full).
+
+**Groups' lists** show students who joined in the last two weeks first, marked "Yangi".
+
 ## 4. Settings
 
 `app_settings` (one row, owner-only edit, audited): `trial_limit_per_person` (1). The time zone is `Asia/Tashkent` from server config. Billing and pay rules are per group / per teacher, not settings.

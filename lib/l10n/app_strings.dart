@@ -60,7 +60,6 @@ class AppStrings {
   String get newItem => 'Yangi';
 
   // --- Quick actions -------------------------------------------------
-  String get receivePayment => 'To\'lov qabul qilish';
   String get newLead => 'Yangi so\'rov';
   String get newStudent => 'Yangi o\'quvchi';
   String get paymentRecorded => 'To\'lov qabul qilindi';

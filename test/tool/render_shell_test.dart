@@ -207,6 +207,39 @@ void main() {
     await mount(Size(_w.toDouble(), _h.toDouble()));
     await shot(tester, 'desktop-bugun');
 
+    if (_only == 'students') {
+      await tester.tap(find.text('O\'quvchilar').first);
+      await shot(tester, 'students-table');
+      await tester.tap(find.byKey(const ValueKey('panel-tab-1')));
+      await shot(tester, 'students-payments');
+      await tester.tap(find.byKey(const ValueKey('panel-tab-2')));
+      await shot(tester, 'students-attendance');
+      await tester.tap(find.byKey(const ValueKey('panel-tab-0')));
+      await tester.tap(find.byKey(const ValueKey('panel-pay')));
+      await settle(tester);
+      await shot(tester, 'students-pay-dialog');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('panel-add-group')));
+      await settle(tester);
+      await tester.enterText(
+        find.byKey(const ValueKey('add-group-search')),
+        'a',
+      );
+      await settle(tester);
+      await shot(tester, 'students-add-group');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('panel-edit')));
+      await settle(tester);
+      await shot(tester, 'students-edit');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('tab-debtors')));
+      await shot(tester, 'students-debtors');
+      return;
+    }
+
     if (_only == 'qabul') {
       await qabulScenes(tester, shot, settle);
       return;

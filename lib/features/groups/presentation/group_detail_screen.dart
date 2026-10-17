@@ -3,9 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/formatters/currency_formatter.dart';
 import '../../../core/widgets/bordered_list_tile.dart';
-import '../../billing/presentation/transaction_history_screen.dart';
+import '../../../core/widgets/status_chip.dart';
 import '../../enrollments/data/enrollments_repository.dart';
 import '../../enrollments/presentation/enroll_student_sheet.dart';
+import '../../students/presentation/open_student.dart';
 import '../data/groups_repository.dart';
 
 class GroupDetailScreen extends ConsumerStatefulWidget {
@@ -96,7 +97,16 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
                               : Colors.green,
                         ),
                       ),
-                      title: Text(entry.studentFullName),
+                      // New students are listed first, marked "Yangi".
+                      title: Row(
+                        children: <Widget>[
+                          Flexible(child: Text(entry.studentFullName)),
+                          if (entry.isNew) ...<Widget>[
+                            const SizedBox(width: 8),
+                            const StatusChip('Yangi', tone: StatusTone.info),
+                          ],
+                        ],
+                      ),
                       subtitle: Text(
                         owesMoney
                             ? 'Qarz: ${CurrencyFormatter.format(entry.balance)}'
@@ -113,16 +123,11 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
                         tooltip: 'Chiqarish',
                         onPressed: () => _confirmWithdraw(entry),
                       ),
-                      onTap: () async {
-                        await Navigator.of(context).push<void>(
-                          MaterialPageRoute(
-                            builder: (context) => TransactionHistoryScreen(
-                              enrollmentId: entry.enrollmentId,
-                              studentName: entry.studentFullName,
-                            ),
-                          ),
-                        );
-                        _reload();
+                      // The profile, where payments are taken.
+                      onTap: () {
+                        ref.read(openStudentRequestProvider).value =
+                            entry.studentId;
+                        Navigator.of(context).popUntil((r) => r.isFirst);
                       },
                     );
                   },

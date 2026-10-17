@@ -105,6 +105,7 @@ class RosterEntry {
     required this.joinedAt,
     required this.status,
     required this.balance,
+    this.isNew = false,
   });
 
   final int enrollmentId;
@@ -118,6 +119,9 @@ class RosterEntry {
   /// means the student still owes money.
   final int balance;
 
+  /// Joined in the last two weeks: listed first, marked "Yangi".
+  final bool isNew;
+
   factory RosterEntry.fromJson(Map<String, dynamic> json) => RosterEntry(
     enrollmentId: json['enrollment_id'] as int,
     studentId: json['student_id'] as int,
@@ -126,6 +130,7 @@ class RosterEntry {
     joinedAt: DateTime.parse(json['joined_at'] as String),
     status: json['status'] as String,
     balance: json['balance'] as int,
+    isNew: json['is_new'] as bool? ?? false,
   );
 }
 

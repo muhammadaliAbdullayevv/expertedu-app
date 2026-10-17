@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../services/api/api_client.dart';
 import '../../enrollments/data/enrollments_repository.dart';
+import 'student_models.dart';
 
 final studentsRepositoryProvider = Provider<StudentsRepository>((ref) {
   return StudentsRepository(ref.watch(apiClientProvider));
@@ -16,6 +17,7 @@ class Student {
     this.note,
     this.parentPhone,
     this.heardFrom,
+    this.address,
     this.balance = 0,
   });
 
@@ -25,6 +27,9 @@ class Student {
   final String? telegramUsername;
   final String? note;
   final String? parentPhone;
+
+  /// Where they live, typed by hand.
+  final String? address;
 
   /// 'instagram' | 'telegram' | 'referral' | 'walk_in' | 'other'.
   final String? heardFrom;
@@ -41,6 +46,7 @@ class Student {
     note: json['note'] as String?,
     parentPhone: json['parent_phone'] as String?,
     heardFrom: json['heard_from'] as String?,
+    address: json['address'] as String?,
     balance: json['balance'] as int? ?? 0,
   );
 }
@@ -85,6 +91,58 @@ class StudentsRepository {
     return json
         .map((e) => Student.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  /// The table: every student with their groups, attendance and tab flags.
+  Future<List<StudentRow>> rows({String? query}) async {
+    final json =
+        await _api.get(
+              '/students',
+              query: query == null || query.isEmpty ? null : {'q': query},
+            )
+            as List<dynamic>;
+    return [
+      for (final e in json) StudentRow.fromJson(e as Map<String, dynamic>),
+    ];
+  }
+
+  /// The profile panel's data in one request.
+  Future<StudentProfileData> profile(int id) async {
+    final json =
+        await _api.get('/students/$id/profile') as Map<String, dynamic>;
+    return StudentProfileData.fromJson(json);
+  }
+
+  /// Edits the profile; only the fields in [changes] are sent. The server
+  /// refuses a phone that belongs to someone else and logs every change.
+  Future<Student> update(int id, Map<String, dynamic> changes) async {
+    final json =
+        await _api.patch('/students/$id', body: changes)
+            as Map<String, dynamic>;
+    return Student.fromJson(json);
+  }
+
+  /// "Boshqa guruhga qo'shish": the seat, the first bill by the group's rule
+  /// and the optional first payment, in one step.
+  Future<AddedToGroup> addToGroup(
+    int id, {
+    required int groupId,
+    required DateTime joinedAt,
+    int? firstPaymentAmount,
+    String? firstPaymentMethod,
+  }) async {
+    final json =
+        await _api.post(
+              '/students/$id/add-to-group',
+              body: <String, dynamic>{
+                'group_id': groupId,
+                'joined_at': apiDate(joinedAt),
+                'first_payment_amount': firstPaymentAmount,
+                'first_payment_method': firstPaymentMethod,
+              },
+            )
+            as Map<String, dynamic>;
+    return AddedToGroup.fromJson(json);
   }
 
   Future<Student> get(int id) async {

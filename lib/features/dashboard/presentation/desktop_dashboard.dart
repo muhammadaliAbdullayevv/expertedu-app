@@ -8,7 +8,7 @@ import '../../../core/formatters/currency_formatter.dart';
 import '../../../core/formatters/date_formatters.dart';
 import '../../../core/formatters/phone_formatter.dart';
 import '../../../app/theme/app_theme.dart';
-import '../../billing/presentation/record_payment_sheet.dart';
+import '../../students/presentation/open_student.dart';
 import '../../debtors/data/debtors_repository.dart';
 import '../../debtors/presentation/overdue_label.dart';
 import '../../admissions/data/admissions_models.dart';
@@ -118,7 +118,7 @@ class DesktopDashboardState extends ConsumerState<DesktopDashboard> {
         debtors: summary.topDebtors,
         today: summary.today,
         onOpenAll: widget.onOpenDebtors,
-        onPaid: reload,
+        onOpenProfile: (id) => ref.read(openStudentRequestProvider).value = id,
       ),
       _Panel(
         title: 'Tushum, oxirgi 6 oy',
@@ -502,13 +502,13 @@ class _DebtorsPanel extends StatelessWidget {
     required this.debtors,
     required this.today,
     required this.onOpenAll,
-    required this.onPaid,
+    required this.onOpenProfile,
   });
 
   final List<Debtor> debtors;
   final DateTime today;
   final VoidCallback onOpenAll;
-  final VoidCallback onPaid;
+  final ValueChanged<int> onOpenProfile;
 
   @override
   Widget build(BuildContext context) {
@@ -559,15 +559,9 @@ class _DebtorsPanel extends StatelessWidget {
                           style: OutlinedButton.styleFrom(
                             visualDensity: VisualDensity.compact,
                           ),
-                          onPressed: () async {
-                            final paid = await showRecordPaymentSheet(
-                              context,
-                              enrollmentId: debtor.enrollmentId,
-                              balance: debtor.balance,
-                            );
-                            if (paid == true) onPaid();
-                          },
-                          child: const Text('To\'lov'),
+                          // Payments are taken on the profile only.
+                          onPressed: () => onOpenProfile(debtor.studentId),
+                          child: const Text('Profil'),
                         ),
                       ],
                     ),

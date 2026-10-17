@@ -74,11 +74,24 @@ class TransactionsRepository {
   Future<void> recordPayment({
     required int enrollmentId,
     required int amount,
+    String? method,
     String? note,
   }) {
     return _api.post(
       '/enrollments/$enrollmentId/payments',
-      body: <String, dynamic>{'amount': amount, 'note': note},
+      body: <String, dynamic>{
+        'amount': amount,
+        'method': method ?? 'cash',
+        'note': note,
+      },
+    );
+  }
+
+  /// Cancels a payment; it stays on record, marked cancelled, with the reason.
+  Future<void> cancelPayment(int paymentId, String reason) {
+    return _api.post(
+      '/payments/$paymentId/cancel',
+      body: <String, dynamic>{'reason': reason},
     );
   }
 }

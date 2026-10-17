@@ -4,21 +4,19 @@ import '../../l10n/app_strings.dart';
 import '../navigation/destinations.dart';
 import '../theme/app_theme.dart';
 
-/// The phone's bottom navigation (V2): two destinations, the round "+"
-/// that takes a payment, and two more. Touch targets are at least 56 high.
+/// The phone's bottom navigation (V2): destinations only -- payments are
+/// taken on a student's profile, not from here. Touch targets are at least 56 high.
 class PhoneBottomBar extends StatelessWidget {
   const PhoneBottomBar({
     super.key,
     required this.layout,
     required this.selected,
     required this.onSelect,
-    required this.onPayment,
   });
 
   final PhoneBarLayout layout;
   final Destination selected;
   final ValueChanged<Destination> onSelect;
-  final VoidCallback onPayment;
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +40,6 @@ class PhoneBottomBar extends StatelessWidget {
           children: <Widget>[
             for (final d in layout.left)
               _BarItem(d, selected: d == selected, onTap: () => onSelect(d)),
-            if (layout.showPaymentButton) _PaymentButton(onPressed: onPayment),
             for (final d in layout.right)
               _BarItem(d, selected: d == selected, onTap: () => onSelect(d)),
           ],
@@ -94,50 +91,6 @@ class _BarItem extends StatelessWidget {
                   ),
                 ),
               ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _PaymentButton extends StatelessWidget {
-  const _PaymentButton({required this.onPressed});
-
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    const s = AppStrings.current;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 6),
-      child: Transform.translate(
-        offset: const Offset(0, -14),
-        child: Semantics(
-          button: true,
-          label: s.receivePayment,
-          child: GestureDetector(
-            onTap: onPressed,
-            child: Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: AppColors.accent,
-                shape: BoxShape.circle,
-                boxShadow: <BoxShadow>[
-                  BoxShadow(
-                    color: AppColors.accent.withValues(alpha: 0.35),
-                    blurRadius: 16,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
-              ),
-              child: const Icon(
-                Icons.add_rounded,
-                color: Colors.white,
-                size: 28,
-              ),
             ),
           ),
         ),

@@ -160,15 +160,10 @@ List<Destination> reachableFor(AppRole role) => [
 /// middle, two more. Owner and admin both get Moliya in the last slot.
 /// Teachers have no payment button and no slots beyond these two.
 class PhoneBarLayout {
-  const PhoneBarLayout({
-    required this.left,
-    required this.right,
-    required this.showPaymentButton,
-  });
+  const PhoneBarLayout({required this.left, required this.right});
 
   final List<Destination> left;
   final List<Destination> right;
-  final bool showPaymentButton;
 
   List<Destination> get all => [...left, ...right];
 }
@@ -177,16 +172,13 @@ PhoneBarLayout phoneBarFor(AppRole role) => switch (role) {
   AppRole.owner => const PhoneBarLayout(
     left: [Destination.today, Destination.students],
     right: [Destination.timetable, Destination.finance],
-    showPaymentButton: true,
   ),
   AppRole.admin => const PhoneBarLayout(
     left: [Destination.today, Destination.students],
     right: [Destination.timetable, Destination.finance],
-    showPaymentButton: true,
   ),
   AppRole.teacher => const PhoneBarLayout(
     left: [Destination.today],
     right: [Destination.timetable],
-    showPaymentButton: false,
   ),
 };

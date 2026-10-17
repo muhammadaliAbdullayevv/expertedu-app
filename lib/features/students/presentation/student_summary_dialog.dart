@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/extensions/build_context_x.dart';
 import '../../../core/formatters/currency_formatter.dart';
 import '../../../core/formatters/phone_formatter.dart';
-import '../../billing/presentation/transaction_history_screen.dart';
+import 'open_student.dart';
 import '../../enrollments/data/enrollments_repository.dart';
 import '../data/students_repository.dart';
 import 'heard_from.dart';
@@ -110,14 +110,11 @@ class _StudentSummaryDialogState extends ConsumerState<_StudentSummaryDialog> {
                             : Colors.green.shade700,
                       ),
                     ),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => TransactionHistoryScreen(
-                          enrollmentId: enrollment.enrollmentId,
-                          studentName: student.fullName,
-                        ),
-                      ),
-                    ),
+                    // The profile, where payments are taken.
+                    onTap: () {
+                      ref.read(openStudentRequestProvider).value = student.id;
+                      Navigator.of(context).popUntil((r) => r.isFirst);
+                    },
                   ),
               ],
             );

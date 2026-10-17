@@ -8,7 +8,6 @@ import '../../../app/navigation/destinations.dart';
 import '../../../app/shell/app_sidebar.dart';
 import '../../../app/shell/command_palette.dart';
 import '../../../app/shell/phone_bottom_bar.dart';
-import '../../../app/shell/receive_payment_flow.dart';
 import '../../../app/shell/shell_counts.dart';
 import '../../../app/shell/top_bar.dart';
 import '../../../app/theme/app_theme.dart';
@@ -26,6 +25,7 @@ import '../../settings/presentation/desktop_settings.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../../stats/presentation/stats_screen.dart';
 import '../../students/data/students_repository.dart';
+import '../../students/presentation/open_student.dart';
 import '../../students/presentation/students_list_screen.dart';
 import '../../subjects/presentation/subjects_list_screen.dart';
 import '../../timetable/presentation/timetable_screen.dart';
@@ -70,14 +70,20 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     _session.addListener(_onSessionChanged);
     // Any change to a lead moves the sidebar numbers (and Bugun's).
     _admissionsRefresh.addListener(_onAdmissionsChanged);
+    _openStudent.addListener(_onOpenStudentRequest);
   }
 
   @override
   void dispose() {
     _session.removeListener(_onSessionChanged);
     _admissionsRefresh.removeListener(_onAdmissionsChanged);
+    _openStudent.removeListener(_onOpenStudentRequest);
     super.dispose();
   }
+
+  late final ValueNotifier<int?> _openStudent = ref.read(
+    openStudentRequestProvider,
+  );
 
   late final ValueNotifier<int> _admissionsRefresh = ref.read(
     admissionsRefreshProvider,
@@ -182,14 +188,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     }
   }
 
-  Future<void> _receivePayment() async {
-    HapticFeedback.mediumImpact();
-    final recorded = await showReceivePayment(context, ref);
-    if (recorded && mounted) {
-      _dashboardKey.currentState?.reload();
-      _debtorsKey.currentState?.reload();
-      ref.invalidate(shellCountsProvider);
-    }
+  /// Anything that wants a student's profile -- Bugun, Qarzdorlar, a group's
+  /// list, the command bar -- asks through [openStudentRequestProvider]; the
+  /// shell moves to O'quvchilar and the page opens the profile. Payments are
+  /// taken and cancelled there and nowhere else.
+  void _onOpenStudentRequest() {
+    if (_openStudent.value != null) _go(Destination.students);
   }
 
   void _newLead() {
@@ -208,7 +212,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   List<NewMenuItem> get _newMenu => [
     if (_role != AppRole.teacher) ...[
-      NewMenuItem(_s.receivePayment, Icons.payments_outlined, _receivePayment),
       NewMenuItem(_s.newLead, Icons.phone_in_talk_outlined, _newLead),
       NewMenuItem(_s.newStudent, Icons.person_add_alt_1_outlined, _newStudent),
     ],
@@ -218,13 +221,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   List<PaletteEntry> get _paletteEntries => [
     if (_role != AppRole.teacher) ...[
-      PaletteEntry(
-        group: _s.commandSectionActions,
-        label: _s.receivePayment,
-        icon: Icons.payments_outlined,
-        keywords: const ['kassa', 'pul', 'summa'],
-        run: _receivePayment,
-      ),
       PaletteEntry(
         group: _s.commandSectionActions,
         label: _s.newLead,
@@ -258,12 +254,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           label: student.fullName,
           subtitle: PhoneFormatter.display(student.phone),
           icon: Icons.person_outline_rounded,
-          run: () {
-            _go(Destination.students);
-            WidgetsBinding.instance.addPostFrameCallback(
-              (_) => _studentsKey.currentState?.applySearch(student.fullName),
-            );
-          },
+          // The profile, where payments are taken.
+          run: () => _openStudent.value = student.id,
         ),
     ];
   }
@@ -358,7 +350,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
               layout: phoneBarFor(role),
               selected: current,
               onSelect: _go,
-              onPayment: _receivePayment,
             ),
           );
 
