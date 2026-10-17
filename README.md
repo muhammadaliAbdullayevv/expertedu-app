@@ -157,7 +157,7 @@ ship the whole `build\windows\x64\runner\Release\` folder.
 Linux builds need `gtk3-devel` and `libsecret-devel`. Login tokens are kept in
 the system keyring (GNOME Keyring on Fedora Workstation).
 
-The version comes from `pubspec.yaml` (`version: 1.7.1+9` → RPM 1.7.1-9).
+The version comes from `pubspec.yaml` (`version: 1.7.2+10` → RPM 1.7.2-10).
 SQLite is bundled with the app (the `sqlite3` package's build hook), so
 desktop builds need no system SQLite.
 Android builds update themselves from `uploads/app/version.json` on the

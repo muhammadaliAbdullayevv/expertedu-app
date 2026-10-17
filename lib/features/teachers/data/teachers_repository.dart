@@ -40,8 +40,13 @@ class TeachersRepository {
 
   final ApiClient _api;
 
-  Future<List<Teacher>> list() async {
-    final json = await _api.get('/teachers') as List<dynamic>;
+  Future<List<Teacher>> list({bool includeInactive = false}) async {
+    final json =
+        await _api.get(
+              '/teachers',
+              query: {'include_inactive': includeInactive.toString()},
+            )
+            as List<dynamic>;
     return json
         .map((e) => Teacher.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -81,6 +86,16 @@ class TeachersRepository {
                 'phone': phone,
                 'note': note,
               },
+            )
+            as Map<String, dynamic>;
+    return Teacher.fromJson(json);
+  }
+
+  Future<Teacher> setActive(int id, bool isActive) async {
+    final json =
+        await _api.patch(
+              '/teachers/$id',
+              body: <String, dynamic>{'is_active': isActive},
             )
             as Map<String, dynamic>;
     return Teacher.fromJson(json);
