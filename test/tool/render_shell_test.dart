@@ -106,40 +106,22 @@ void main() {
 
     await tester.tap(find.text('Qabul').first);
     await shot(tester, 'qabul-add');
+    await tester.tap(firstGroup());
     await tester.enterText(
       find.byKey(const ValueKey('qabul-name')),
       'Render Mijoz',
     );
     await tester.enterText(find.byKey(const ValueKey('qabul-phone')), phone(1));
-    await tester.tap(firstGroup());
     await shot(tester, 'qabul-add-filled');
     await tester.sendKeyEvent(LogicalKeyboardKey.enter);
     await shot(tester, 'qabul-add-saved');
     await tester.tap(find.byKey(const ValueKey('view-list')));
     await shot(tester, 'qabul-list');
-    await tester.tap(find.byKey(const ValueKey('view-add')));
-    await settle(tester);
-    // A second person, saved and then taken back.
-    await tester.enterText(find.byKey(const ValueKey('qabul-name')), 'Qaytgan');
-    await tester.enterText(find.byKey(const ValueKey('qabul-phone')), phone(2));
-    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
-    await settle(tester);
-    await tester.tap(find.text('Qaytarish'));
-    await shot(tester, 'qabul-add-undone');
-    await tester.tap(find.byKey(const ValueKey('view-list')));
-    await settle(tester);
-    await tester.tap(find.byKey(const ValueKey('qabul-archive')));
-    await shot(tester, 'qabul-archive');
-    await tester.tap(find.byKey(const ValueKey('qabul-archive')));
-    await settle(tester);
-    // The dialogs behind the list's actions.
     await tester.tap(find.byKey(const ValueKey('row-student')).first);
     await settle(tester);
     await settle(tester);
     await shot(tester, 'qabul-student-dialog');
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-    await settle(tester);
-    await tester.tap(find.byKey(const ValueKey('view-add')));
     await settle(tester);
   }
 

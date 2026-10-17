@@ -10,7 +10,7 @@ import 'package:expert_edu_center/features/admissions/data/qabul_repository.dart
 import 'package:expert_edu_center/features/admissions/data/quick_save.dart';
 import 'package:expert_edu_center/features/admissions/presentation/admissions_screen.dart';
 import 'package:expert_edu_center/features/admissions/presentation/qabul_form.dart'
-    show rankGroups;
+    show GroupRow, filterGroups;
 import 'package:expert_edu_center/features/admissions/presentation/qabul_widgets.dart';
 import 'package:expert_edu_center/features/timetable/data/timetable_models.dart';
 import 'package:expert_edu_center/services/api/api_client.dart';
@@ -111,12 +111,10 @@ class FakeQabul implements QabulRepository {
 }
 
 class Saved {
-  Saved(this.name, this.phone, this.groupId, this.trial, this.note);
+  Saved(this.name, this.phone, this.groupId);
   final String name;
   final String phone;
   final int? groupId;
-  final DateTime? trial;
-  final String? note;
 }
 
 class FakeSaver implements QuickSaveRepository {
@@ -136,12 +134,10 @@ class FakeSaver implements QuickSaveRepository {
     required String phone,
     int? groupId,
     String? groupName,
-    DateTime? trialStartsAt,
-    String? note,
   }) async {
     if (failWith != null) throw failWith!;
     await hold?.future;
-    saves.add(Saved(fullName, phone, groupId, trialStartsAt, note));
+    saves.add(Saved(fullName, phone, groupId));
     return QuickSave(
       clientId: 'client-${_n++}',
       settled:
@@ -270,9 +266,9 @@ class _NoOutbox implements OutboxStore {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-/// Whether the choice card [key] is the selected one.
+/// Whether the group row [key] is the selected one.
 bool chosen(WidgetTester tester, String key) =>
-    tester.widget<ChoiceCard>(find.byKey(ValueKey(key))).selected;
+    tester.widget<GroupRow>(find.byKey(ValueKey(key))).selected;
 
 String? focusedLabel() => FocusManager.instance.primaryFocus?.debugLabel;
 
@@ -292,22 +288,27 @@ Future<void> enter(WidgetTester tester) async {
 void main() {
   setUpAll(loadAppFonts);
 
+  Future<void> fill(WidgetTester tester, {String name = 'Ali'}) async {
+    await typeInto(tester, 'qabul-name', name);
+    await typeInto(tester, 'qabul-phone', '901234567');
+  }
+
   group('Qabul page', () {
     testWidgets(
-      'opens on "Yangi qo\'shish" with the cursor in the name, and has no numbers',
+      'opens on "Yangi qo\'shish" with the cursor in the search box',
       (tester) async {
         await pumpPage(tester);
         expect(find.text('Yangi qo\'shish'), findsOneWidget);
         expect(find.text('Ro\'yxat'), findsOneWidget);
-        expect(focusedLabel(), 'qabul-name');
-        // No stats, counters, stages or kanban columns.
+        expect(focusedLabel(), 'qabul-search');
+        // Nothing that is not listed: no stats, stages, trial or notes.
         for (final word in [
-          'Yangi\n',
           'Bog\'lanildi',
           'To\'lov kutilmoqda',
           'Jami',
           'Shu oy',
-          'Sinovga kelganlar',
+          'Sinov darsi',
+          'Izoh',
         ]) {
           expect(find.textContaining(word), findsNothing, reason: word);
         }
@@ -335,216 +336,25 @@ void main() {
     });
   });
 
-  group('the add form', () {
-    testWidgets(
-      'the phone starts with +998 and masks what is typed or pasted',
-      (tester) async {
-        await pumpPage(tester);
-        expect(find.text('+998'), findsOneWidget);
-        await typeInto(tester, 'qabul-phone', '901234567');
-        expect(field(tester, 'qabul-phone').controller!.text, '90 123 45 67');
-        await typeInto(tester, 'qabul-phone', '+998 90 111 22 33 99');
-        expect(field(tester, 'qabul-phone').controller!.text, '90 111 22 33');
-        await typeInto(tester, 'qabul-phone', 'ab90x1');
-        expect(field(tester, 'qabul-phone').controller!.text, '90 1');
-      },
-    );
-
-    testWidgets('Tab goes name -> phone -> group -> trial -> note', (
+  group('finding a group', () {
+    testWidgets('with nothing typed all groups show, one plain row each', (
       tester,
     ) async {
       await pumpPage(tester);
-      await tester.tap(find.byKey(const ValueKey('group-1')));
-      await tester.pumpAndSettle();
-      expect(focusedLabel(), 'qabul-group');
-      // Back to the name to start from the top.
-      await tester.tap(find.byKey(const ValueKey('qabul-name')));
-      await tester.pump();
-      final order = <String?>[focusedLabel()];
-      for (var i = 0; i < 4; i++) {
-        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-        await tester.pump();
-        order.add(focusedLabel());
+      for (final id in [1, 2, 3]) {
+        expect(find.byKey(ValueKey('group-$id')), findsOneWidget);
       }
-      expect(order, [
-        'qabul-name',
-        'qabul-phone',
-        'qabul-group',
-        'qabul-trial',
-        'qabul-note',
-      ]);
+      // Name, days and time, teacher, students (and seats when capacity is set).
+      expect(find.text('Ingliz tili, Beginner A'), findsOneWidget);
+      expect(find.text('Du, Chor, Ju · 09:00'), findsWidgets);
+      expect(find.text('Madina Karimova'), findsWidgets);
+      expect(find.text('14 o\'quvchi · 2 bo\'sh'), findsOneWidget);
+      expect(find.text('0 o\'quvchi · 0 bo\'sh'), findsNothing);
+      // Nothing is chosen yet, and there is no inner scroll box.
+      expect(find.byType(ListView), findsNothing);
     });
 
-    testWidgets(
-      'Enter saves, the form clears, focus returns to the name, a notice appears and nothing asks anything',
-      (tester) async {
-        final saver = FakeSaver();
-        await pumpPage(tester, saver: saver);
-        await typeInto(tester, 'qabul-name', 'Nodira Ismoilova');
-        await typeInto(tester, 'qabul-phone', '901234567');
-        await typeInto(tester, 'qabul-note', 'kechqurun qulay');
-        await enter(tester);
-        await tester.pumpAndSettle();
-
-        expect(saver.saves, hasLength(1));
-        final s = saver.saves.single;
-        expect(
-          (s.name, s.phone, s.groupId, s.trial, s.note),
-          ('Nodira Ismoilova', '998901234567', null, null, 'kechqurun qulay'),
-        );
-        expect(field(tester, 'qabul-name').controller!.text, '');
-        expect(field(tester, 'qabul-phone').controller!.text, '');
-        expect(field(tester, 'qabul-note').controller!.text, '');
-        expect(focusedLabel(), 'qabul-name');
-        expect(find.text('Nodira Ismoilova saqlandi'), findsOneWidget);
-        expect(find.text('Qaytarish'), findsOneWidget);
-        expect(find.byType(Dialog), findsNothing);
-        expect(find.byType(AlertDialog), findsNothing);
-      },
-    );
-
-    testWidgets('Enter works from every field', (tester) async {
-      final saver = FakeSaver();
-      await pumpPage(tester, saver: saver);
-      for (final key in ['qabul-name', 'qabul-phone', 'qabul-note']) {
-        await typeInto(tester, 'qabul-name', 'Ali');
-        await typeInto(tester, 'qabul-phone', '901234567');
-        await tester.tap(find.byKey(ValueKey(key)));
-        await tester.pump();
-        await enter(tester);
-        await tester.pumpAndSettle();
-      }
-      expect(saver.saves, hasLength(3));
-    });
-
-    testWidgets('holding Enter saves one person, not many', (tester) async {
-      // Three Enters arrive while the first save is still being written.
-      final saver = FakeSaver()..hold = Completer<void>();
-      await pumpPage(tester, saver: saver);
-      await typeInto(tester, 'qabul-name', 'Ali');
-      await typeInto(tester, 'qabul-phone', '901234567');
-      await enter(tester);
-      await enter(tester);
-      await enter(tester);
-      saver.hold!.complete();
-      await tester.pumpAndSettle();
-      expect(saver.saves, hasLength(1));
-    });
-
-    testWidgets(
-      'a missing name or phone saves nothing and puts the cursor there; typed text stays',
-      (tester) async {
-        final saver = FakeSaver();
-        await pumpPage(tester, saver: saver);
-        await enter(tester);
-        await tester.pump();
-        expect(saver.saves, isEmpty);
-        expect(find.text('Ism kiriting'), findsOneWidget);
-        expect(focusedLabel(), 'qabul-name');
-
-        await typeInto(tester, 'qabul-name', 'Ali');
-        await typeInto(tester, 'qabul-phone', '9012');
-        await enter(tester);
-        await tester.pump();
-        expect(saver.saves, isEmpty);
-        expect(find.text('Telefon to\'liq emas'), findsOneWidget);
-        expect(focusedLabel(), 'qabul-phone');
-        expect(field(tester, 'qabul-name').controller!.text, 'Ali');
-        expect(field(tester, 'qabul-phone').controller!.text, '90 12');
-      },
-    );
-
-    testWidgets(
-      'a group and a trial date are saved with the person; nothing is chosen at first',
-      (tester) async {
-        final saver = FakeSaver();
-        await pumpPage(tester, saver: saver);
-        // The picker shows free seats; "Guruhsiz" is there but not chosen,
-        // and there is no trial section until a group is.
-        expect(find.text('2 bo\'sh o\'rin'), findsOneWidget);
-        expect(find.text('5 bo\'sh o\'rin'), findsOneWidget);
-        expect(find.text('To\'lgan'), findsOneWidget);
-        expect(chosen(tester, 'group-none'), isFalse);
-        expect(chosen(tester, 'group-1'), isFalse);
-        expect(find.byKey(const ValueKey('trial-link')), findsNothing);
-        expect(find.text('Sinov darsi qo\'shish'), findsNothing);
-
-        await tester.tap(find.byKey(const ValueKey('group-1')));
-        await tester.pumpAndSettle();
-        // One link, dates only after it is opened.
-        expect(find.text('Sinov darsi qo\'shish'), findsOneWidget);
-        expect(find.text('Sinovsiz'), findsNothing);
-        await tester.tap(find.byKey(const ValueKey('trial-link')));
-        await tester.pumpAndSettle();
-        expect(find.text('Sinovsiz'), findsOneWidget);
-        await tester.tap(find.text('Pay, 22-okt 09:00'));
-        await tester.pump();
-        await typeInto(tester, 'qabul-name', 'Ali');
-        await typeInto(tester, 'qabul-phone', '901234567');
-        await enter(tester);
-        await tester.pumpAndSettle();
-
-        final s = saver.saves.single;
-        expect(s.groupId, 1);
-        expect(s.trial, DateTime(2026, 10, 22, 9));
-        // Cleared for the next person: the trial section is gone again.
-        expect(find.byKey(const ValueKey('trial-link')), findsNothing);
-        expect(chosen(tester, 'group-1'), isFalse);
-      },
-    );
-
-    testWidgets('"Guruhsiz" is the last row and saves without a group', (
-      tester,
-    ) async {
-      final saver = FakeSaver();
-      await pumpPage(tester, saver: saver);
-      final last = tester.getTopLeft(find.byKey(const ValueKey('group-3'))).dy;
-      final none = tester
-          .getTopLeft(find.byKey(const ValueKey('group-none')))
-          .dy;
-      expect(none, greaterThan(last));
-      await tester.tap(find.byKey(const ValueKey('group-none')));
-      await tester.pump();
-      expect(chosen(tester, 'group-none'), isTrue);
-      await typeInto(tester, 'qabul-name', 'Ali');
-      await typeInto(tester, 'qabul-phone', '901234567');
-      await enter(tester);
-      await tester.pumpAndSettle();
-      expect(saver.saves.single.groupId, isNull);
-    });
-
-    testWidgets(
-      'the arrow keys choose a group and a trial date; Enter then saves',
-      (tester) async {
-        final saver = FakeSaver();
-        await pumpPage(tester, saver: saver);
-        await typeInto(tester, 'qabul-name', 'Ali');
-        await typeInto(tester, 'qabul-phone', '901234567');
-        await tester.tap(find.byKey(const ValueKey('qabul-phone')));
-        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-        await tester.pump();
-        expect(focusedLabel(), 'qabul-group');
-        await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-        await tester.pumpAndSettle();
-        expect(chosen(tester, 'group-1'), isTrue);
-        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
-        await tester.pump();
-        expect(focusedLabel(), 'qabul-trial');
-        await tester.sendKeyEvent(LogicalKeyboardKey.space);
-        await tester.pumpAndSettle();
-        await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-        await tester.pump();
-        await enter(tester);
-        await tester.pumpAndSettle();
-        final s = saver.saves.single;
-        expect(s.groupId, 1);
-        expect(s.trial, DateTime(2026, 10, 20, 9));
-      },
-    );
-
-    testWidgets('one search field narrows the groups by subject or name', (
-      tester,
-    ) async {
+    testWidgets('typing filters by subject or group name', (tester) async {
       await pumpPage(tester);
       await typeInto(tester, 'qabul-group-search', 'fransuz');
       expect(find.byKey(const ValueKey('group-1')), findsNothing);
@@ -554,61 +364,50 @@ void main() {
       expect(find.byKey(const ValueKey('group-1')), findsNothing);
       await typeInto(tester, 'qabul-group-search', 'zzz');
       expect(find.text('Mos guruh topilmadi.'), findsOneWidget);
-      // "Guruhsiz" is always there.
-      expect(find.byKey(const ValueKey('group-none')), findsOneWidget);
     });
 
-    testWidgets('day toggles put exact matches first and hide nothing', (
-      tester,
-    ) async {
+    testWidgets('the day toggles filter by weekday', (tester) async {
       await pumpPage(tester);
-      double top(int id) =>
-          tester.getTopLeft(find.byKey(ValueKey('group-$id'))).dy;
-      // As listed: 1 (Du Chor Ju), 2 (Se Pay Sha), 3 (Du Chor Ju).
-      expect(top(1), lessThan(top(2)));
       await tester.tap(find.widgetWithText(OptionPill, 'Se'));
       await tester.tap(find.widgetWithText(OptionPill, 'Pay'));
       await tester.tap(find.widgetWithText(OptionPill, 'Sha'));
       await tester.pumpAndSettle();
-      // Se Pay Sha picked: group 2 is the exact match and goes first.
-      expect(top(2), lessThan(top(1)));
-      expect(top(2), lessThan(top(3)));
-      expect(find.byKey(const ValueKey('group-1')), findsOneWidget);
-      expect(find.byKey(const ValueKey('group-3')), findsOneWidget);
-    });
-
-    testWidgets('five groups at first, "Yana ko\'rsatish" shows five more', (
-      tester,
-    ) async {
-      final many = <GroupMatch>[
-        for (var i = 1; i <= 12; i++)
-          makeGroup(i, 'Guruh $i', 'Ingliz tili', [1, 3, 5]),
-      ];
-      await pumpPage(tester, qabul: FakeQabul(list: many));
-      expect(find.byKey(const ValueKey('group-5')), findsOneWidget);
-      expect(find.byKey(const ValueKey('group-6')), findsNothing);
-      await tester.ensureVisible(find.byKey(const ValueKey('group-more')));
-      await tester.tap(find.byKey(const ValueKey('group-more')));
+      // Group 2 meets Se Pay Sha; the others meet other days.
+      expect(find.byKey(const ValueKey('group-2')), findsOneWidget);
+      expect(find.byKey(const ValueKey('group-1')), findsNothing);
+      expect(find.byKey(const ValueKey('group-3')), findsNothing);
+      await tester.tap(find.widgetWithText(OptionPill, 'Se'));
       await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('group-10')), findsOneWidget);
-      expect(find.byKey(const ValueKey('group-11')), findsNothing);
-      await tester.ensureVisible(find.byKey(const ValueKey('group-more')));
-      await tester.tap(find.byKey(const ValueKey('group-more')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const ValueKey('group-12')), findsOneWidget);
-      expect(find.byKey(const ValueKey('group-more')), findsNothing);
-      // The inline list has no scroll box of its own.
-      expect(
-        find.descendant(
-          of: find.byKey(const ValueKey('group-1')),
-          matching: find.byType(Scrollable),
-        ),
-        findsNothing,
-      );
+      // Se is off: group 2 needs a day that is no longer picked.
+      expect(find.byKey(const ValueKey('group-2')), findsNothing);
     });
 
     testWidgets(
-      'a group with no schedule says so; no capacity shows the students, not "Cheklanmagan"',
+      'six groups at first, "Ko\'proq" shows six more, with no scroll box',
+      (tester) async {
+        final many = <GroupMatch>[
+          for (var i = 1; i <= 14; i++)
+            makeGroup(i, 'Guruh $i', 'Ingliz tili', [1, 3, 5]),
+        ];
+        await pumpPage(tester, qabul: FakeQabul(list: many));
+        expect(find.byKey(const ValueKey('group-6')), findsOneWidget);
+        expect(find.byKey(const ValueKey('group-7')), findsNothing);
+        await tester.ensureVisible(find.byKey(const ValueKey('group-more')));
+        await tester.tap(find.byKey(const ValueKey('group-more')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('group-12')), findsOneWidget);
+        expect(find.byKey(const ValueKey('group-13')), findsNothing);
+        await tester.ensureVisible(find.byKey(const ValueKey('group-more')));
+        await tester.tap(find.byKey(const ValueKey('group-more')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('group-14')), findsOneWidget);
+        expect(find.byKey(const ValueKey('group-more')), findsNothing);
+        expect(find.byType(ListView), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'a group with no schedule says "Jadval kiritilmagan"; students show without a capacity',
       (tester) async {
         final bare = GroupMatch(
           groupId: 9,
@@ -627,12 +426,183 @@ void main() {
         await pumpPage(tester, qabul: FakeQabul(list: [bare, groups.first]));
         expect(find.text('Jadval kiritilmagan'), findsOneWidget);
         expect(find.text('14 o\'quvchi'), findsOneWidget);
-        expect(find.text('Cheklanmagan'), findsNothing);
         expect(find.text('Jahongir Rashidov'), findsOneWidget);
-        // The scheduled group still shows its own days and time.
-        expect(find.text('09:00–10:30'), findsOneWidget);
+        expect(find.text('Cheklanmagan'), findsNothing);
       },
     );
+
+    test(
+      'filterGroups: nothing typed keeps all; a group with no schedule needs no day',
+      () {
+        final bare = makeGroup(9, 'Fizika', 'Fizika', const []);
+        final all = [...groups, bare];
+        expect(filterGroups(all).map((g) => g.groupId), [1, 2, 3, 9]);
+        expect(filterGroups(all, query: 'ingliz').map((g) => g.groupId), [
+          1,
+          2,
+        ]);
+        expect(filterGroups(all, days: {1, 3, 5}).map((g) => g.groupId), [
+          1,
+          3,
+        ]);
+        expect(filterGroups(all, days: {1, 3}).map((g) => g.groupId), isEmpty);
+      },
+    );
+  });
+
+  group('saving', () {
+    testWidgets(
+      'pick a group, type name and phone, Enter: saved, cleared, back to the search',
+      (tester) async {
+        final saver = FakeSaver();
+        await pumpPage(tester, saver: saver);
+        await typeInto(tester, 'qabul-group-search', 'ingliz');
+        await tester.tap(find.byKey(const ValueKey('group-1')));
+        await tester.pump();
+        expect(focusedLabel(), 'qabul-name');
+        await fill(tester, name: 'Nodira Ismoilova');
+        await enter(tester);
+        await tester.pumpAndSettle();
+
+        final s = saver.saves.single;
+        expect(
+          (s.name, s.phone, s.groupId),
+          ('Nodira Ismoilova', '998901234567', 1),
+        );
+        expect(field(tester, 'qabul-name').controller!.text, '');
+        expect(field(tester, 'qabul-phone').controller!.text, '');
+        // The search stays; the cursor is back in it.
+        expect(field(tester, 'qabul-group-search').controller!.text, 'ingliz');
+        expect(focusedLabel(), 'qabul-search');
+        expect(chosen(tester, 'group-1'), isFalse);
+        expect(find.text('Saqlandi'), findsOneWidget);
+        expect(find.text('Qaytarish'), findsOneWidget);
+        expect(find.byType(AlertDialog), findsNothing);
+      },
+    );
+
+    testWidgets('the Saqlash button saves too', (tester) async {
+      final saver = FakeSaver();
+      await pumpPage(tester, saver: saver);
+      await tester.tap(find.byKey(const ValueKey('group-2')));
+      await fill(tester);
+      await tester.ensureVisible(find.text('Saqlash'));
+      await tester.tap(find.text('Saqlash'));
+      await tester.pumpAndSettle();
+      expect(saver.saves.single.groupId, 2);
+    });
+
+    testWidgets('"Guruhsiz saqlash" asks only name and phone', (tester) async {
+      final saver = FakeSaver();
+      await pumpPage(tester, saver: saver);
+      await tester.ensureVisible(find.byKey(const ValueKey('save-groupless')));
+      await tester.tap(find.byKey(const ValueKey('save-groupless')));
+      await tester.pump();
+      expect(find.text('Guruhsiz saqlanadi'), findsOneWidget);
+      expect(focusedLabel(), 'qabul-name');
+      await fill(tester);
+      await enter(tester);
+      await tester.pumpAndSettle();
+      expect(saver.saves.single.groupId, isNull);
+      // Cleared: the next person starts from nothing again.
+      expect(find.text('Guruhsiz saqlanadi'), findsNothing);
+    });
+
+    testWidgets(
+      'without a group and without "Guruhsiz saqlash" nothing is saved',
+      (tester) async {
+        final saver = FakeSaver();
+        await pumpPage(tester, saver: saver);
+        await fill(tester);
+        await enter(tester);
+        await tester.pump();
+        expect(saver.saves, isEmpty);
+        expect(find.textContaining('Guruhni tanlang'), findsOneWidget);
+        expect(focusedLabel(), 'qabul-search');
+        expect(field(tester, 'qabul-name').controller!.text, 'Ali');
+      },
+    );
+
+    testWidgets(
+      'Enter in the search box moves on to the name instead of saving',
+      (tester) async {
+        final saver = FakeSaver();
+        await pumpPage(tester, saver: saver);
+        await tester.tap(find.byKey(const ValueKey('group-1')));
+        await tester.tap(find.byKey(const ValueKey('qabul-group-search')));
+        await fill(tester);
+        await tester.tap(find.byKey(const ValueKey('qabul-group-search')));
+        await tester.pump();
+        await enter(tester);
+        expect(saver.saves, isEmpty);
+        expect(focusedLabel(), 'qabul-name');
+      },
+    );
+
+    testWidgets(
+      'a missing name or phone saves nothing and puts the cursor there',
+      (tester) async {
+        final saver = FakeSaver();
+        await pumpPage(tester, saver: saver);
+        await tester.tap(find.byKey(const ValueKey('group-1')));
+        await tester.pump();
+        await enter(tester);
+        await tester.pump();
+        expect(find.text('Ism kiriting'), findsOneWidget);
+        expect(focusedLabel(), 'qabul-name');
+        await typeInto(tester, 'qabul-name', 'Ali');
+        await typeInto(tester, 'qabul-phone', '9012');
+        await enter(tester);
+        await tester.pump();
+        expect(find.text('Telefon to\'liq emas'), findsOneWidget);
+        expect(focusedLabel(), 'qabul-phone');
+        expect(saver.saves, isEmpty);
+        expect(field(tester, 'qabul-name').controller!.text, 'Ali');
+      },
+    );
+
+    testWidgets(
+      'the phone starts with +998 and masks what is typed or pasted',
+      (tester) async {
+        await pumpPage(tester);
+        expect(find.text('+998'), findsOneWidget);
+        await typeInto(tester, 'qabul-phone', '901234567');
+        expect(field(tester, 'qabul-phone').controller!.text, '90 123 45 67');
+        await typeInto(tester, 'qabul-phone', '+998 90 111 22 33 99');
+        expect(field(tester, 'qabul-phone').controller!.text, '90 111 22 33');
+      },
+    );
+
+    testWidgets('holding Enter saves one person, not many', (tester) async {
+      final saver = FakeSaver()..hold = Completer<void>();
+      await pumpPage(tester, saver: saver);
+      await tester.tap(find.byKey(const ValueKey('group-1')));
+      await fill(tester);
+      await enter(tester);
+      await enter(tester);
+      await enter(tester);
+      saver.hold!.complete();
+      await tester.pumpAndSettle();
+      expect(saver.saves, hasLength(1));
+    });
+
+    testWidgets('if the local save itself fails the typed text stays', (
+      tester,
+    ) async {
+      final saver = FakeSaver()..failWith = StateError('disk full');
+      await pumpPage(tester, saver: saver);
+      await tester.tap(find.byKey(const ValueKey('group-1')));
+      await fill(tester);
+      await enter(tester);
+      await tester.pumpAndSettle();
+      expect(field(tester, 'qabul-name').controller!.text, 'Ali');
+      expect(field(tester, 'qabul-phone').controller!.text, '90 123 45 67');
+      expect(find.text('Saqlandi'), findsNothing);
+      saver.failWith = null;
+      await enter(tester);
+      await tester.pumpAndSettle();
+      expect(saver.saves, hasLength(1));
+    });
 
     testWidgets('a group pushed out of the list by the search is not saved', (
       tester,
@@ -640,133 +610,54 @@ void main() {
       final saver = FakeSaver();
       await pumpPage(tester, saver: saver);
       await tester.tap(find.byKey(const ValueKey('group-1')));
-      await tester.pumpAndSettle();
       await typeInto(tester, 'qabul-group-search', 'fransuz');
       await tester.pumpAndSettle();
-      await typeInto(tester, 'qabul-name', 'Ali');
-      await typeInto(tester, 'qabul-phone', '901234567');
+      await tester.ensureVisible(find.byKey(const ValueKey('save-groupless')));
+      await tester.tap(find.byKey(const ValueKey('save-groupless')));
+      await fill(tester);
       await enter(tester);
       await tester.pumpAndSettle();
       expect(saver.saves.single.groupId, isNull);
     });
 
-    testWidgets('the form is centred in the page', (tester) async {
-      await pumpPage(tester);
-      final card = tester.getRect(find.byKey(const ValueKey('qabul-name')));
-      // 1440 wide page: the 780 card sits in the middle of
-      // the page, not against the left edge.
-      expect(card.left, greaterThan(200));
-    });
-
-    testWidgets(
-      'on a slow connection the saved state shows at once, then follows the send',
-      (tester) async {
-        final saver = FakeSaver()..settle = Completer<QuickSaveResult>();
-        await pumpPage(tester, saver: saver);
-        await typeInto(tester, 'qabul-name', 'Ali');
-        await typeInto(tester, 'qabul-phone', '901234567');
-        await enter(tester);
-        await tester.pump();
-        // Not sent yet -- but saved, cleared and ready for the next person.
-        expect(find.text('Ali saqlandi'), findsOneWidget);
-        expect(field(tester, 'qabul-name').controller!.text, '');
-        expect(focusedLabel(), 'qabul-name');
-        saver.settle!.complete(const QuickSaveResult(SaveState.queued));
-        await tester.pumpAndSettle();
-        expect(
-          find.text('Ali saqlandi — internet qaytganda yuboriladi'),
-          findsOneWidget,
-        );
-      },
-    );
-
-    testWidgets(
-      'a refused save says why and points to the waiting list; nothing is lost',
-      (tester) async {
-        final saver = FakeSaver()..settle = Completer<QuickSaveResult>();
-        await pumpPage(tester, saver: saver);
-        await typeInto(tester, 'qabul-name', 'Ali');
-        await typeInto(tester, 'qabul-phone', '901234567');
-        await enter(tester);
-        await tester.pump();
-        saver.settle!.complete(
-          const QuickSaveResult(SaveState.refused, 'Sinovda joy yo\'q'),
-        );
-        await tester.pumpAndSettle();
-        expect(find.text('Ali saqlanmadi: Sinovda joy yo\'q'), findsOneWidget);
-        expect(find.text('Ko\'rish'), findsOneWidget);
-        expect(find.text('Qaytarish'), findsNothing);
-      },
-    );
-
-    testWidgets('if the local save itself fails the typed text stays', (
-      tester,
-    ) async {
-      final saver = FakeSaver()..failWith = StateError('disk full');
+    testWidgets('Qaytarish undoes that save', (tester) async {
+      final saver = FakeSaver();
       await pumpPage(tester, saver: saver);
-      await typeInto(tester, 'qabul-name', 'Ali');
-      await typeInto(tester, 'qabul-phone', '901234567');
+      await tester.tap(find.byKey(const ValueKey('group-1')));
+      await fill(tester, name: 'Ali');
       await enter(tester);
       await tester.pumpAndSettle();
-      expect(field(tester, 'qabul-name').controller!.text, 'Ali');
-      expect(field(tester, 'qabul-phone').controller!.text, '90 123 45 67');
-      expect(find.text('Ali saqlandi'), findsNothing);
-      // And it can be tried again.
-      saver.failWith = null;
-      await enter(tester);
+      await tester.tap(find.text('Qaytarish'));
       await tester.pumpAndSettle();
-      expect(saver.saves, hasLength(1));
+      expect(saver.undone, ['client-0']);
+      expect(find.text('Ali qaytarildi.'), findsOneWidget);
     });
 
-    testWidgets(
-      'Qaytarish undoes that save and puts the person back in the form',
-      (tester) async {
-        final saver = FakeSaver();
-        await pumpPage(tester, saver: saver);
-        await typeInto(tester, 'qabul-name', 'Ali');
-        await typeInto(tester, 'qabul-phone', '901234567');
-        await typeInto(tester, 'qabul-note', 'qulay');
-        await enter(tester);
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Qaytarish'));
-        await tester.pumpAndSettle();
-        expect(saver.undone, ['client-0']);
-        expect(find.text('Ali qaytarildi.'), findsOneWidget);
-        expect(field(tester, 'qabul-name').controller!.text, 'Ali');
-        expect(field(tester, 'qabul-phone').controller!.text, '90 123 45 67');
-        expect(field(tester, 'qabul-note').controller!.text, 'qulay');
-      },
-    );
+    testWidgets('a folded save says it changed nothing', (tester) async {
+      final saver = FakeSaver()..undoOutcome = UndoOutcome.unchanged;
+      await pumpPage(tester, saver: saver);
+      await tester.tap(find.byKey(const ValueKey('group-1')));
+      await fill(tester);
+      await enter(tester);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Qaytarish'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('o\'zgarmadi'), findsOneWidget);
+    });
 
-    testWidgets(
-      'Qaytarish does not overwrite the next person being typed; a folded save says it changed nothing',
-      (tester) async {
-        final saver = FakeSaver()..undoOutcome = UndoOutcome.unchanged;
-        await pumpPage(tester, saver: saver);
-        await typeInto(tester, 'qabul-name', 'Ali');
-        await typeInto(tester, 'qabul-phone', '901234567');
-        await enter(tester);
-        await tester.pumpAndSettle();
-        await typeInto(tester, 'qabul-name', 'Vali');
-        await tester.tap(find.text('Qaytarish'));
-        await tester.pumpAndSettle();
-        expect(field(tester, 'qabul-name').controller!.text, 'Vali');
-        expect(
-          find.textContaining('avvalgi so\'rovga qo\'shilgan, o\'zgarmadi'),
-          findsOneWidget,
-        );
-      },
-    );
-
-    testWidgets('the notice goes away by itself', (tester) async {
-      await pumpPage(tester);
-      await typeInto(tester, 'qabul-name', 'Ali');
-      await typeInto(tester, 'qabul-phone', '901234567');
+    testWidgets('a refused save says why', (tester) async {
+      final saver = FakeSaver()..settle = Completer<QuickSaveResult>();
+      await pumpPage(tester, saver: saver);
+      await tester.tap(find.byKey(const ValueKey('group-1')));
+      await fill(tester);
       await enter(tester);
       await tester.pump();
-      expect(find.text('Ali saqlandi'), findsOneWidget);
-      await tester.pump(const Duration(seconds: 13));
-      expect(find.text('Ali saqlandi'), findsNothing);
+      expect(find.text('Saqlandi'), findsOneWidget); // at once, before the send
+      saver.settle!.complete(
+        const QuickSaveResult(SaveState.refused, 'Telefon noto\'g\'ri'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Ali saqlanmadi: Telefon noto\'g\'ri'), findsOneWidget);
     });
 
     testWidgets(
@@ -778,13 +669,22 @@ void main() {
           find.text('Guruhlar yuklanmadi. Guruhsiz saqlash mumkin.'),
           findsOneWidget,
         );
-        await typeInto(tester, 'qabul-name', 'Ali');
-        await typeInto(tester, 'qabul-phone', '901234567');
+        await tester.ensureVisible(
+          find.byKey(const ValueKey('save-groupless')),
+        );
+        await tester.tap(find.byKey(const ValueKey('save-groupless')));
+        await fill(tester);
         await enter(tester);
         await tester.pumpAndSettle();
         expect(saver.saves.single.groupId, isNull);
       },
     );
+
+    testWidgets('the form is centred in the page', (tester) async {
+      await pumpPage(tester);
+      final card = tester.getRect(find.byKey(const ValueKey('qabul-name')));
+      expect(card.left, greaterThan(200));
+    });
   });
 
   group('the Oflayn chip', () {
@@ -819,7 +719,7 @@ void main() {
       sync.pendingCount.value = 1;
       await tester.pump(const Duration(seconds: 2));
       expect(find.textContaining('yuborilmagan'), findsNothing);
-      sync.pendingCount.value = 0; // it arrived
+      sync.pendingCount.value = 0;
       await tester.pump(const Duration(seconds: 10));
       expect(find.textContaining('yuborilmagan'), findsNothing);
     });
@@ -838,151 +738,78 @@ void main() {
     });
   });
 
-  group('ranking the groups', () {
-    test('a search keeps what matches the subject or the name', () {
-      expect(rankGroups(groups, query: 'fransuz').map((g) => g.groupId), [3]);
-      expect(rankGroups(groups, query: 'ingliz').map((g) => g.groupId), [1, 2]);
-      expect(rankGroups(groups, query: 'BEGINNER A').map((g) => g.groupId), [
-        1,
-      ]);
-    });
-
-    test(
-      'exact day matches come first, then by fit, then groups with no schedule',
-      () {
-        final noSchedule = makeGroup(9, 'Fizika', 'Fizika', const []);
-        final mixed = makeGroup(8, 'Aralash', 'Ingliz tili', [1, 6]);
-        final all = [noSchedule, groups[1], mixed, groups[0]];
-        // Du Chor Ju: group 1 exact; mixed fits one day; group 2 none; Fizika unknown.
-        final ids = rankGroups(all, days: {1, 3, 5}).map((g) => g.groupId);
-        expect(ids, [1, 8, 2, 9]);
-        // Nothing is ever hidden by the days.
-        expect(ids, hasLength(4));
+  group('the list', () {
+    testWidgets(
+      'rows show name, phone, group and date -- and only two buttons',
+      (tester) async {
+        final admissions = FakeAdmissions()
+          ..leads = [
+            lead(
+              1,
+              'Nodira Ismoilova',
+              groupId: 1,
+              groupName: 'Ingliz tili, Beginner A',
+            ),
+            lead(2, 'Sevara Tursunova', created: DateTime(2026, 10, 3)),
+          ];
+        await pumpPage(tester, admissions: admissions, view: QabulView.list);
+        expect(find.text('Nodira Ismoilova'), findsOneWidget);
+        expect(find.text('+998 90 000 00 01'), findsOneWidget);
+        expect(find.text('Ingliz tili, Beginner A'), findsOneWidget);
+        expect(find.text('Guruhsiz'), findsOneWidget);
+        expect(find.text('O\'quvchi qilish'), findsNWidgets(2));
+        expect(find.text('Arxiv'), findsNWidgets(2));
+        // Nothing that is not listed.
+        for (final word in ['Sinov', 'Jami', 'Filter', 'Qayta ochish']) {
+          expect(find.textContaining(word), findsNothing, reason: word);
+        }
+        expect(find.byKey(const ValueKey('row-more')), findsNothing);
       },
     );
-  });
 
-  group('the list', () {
-    testWidgets('rows show the person, group, trial and age -- and no totals', (
-      tester,
-    ) async {
-      final admissions = FakeAdmissions()
-        ..leads = [
-          lead(
-            1,
-            'Nodira Ismoilova',
-            groupId: 1,
-            groupName: 'Ingliz tili, Beginner A',
-          ),
-          lead(
-            2,
-            'Sevara Tursunova',
-            note: 'kechqurun',
-            created: DateTime.now().subtract(const Duration(days: 3)),
-          ),
-          lead(
-            3,
-            'Rustam Soliyev',
-            groupName: 'Matematika',
-            trial: DateTime(2026, 10, 21, 15),
-          ),
-        ];
-      await pumpPage(tester, admissions: admissions, view: QabulView.list);
-      expect(find.text('Nodira Ismoilova'), findsOneWidget);
-      expect(find.text('+998 90 000 00 01'), findsOneWidget);
-      expect(find.text('Ingliz tili, Beginner A'), findsOneWidget);
-      expect(find.text('Du, Chor, Ju · 09:00'), findsOneWidget);
-      expect(find.text('Guruhsiz'), findsWidgets);
-      expect(find.text('Ingliz tili, kechqurun'), findsOneWidget);
-      expect(find.text('Sinov: 21-okt 15:00'), findsOneWidget);
-      expect(find.text('Bugun'), findsWidgets);
-      expect(find.text('3 kun oldin'), findsOneWidget);
-      expect(find.text('Sinov darsi'), findsNWidgets(3));
-      expect(find.text('O\'quvchi qilish'), findsNWidgets(3));
-      expect(find.textContaining('Jami'), findsNothing);
-    });
-
-    testWidgets('search waits for a pause and the filters go to the server', (
+    testWidgets('search waits for a pause, then asks the server', (
       tester,
     ) async {
       final admissions = FakeAdmissions();
       await pumpPage(tester, admissions: admissions, view: QabulView.list);
-      expect(admissions.queries.last, {
-        'q': '',
-        'group': null,
-        'groupless': false,
-        'trial': false,
-        'archive': false,
-      });
-
+      expect(admissions.queries.last['q'], '');
       await typeInto(tester, 'qabul-search', 'nod');
       await tester.pump(const Duration(milliseconds: 100));
-      expect(admissions.queries.length, 1); // still typing
+      expect(admissions.queries.length, 1);
       await tester.pump(const Duration(milliseconds: 400));
       await tester.pumpAndSettle();
       expect(admissions.queries.last['q'], 'nod');
-
-      await tester.tap(find.byKey(const ValueKey('qabul-groupless')));
-      await tester.pumpAndSettle();
-      expect(admissions.queries.last['groupless'], isTrue);
-      await tester.tap(find.byKey(const ValueKey('qabul-with-trial')));
-      await tester.pumpAndSettle();
-      expect(admissions.queries.last['trial'], isTrue);
-      await tester.tap(find.byKey(const ValueKey('qabul-archive')));
-      await tester.pumpAndSettle();
-      expect(admissions.queries.last['archive'], isTrue);
-    });
-
-    testWidgets('the group filter picks one group', (tester) async {
-      final admissions = FakeAdmissions();
-      await pumpPage(tester, admissions: admissions, view: QabulView.list);
-      await tester.tap(find.byKey(const ValueKey('qabul-group-filter')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Ingliz tili, Beginner B').last);
-      await tester.pumpAndSettle();
-      expect(admissions.queries.last['group'], 2);
-      expect(find.text('Beginner B'), findsOneWidget);
+      // No filters beyond the search.
+      expect(admissions.queries.last['group'], isNull);
+      expect(admissions.queries.last['groupless'], isFalse);
+      expect(admissions.queries.last['trial'], isFalse);
+      expect(admissions.queries.last['archive'], isFalse);
     });
 
     testWidgets(
-      'Arxiv archives at once with a way back; the archive view offers Qayta ochish only',
+      'Arxiv takes the person off the list with a reason; nothing is deleted',
       (tester) async {
         final admissions = FakeAdmissions()
           ..leads = [lead(1, 'Nodira Ismoilova')];
         await pumpPage(tester, admissions: admissions, view: QabulView.list);
-        await tester.tap(find.byKey(const ValueKey('row-more')));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Arxiv').last);
+        await tester.tap(find.byKey(const ValueKey('row-archive')));
         await tester.pumpAndSettle();
         expect(admissions.stages, [
           (stage: 'not_interested', reason: 'Arxivga olindi'),
         ]);
         expect(find.byType(AlertDialog), findsNothing);
-        expect(find.text('Nodira Ismoilova arxivga olindi.'), findsOneWidget);
-        await tester.tap(find.text('Qaytarish'));
-        await tester.pumpAndSettle();
-        expect(admissions.stages.last.stage, 'contacted');
-
-        await tester.tap(find.byKey(const ValueKey('qabul-archive')));
-        await tester.pumpAndSettle();
-        expect(find.text('Qayta ochish'), findsOneWidget);
-        expect(find.text('Sinov darsi'), findsNothing);
-        expect(find.text('O\'quvchi qilish'), findsNothing);
       },
     );
 
     testWidgets(
-      'a person saved offline is listed first as "Yuborilmagan", without actions',
+      'a person saved offline is listed first as "Yuborilmagan", without buttons',
       (tester) async {
         final admissions = FakeAdmissions()
           ..pending = [lead(0, 'Ali Valiyev', pendingLocalId: 'local-1')]
           ..leads = [lead(2, 'Sevara Tursunova')];
         await pumpPage(tester, admissions: admissions, view: QabulView.list);
         expect(find.text('Yuborilmagan'), findsOneWidget);
-        expect(
-          find.text('O\'quvchi qilish'),
-          findsOneWidget,
-        ); // only Sevara's row
+        expect(find.text('O\'quvchi qilish'), findsOneWidget);
         final names = tester
             .widgetList<Text>(
               find.byWidgetPredicate(

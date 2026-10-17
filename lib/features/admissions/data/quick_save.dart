@@ -85,8 +85,6 @@ class QuickSaveRepository {
     required String phone,
     int? groupId,
     String? groupName,
-    DateTime? trialStartsAt,
-    String? note,
   }) async {
     final clientId = const Uuid().v4();
     await _outbox.enqueue(
@@ -102,8 +100,6 @@ class QuickSaveRepository {
           'full_name': fullName,
           'phone': phone,
           'group_id': groupId,
-          'trial_starts_at': trialStartsAt?.toUtc().toIso8601String(),
-          'note': note,
           // Nobody is there to decide when it is finally sent: a number that
           // already has an open request is added to it.
           'on_duplicate': 'merge',
