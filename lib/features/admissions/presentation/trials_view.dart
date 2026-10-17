@@ -150,7 +150,7 @@ class _TrialsViewState extends ConsumerState<TrialsView> {
                 }
                 return LayoutBuilder(
                   builder: (context, constraints) =>
-                      _asList || constraints.maxWidth < 1100
+                      _asList || constraints.maxWidth < 900
                       ? _list(sessions)
                       : _calendar(sessions),
                 );

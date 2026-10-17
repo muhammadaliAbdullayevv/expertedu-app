@@ -1,9 +1,6 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../app/theme/app_theme.dart';
 import '../../../core/extensions/build_context_x.dart';
 import '../../../core/formatters/currency_formatter.dart';
 import '../../groups/data/groups_repository.dart';
@@ -45,91 +42,54 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
     );
   }
 
-  void _reload() => setState(() => _future = _load());
-
-  Future<void> _refresh() async {
-    final future = _load();
-    setState(() => _future = future);
-    await future;
-  }
-
   @override
   Widget build(BuildContext context) {
     return RefreshIndicator(
-      onRefresh: _refresh,
+      onRefresh: () async {
+        final future = _load();
+        setState(() => _future = future);
+        await future;
+      },
       child: FutureBuilder<_Totals>(
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
             return const Center(child: CircularProgressIndicator());
           }
-          if (snapshot.hasError) return _LoadFailed(onRetry: _reload);
+          if (snapshot.hasError) {
+            return Center(child: Text('Xatolik: ${snapshot.error}'));
+          }
           final totals = snapshot.data!;
-          return LayoutBuilder(
-            builder: (context, constraints) {
-              const gap = 16.0;
-              final columns = constraints.maxWidth >= 1100
-                  ? 3
-                  : constraints.maxWidth >= 620
-                  ? 2
-                  : 1;
-              final side = constraints.maxWidth >= 840
-                  ? math.max(24.0, (constraints.maxWidth - 1400) / 2)
-                  : 16.0;
-              final contentWidth = constraints.maxWidth - 2 * side;
-              final cardWidth = (contentWidth - gap * (columns - 1)) / columns;
-              return ListView(
-                padding: EdgeInsets.fromLTRB(side, 24, side, 32),
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+            children: <Widget>[
+              Row(
                 children: <Widget>[
-                  Text(
-                    'Markaz statistikasi',
-                    style: context.textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Guruhlar, faol o\'quvchilar va to\'lovlar bo\'yicha joriy holat',
-                    style: context.textTheme.bodyMedium?.copyWith(
-                      color: context.colors.onSurfaceVariant,
+                  Expanded(
+                    child: _StatCard(
+                      icon: Icons.menu_book,
+                      label: 'Guruhlar',
+                      value: '${totals.groupCount}',
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  Wrap(
-                    spacing: gap,
-                    runSpacing: gap,
-                    children: <Widget>[
-                      SizedBox(
-                        width: cardWidth,
-                        height: 154,
-                        child: _StatCard(
-                          icon: Icons.menu_book_rounded,
-                          label: 'Guruhlar',
-                          value: '${totals.groupCount}',
-                        ),
-                      ),
-                      SizedBox(
-                        width: cardWidth,
-                        height: 154,
-                        child: _StatCard(
-                          icon: Icons.school_rounded,
-                          label: 'Faol o\'quvchilar',
-                          value: '${totals.activeStudents}',
-                        ),
-                      ),
-                      SizedBox(
-                        width: cardWidth,
-                        height: 154,
-                        child: _StatCard(
-                          icon: Icons.payments_rounded,
-                          label: 'Jami qarzdorlik',
-                          value: CurrencyFormatter.format(totals.totalOwed),
-                          highlight: totals.totalOwed > 0,
-                        ),
-                      ),
-                    ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _StatCard(
+                      icon: Icons.school,
+                      label: 'Faol o\'quvchilar',
+                      value: '${totals.activeStudents}',
+                    ),
                   ),
                 ],
-              );
-            },
+              ),
+              const SizedBox(height: 12),
+              _StatCard(
+                icon: Icons.payments,
+                label: 'Jami qarzdorlik (hammasi bo\'lib)',
+                value: CurrencyFormatter.format(totals.totalOwed),
+                highlight: totals.totalOwed > 0,
+              ),
+            ],
           );
         },
       ),
@@ -164,78 +124,33 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent = highlight ? context.colors.error : AppColors.accent;
     return Card(
-      margin: EdgeInsets.zero,
-      clipBehavior: Clip.antiAlias,
+      elevation: 0,
+      color: context.colors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: context.colors.outlineVariant),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Row(
-              children: <Widget>[
-                CircleAvatar(
-                  radius: 18,
-                  backgroundColor: accent.withValues(alpha: 0.1),
-                  foregroundColor: accent,
-                  child: Icon(icon, size: 19),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    label,
-                    style: context.textTheme.bodyMedium?.copyWith(
-                      color: context.colors.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-              ],
+            Icon(
+              icon,
+              color: highlight ? context.colors.error : context.colors.primary,
             ),
-            const Spacer(),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text(
-                value,
-                style: context.textTheme.headlineSmall?.copyWith(
-                  color: highlight ? context.colors.error : null,
-                  fontWeight: FontWeight.w700,
-                ),
+            const SizedBox(height: 10),
+            Text(
+              value,
+              style: context.textTheme.titleLarge?.copyWith(
+                color: highlight ? context.colors.error : null,
+                fontWeight: FontWeight.w700,
               ),
             ),
+            Text(label, style: context.textTheme.bodySmall),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _LoadFailed extends StatelessWidget {
-  const _LoadFailed({required this.onRetry});
-
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(
-            Icons.cloud_off_outlined,
-            size: 36,
-            color: context.colors.outline,
-          ),
-          const SizedBox(height: 12),
-          const Text('Statistikani yuklab bo\'lmadi'),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Qayta urinish'),
-          ),
-        ],
       ),
     );
   }

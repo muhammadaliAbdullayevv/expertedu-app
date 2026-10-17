@@ -65,8 +65,6 @@ class TableCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final headerStyle = context.textTheme.labelMedium?.copyWith(
       color: context.colors.onSurfaceVariant,
-      fontWeight: FontWeight.w600,
-      letterSpacing: 0.1,
     );
     return Card(
       margin: EdgeInsets.zero,
@@ -85,28 +83,10 @@ class TableCard extends StatelessWidget {
           Expanded(
             child: rowCount == 0
                 ? Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: <Widget>[
-                          Icon(
-                            Icons.inbox_outlined,
-                            size: 34,
-                            color: context.colors.outline,
-                          ),
-                          const SizedBox(height: 10),
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 360),
-                            child: Text(
-                              emptyText,
-                              textAlign: TextAlign.center,
-                              style: context.textTheme.bodyMedium?.copyWith(
-                                color: context.colors.onSurfaceVariant,
-                              ),
-                            ),
-                          ),
-                        ],
+                    child: Text(
+                      emptyText,
+                      style: context.textTheme.bodyMedium?.copyWith(
+                        color: context.colors.onSurfaceVariant,
                       ),
                     ),
                   )
@@ -114,22 +94,16 @@ class TableCard extends StatelessWidget {
                     itemCount: rowCount,
                     separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, row) => InkWell(
-                      mouseCursor: onRowTap == null
-                          ? null
-                          : SystemMouseCursors.click,
                       onTap: onRowTap == null ? null : () => onRowTap!(row),
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(minHeight: 58),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 12,
-                          ),
-                          child: _layout(<Widget>[
-                            for (var c = 0; c < columns.length; c++)
-                              cell(context, row, c),
-                          ]),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 12,
                         ),
+                        child: _layout(<Widget>[
+                          for (var c = 0; c < columns.length; c++)
+                            cell(context, row, c),
+                        ]),
                       ),
                     ),
                   ),

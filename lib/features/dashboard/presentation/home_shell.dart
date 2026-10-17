@@ -13,7 +13,6 @@ import '../../settings/presentation/settings_screen.dart';
 import '../../stats/presentation/stats_screen.dart';
 import '../../students/presentation/students_list_screen.dart';
 import '../../subjects/presentation/subjects_list_screen.dart';
-import '../../teachers/presentation/teachers_screen.dart';
 import 'dashboard_screen.dart';
 import 'desktop_sidebar.dart';
 
@@ -32,12 +31,6 @@ enum _Tab {
     desktopOnly: true,
   ),
   subjects(Icons.menu_book_outlined, Icons.menu_book_rounded, 'Fanlar'),
-  teachers(
-    Icons.co_present_outlined,
-    Icons.co_present_rounded,
-    'O\'qituvchilar',
-    desktopOnly: true,
-  ),
   students(Icons.school_outlined, Icons.school_rounded, 'O\'quvchilar'),
   debtors(
     Icons.account_balance_wallet_outlined,
@@ -113,7 +106,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   }
 
   final _dashboardKey = GlobalKey<DashboardScreenState>();
-  final _teachersKey = GlobalKey<TeachersScreenState>();
   final _subjectsKey = GlobalKey<SubjectsListScreenState>();
   final _studentsKey = GlobalKey<StudentsListScreenState>();
   final _debtorsKey = GlobalKey<DebtorsScreenState>();
@@ -139,10 +131,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     _Tab.timetable: TimetableScreen(key: _timetableKey),
     _Tab.finance: FinanceScreen(key: _financeKey),
     _Tab.subjects: SubjectsListScreen(key: _subjectsKey),
-    _Tab.teachers: TeachersScreen(
-      key: _teachersKey,
-      onOpenFinance: () => _selectTab(_Tab.finance),
-    ),
     _Tab.students: StudentsListScreen(key: _studentsKey),
     _Tab.debtors: DebtorsScreen(key: _debtorsKey),
     _Tab.stats: const StatsScreen(),
@@ -216,14 +204,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                   tab == _Tab.debtors ||
                   tab == _Tab.admissions ||
                   tab == _Tab.timetable ||
-                  tab == _Tab.finance ||
-                  tab == _Tab.teachers))
+                  tab == _Tab.finance))
             IconButton(
               tooltip:
                   tab == _Tab.admissions ||
                       tab == _Tab.timetable ||
-                      tab == _Tab.finance ||
-                      tab == _Tab.teachers
+                      tab == _Tab.finance
                   ? 'Yangilash (F5)'
                   : 'Yangilash',
               icon: const Icon(Icons.refresh_rounded),
@@ -232,7 +218,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                 _Tab.admissions => _admissionsKey.currentState?.reload(),
                 _Tab.timetable => _timetableKey.currentState?.reload(),
                 _Tab.finance => _financeKey.currentState?.reload(),
-                _Tab.teachers => _teachersKey.currentState?.reload(),
                 _ => _debtorsKey.currentState?.reload(),
               },
             ),
@@ -294,8 +279,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                     actionIcon: Icons.person_add_alt_1_rounded,
                     onAction: () =>
                         _studentsKey.currentState?.showCreateSheet(),
-                    accountName: _session.user?.fullName,
-                    accountRole: isOwner ? 'Markaz egasi' : 'Administrator',
                   ),
                   Expanded(child: content),
                 ],

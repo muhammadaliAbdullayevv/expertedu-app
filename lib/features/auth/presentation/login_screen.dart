@@ -17,7 +17,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _submitting = false;
-  bool _obscurePassword = true;
 
   @override
   void dispose() {
@@ -52,57 +51,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
-                        Row(
-                          children: <Widget>[
-                            Container(
-                              width: 48,
-                              height: 48,
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: context.colors.primaryContainer,
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: Image.asset(
-                                'assets/branding/logo_mark.png',
-                                filterQuality: FilterQuality.medium,
-                              ),
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: <Widget>[
-                                  Text(
-                                    context.strings.appName,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: context.textTheme.titleLarge,
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    'Markaz boshqaruv paneli',
-                                    style: context.textTheme.bodySmall
-                                        ?.copyWith(
-                                          color:
-                                              context.colors.onSurfaceVariant,
-                                        ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 28),
                         Text(
-                          'Hisobingizga kiring',
-                          style: context.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          'Davom etish uchun telefon va parolingizni kiriting.',
-                          style: context.textTheme.bodySmall?.copyWith(
-                            color: context.colors.onSurfaceVariant,
-                          ),
+                          context.strings.appName,
+                          textAlign: TextAlign.center,
+                          style: context.textTheme.headlineSmall,
                         ),
                         const SizedBox(height: 24),
                         UzPhoneField(
@@ -116,22 +68,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         const SizedBox(height: 16),
                         TextFormField(
                           controller: _passwordController,
-                          obscureText: _obscurePassword,
+                          obscureText: true,
                           decoration: InputDecoration(
                             labelText: context.strings.password,
-                            suffixIcon: IconButton(
-                              tooltip: _obscurePassword
-                                  ? 'Parolni ko\'rsatish'
-                                  : 'Parolni yashirish',
-                              onPressed: () => setState(
-                                () => _obscurePassword = !_obscurePassword,
-                              ),
-                              icon: Icon(
-                                _obscurePassword
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
-                              ),
-                            ),
                           ),
                           validator: (value) => (value == null || value.isEmpty)
                               ? context.strings.requiredField

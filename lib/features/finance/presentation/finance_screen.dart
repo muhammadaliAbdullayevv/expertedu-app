@@ -163,95 +163,33 @@ class _SummaryViewState extends ConsumerState<_SummaryView>
         return ListView(
           padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
           children: <Widget>[
+            Text(
+              DateFormatters.monthYearLabel(current.month),
+              style: context.textTheme.titleMedium,
+            ),
+            const SizedBox(height: 12),
             Row(
               children: <Widget>[
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        'Moliyaviy ko\'rinish',
-                        style: context.textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        DateFormatters.monthYearLabel(current.month),
-                        style: context.textTheme.bodySmall?.copyWith(
-                          color: context.colors.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
+                _Kpi('Tushum', _money(current.income), 'to\'lovlar'),
+                _Kpi('Xarajat', _money(current.expenses), 'oyliklar bilan'),
+                _Kpi(
+                  'Foyda',
+                  _money(current.profit),
+                  'tushum − xarajat',
+                  color: current.profit < 0
+                      ? AppColors.danger
+                      : AppColors.success,
                 ),
-                Text(
-                  'So\'nggi 6 oy',
-                  style: context.textTheme.labelLarge?.copyWith(
-                    color: context.colors.onSurfaceVariant,
-                  ),
+                _Kpi(
+                  'To\'lanmagan oyliklar',
+                  _money(summary.salariesUnpaidThisMonth),
+                  'bu oy hisoblangan, hali to\'lanmagan',
+                  color: summary.salariesUnpaidThisMonth > 0
+                      ? AppColors.danger
+                      : null,
+                  last: true,
                 ),
               ],
-            ),
-            const SizedBox(height: 16),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                const gap = 12.0;
-                final columns = constraints.maxWidth >= 1080 ? 4 : 2;
-                final width =
-                    (constraints.maxWidth - gap * (columns - 1)) / columns;
-                return Wrap(
-                  spacing: gap,
-                  runSpacing: gap,
-                  children: <Widget>[
-                    SizedBox(
-                      width: width,
-                      height: 156,
-                      child: _Kpi(
-                        'Tushum',
-                        _money(current.income),
-                        'to\'lovlar',
-                        icon: Icons.south_west_rounded,
-                      ),
-                    ),
-                    SizedBox(
-                      width: width,
-                      height: 156,
-                      child: _Kpi(
-                        'Xarajat',
-                        _money(current.expenses),
-                        'oyliklar bilan',
-                        icon: Icons.north_east_rounded,
-                        color: AppColors.inkMuted,
-                      ),
-                    ),
-                    SizedBox(
-                      width: width,
-                      height: 156,
-                      child: _Kpi(
-                        'Foyda',
-                        _money(current.profit),
-                        'tushum − xarajat',
-                        icon: Icons.account_balance_rounded,
-                        color: current.profit < 0
-                            ? AppColors.danger
-                            : AppColors.success,
-                      ),
-                    ),
-                    SizedBox(
-                      width: width,
-                      height: 156,
-                      child: _Kpi(
-                        'To\'lanmagan oyliklar',
-                        _money(summary.salariesUnpaidThisMonth),
-                        'hisoblangan, hali to\'lanmagan',
-                        icon: Icons.schedule_rounded,
-                        color: summary.salariesUnpaidThisMonth > 0
-                            ? AppColors.danger
-                            : null,
-                      ),
-                    ),
-                  ],
-                );
-              },
             ),
             const SizedBox(height: 16),
             Card(
@@ -261,22 +199,7 @@ class _SummaryViewState extends ConsumerState<_SummaryView>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
-                    Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: Text(
-                            'Oylik dinamika',
-                            style: context.textTheme.titleMedium,
-                          ),
-                        ),
-                        _ChartLegend(color: AppColors.accent, label: 'Tushum'),
-                        const SizedBox(width: 16),
-                        _ChartLegend(
-                          color: AppColors.inkMuted,
-                          label: 'Xarajat',
-                        ),
-                      ],
-                    ),
+                    Text('Oxirgi 6 oy', style: context.textTheme.titleSmall),
                     const SizedBox(height: 12),
                     for (final month in summary.months.reversed)
                       _MonthRow(month: month, most: most),
@@ -334,101 +257,57 @@ class _Kpi extends StatelessWidget {
     this.label,
     this.value,
     this.note, {
-    required this.icon,
     this.color,
+    this.last = false,
   });
 
   final String label;
   final String value;
   final String note;
-  final IconData icon;
   final Color? color;
 
+  /// The row's last card: no gap after it, so the row lines up with the
+  /// cards below.
+  final bool last;
+
   @override
   Widget build(BuildContext context) {
-    final accent = color ?? context.colors.primary;
-    return Card(
-      margin: EdgeInsets.zero,
-      clipBehavior: Clip.antiAlias,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: accent.withValues(alpha: 0.1),
-                  foregroundColor: accent,
-                  child: Icon(icon, size: 17),
+    return Expanded(
+      child: Card(
+        margin: EdgeInsets.only(right: last ? 0 : 12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                label,
+                style: context.textTheme.labelLarge?.copyWith(
+                  color: context.colors.onSurfaceVariant,
                 ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Text(
-                    label,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: context.textTheme.labelLarge?.copyWith(
-                      color: context.colors.onSurfaceVariant,
-                    ),
+              ),
+              const SizedBox(height: 6),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  value,
+                  style: context.textTheme.headlineSmall?.copyWith(
+                    color: color,
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
-              child: Text(
-                value,
-                maxLines: 1,
-                style: context.textTheme.headlineSmall?.copyWith(
-                  color: color,
-                  fontWeight: FontWeight.w700,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                note,
+                style: context.textTheme.bodySmall?.copyWith(
+                  color: context.colors.onSurfaceVariant,
                 ),
               ),
-            ),
-            const Spacer(),
-            Text(
-              note,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: context.textTheme.bodySmall?.copyWith(
-                color: context.colors.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ChartLegend extends StatelessWidget {
-  const _ChartLegend({required this.color, required this.label});
-
-  final Color color;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: context.textTheme.bodySmall?.copyWith(
-            color: context.colors.onSurfaceVariant,
+            ],
           ),
         ),
-      ],
+      ),
     );
   }
 }

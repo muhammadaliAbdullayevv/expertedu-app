@@ -41,7 +41,6 @@ class DesktopDashboardState extends ConsumerState<DesktopDashboard> {
   /// Below this the side-by-side panels get too narrow for a debtor's name,
   /// amount and payment button on one line -- they stack instead.
   static const double _twoColumnMinWidth = 1100;
-  static const double _fourKpiMinWidth = 1080;
 
   late Future<DashboardSummary> _summary;
 
@@ -84,7 +83,9 @@ class DesktopDashboardState extends ConsumerState<DesktopDashboard> {
                 return _content(
                   context,
                   snapshot.data!,
-                  availableWidth: constraints.maxWidth - 2 * sidePadding,
+                  twoColumns:
+                      constraints.maxWidth - 2 * sidePadding >=
+                      _twoColumnMinWidth,
                 );
               },
             ),
@@ -97,15 +98,11 @@ class DesktopDashboardState extends ConsumerState<DesktopDashboard> {
   Widget _content(
     BuildContext context,
     DashboardSummary summary, {
-    required double availableWidth,
+    required bool twoColumns,
   }) {
     final planProgress = summary.monthlyPlan == 0
         ? 0.0
         : (summary.collectedThisMonth / summary.monthlyPlan).clamp(0.0, 1.0);
-    final twoColumns = availableWidth >= _twoColumnMinWidth;
-    final kpiColumns = availableWidth >= _fourKpiMinWidth ? 4 : 2;
-    const kpiGap = 14.0;
-    final kpiWidth = (availableWidth - kpiGap * (kpiColumns - 1)) / kpiColumns;
 
     // What needs doing (today, the call log) and money (debts, revenue,
     // payments) -- side by side when there's room, stacked otherwise.
@@ -130,194 +127,65 @@ class DesktopDashboardState extends ConsumerState<DesktopDashboard> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Text(
-                    'Bugungi holat',
-                    style: context.textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Markaz faoliyati, qabul va moliya ko\'rsatkichlari',
-                    style: context.textTheme.bodyMedium?.copyWith(
-                      color: context.colors.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 16),
-            _DateBadge(date: DateFormatters.date(summary.today)),
-          ],
-        ),
-        const SizedBox(height: 20),
-        Wrap(
-          spacing: kpiGap,
-          runSpacing: kpiGap,
-          children: <Widget>[
-            SizedBox(
-              width: kpiWidth,
-              height: 168,
-              child: _KpiCard(
-                icon: Icons.school_rounded,
-                label: 'Faol o\'quvchilar',
-                value: '${summary.activeStudents}',
-                detail:
-                    '${summary.activeGroups} guruh · +${summary.newStudentsThisMonth} yangi bu oy',
-              ),
-            ),
-            SizedBox(
-              width: kpiWidth,
-              height: 168,
-              child: _KpiCard(
-                icon: Icons.payments_rounded,
-                label: 'Bu oy tushum',
-                value: CurrencyFormatter.format(summary.collectedThisMonth),
-                detail:
-                    'Oylik reja: ${CurrencyFormatter.format(summary.monthlyPlan)}',
-                progress: planProgress,
-              ),
-            ),
-            SizedBox(
-              width: kpiWidth,
-              height: 168,
-              child: _KpiCard(
-                icon: Icons.warning_amber_rounded,
-                label: 'Qarzdorlik',
-                value: CurrencyFormatter.format(summary.totalDebt),
-                detail: '${summary.debtorCount} o\'quvchi qarzdor',
-                alert: summary.totalDebt > 0,
-                onTap: widget.onOpenDebtors,
-              ),
-            ),
-            SizedBox(
-              width: kpiWidth,
-              height: 168,
-              child: _KpiCard(
-                icon: Icons.phone_in_talk_rounded,
-                label: 'Yangi so\'rovlar (7 kun)',
-                value: '${summary.newLeadsThisWeek}',
-                detail: '${summary.openLeads} ta ochiq so\'rov',
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 22),
-        if (twoColumns)
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
               Expanded(
-                flex: 3,
-                child: _DashboardColumn(
-                  title: 'Kundalik ishlar',
-                  subtitle: 'Sinov darslari va yangi murojaatlar',
-                  children: work,
+                child: _KpiCard(
+                  icon: Icons.school_rounded,
+                  label: 'Faol o\'quvchilar',
+                  value: '${summary.activeStudents}',
+                  detail:
+                      '${summary.activeGroups} guruh · +${summary.newStudentsThisMonth} yangi bu oy',
                 ),
               ),
               const SizedBox(width: 16),
               Expanded(
-                flex: 2,
-                child: _DashboardColumn(
-                  title: 'Moliya',
-                  subtitle: 'Qarzdorlik, tushum va to\'lovlar',
-                  children: money,
+                child: _KpiCard(
+                  icon: Icons.payments_rounded,
+                  label: 'Bu oy tushum',
+                  value: CurrencyFormatter.format(summary.collectedThisMonth),
+                  detail:
+                      'Oylik reja: ${CurrencyFormatter.format(summary.monthlyPlan)}',
+                  progress: planProgress,
                 ),
               ),
-            ],
-          )
-        else
-          _column(<Widget>[
-            _DashboardColumn(
-              title: 'Kundalik ishlar',
-              subtitle: 'Sinov darslari va yangi murojaatlar',
-              children: work,
-            ),
-            _DashboardColumn(
-              title: 'Moliya',
-              subtitle: 'Qarzdorlik, tushum va to\'lovlar',
-              children: money,
-            ),
-          ]),
-      ],
-    );
-  }
-}
-
-class _DateBadge extends StatelessWidget {
-  const _DateBadge({required this.date});
-
-  final String date;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration: BoxDecoration(
-        color: context.colors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: context.colors.outlineVariant),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(
-            Icons.calendar_today_rounded,
-            size: 17,
-            color: context.colors.primary,
-          ),
-          const SizedBox(width: 9),
-          Text(
-            date,
-            style: context.textTheme.labelLarge?.copyWith(
-              color: context.colors.onSurface,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DashboardColumn extends StatelessWidget {
-  const _DashboardColumn({
-    required this.title,
-    required this.subtitle,
-    required this.children,
-  });
-
-  final String title;
-  final String subtitle;
-  final List<Widget> children;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(2, 0, 2, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(title, style: context.textTheme.titleMedium),
-              const SizedBox(height: 3),
-              Text(
-                subtitle,
-                style: context.textTheme.bodySmall?.copyWith(
-                  color: context.colors.onSurfaceVariant,
+              const SizedBox(width: 16),
+              Expanded(
+                child: _KpiCard(
+                  icon: Icons.warning_amber_rounded,
+                  label: 'Qarzdorlik',
+                  value: CurrencyFormatter.format(summary.totalDebt),
+                  detail: '${summary.debtorCount} o\'quvchi qarzdor',
+                  alert: summary.totalDebt > 0,
+                  onTap: widget.onOpenDebtors,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: _KpiCard(
+                  icon: Icons.phone_in_talk_rounded,
+                  label: 'Yangi so\'rovlar (7 kun)',
+                  value: '${summary.newLeadsThisWeek}',
+                  detail: '${summary.openLeads} ta ochiq so\'rov',
                 ),
               ),
             ],
           ),
         ),
-        _column(children),
+        const SizedBox(height: 16),
+        if (twoColumns)
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(flex: 3, child: _column(work)),
+              const SizedBox(width: 16),
+              Expanded(flex: 2, child: _column(money)),
+            ],
+          )
+        else
+          _column(<Widget>[...work, ...money]),
       ],
     );
   }
@@ -464,17 +332,11 @@ class _KpiCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 14),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  value,
-                  maxLines: 1,
-                  softWrap: false,
-                  style: context.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: alert ? context.colors.error : null,
-                  ),
+              Text(
+                value,
+                style: context.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: alert ? context.colors.error : null,
                 ),
               ),
               const Spacer(),
