@@ -16,6 +16,7 @@ from ..schemas import (
     AddToGroupRequest,
     ProfileAttendance,
     ProfileGroup,
+    ProfileMark,
     ProfilePayment,
     ScheduleSlot,
     Student,
@@ -345,9 +346,10 @@ async def student_profile(student_id: int):
         )
         marks = await conn.fetch(
             """
-            select a.enrollment_id, a.status
+            select a.enrollment_id, a.status, l.starts_at as at, g.name as group_name
             from attendance a join lessons l on l.id = a.lesson_id
             join enrollments e on e.id = a.enrollment_id
+            join groups g on g.id = e.group_id
             where e.student_id = $1
             order by l.starts_at, a.id
             """,
@@ -422,6 +424,7 @@ async def student_profile(student_id: int):
         debt_since=debt_since,
         overdue_days=max((today - debt_since).days, 0) if debt_since else 0,
         activity=activity,
+        marks=[ProfileMark(at=m["at"], group_name=m["group_name"], status=m["status"]) for m in reversed(marks)][:30],
     )
 
 

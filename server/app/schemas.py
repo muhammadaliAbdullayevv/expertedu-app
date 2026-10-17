@@ -1162,6 +1162,12 @@ class ProfileAttendance(BaseModel):
     recent: list[str] = []
 
 
+class ProfileMark(BaseModel):
+    at: datetime
+    group_name: str
+    status: str
+
+
 class ProfileGroup(BaseModel):
     enrollment_id: int
     group_id: int
@@ -1207,6 +1213,8 @@ class StudentProfile(BaseModel):
     debt_since: date | None = None
     overdue_days: int = 0
     activity: list["ActivityItem"] = []
+    # The last thirty marked lessons, newest first -- the Davomat tab.
+    marks: list["ProfileMark"] = []
 
 
 class StudentGroupRef(BaseModel):

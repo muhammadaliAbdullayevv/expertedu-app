@@ -116,6 +116,11 @@ async def test_the_profile_has_groups_attendance_balance_and_payments(school):
     assert att["recent"] == ["present", "present", "late", "absent", "present", "excused"]
     # Overall: 4 + 0 came; 5 + 2 expected.
     assert p["attendance"]["total"] == 8 and p["attendance"]["rate"] == round(4 / 7, 4)
+    # The Davomat tab: dated lessons, newest first.
+    assert len(p["marks"]) == 8
+    mark_times = [datetime.fromisoformat(m["at"]) for m in p["marks"]]
+    assert mark_times == sorted(mark_times, reverse=True)
+    assert {m["group_name"] for m in p["marks"]} == {"Beginner A", "Matematika 9"}
     # Payments, with who took them.
     assert [(x["amount"], x["method"], x["group_name"], x["status"]) for x in p["payments"]] == [
         (1000, "cash", "Beginner A", "valid"),
