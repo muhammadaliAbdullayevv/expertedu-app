@@ -46,7 +46,9 @@ create table if not exists teachers (
   -- How they are paid: 'percent' of payments (salary_percent) or a 'fixed'
   -- monthly amount; a group's own rule wins (0014).
   salary_method text check (salary_method in ('percent', 'fixed')),
-  salary_fixed bigint check (salary_fixed is null or salary_fixed >= 0)
+  salary_fixed bigint check (salary_fixed is null or salary_fixed >= 0),
+  -- Stored file name of the profile photo; null = none (0020).
+  photo text
 );
 
 create table if not exists groups (
@@ -91,7 +93,9 @@ create table if not exists students (
   created_by bigint references users(id),
   created_at timestamptz not null default now(),
   -- Where they live, typed by hand (0019).
-  address text
+  address text,
+  -- Stored file name of the profile photo; null = none (0020).
+  photo text
 );
 
 -- A student can be enrolled in multiple groups at once, each its own

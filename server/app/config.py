@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 
 class Settings:
@@ -12,6 +13,9 @@ class Settings:
     eskiz_base_url: str = os.environ.get("ESKIZ_BASE_URL", "https://notify.eskiz.uz")
 
     fcm_service_account_json: str | None = os.environ.get("FCM_SERVICE_ACCOUNT_JSON") or None
+
+    # Where profile photos are kept. Not under uploads/, which is public.
+    photos_dir: str = os.environ.get("PHOTOS_DIR") or str(Path(__file__).resolve().parent.parent / "photos")
 
     public_base_url: str = os.environ.get("PUBLIC_BASE_URL", "https://expertedu-api.ai-student-helper.site")
 

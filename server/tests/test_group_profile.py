@@ -23,7 +23,7 @@ async def test_the_profile_names_the_teacher_the_schedule_and_the_billing_day(ap
     p = await profile(school, school.g1)
     assert p["group"]["name"] == "Beginner A"
     assert p["subject_name"] == "Ingliz tili"
-    assert p["teacher"] == {"id": school.t1, "full_name": "Madina Karimova", "phone": "998901110000"}
+    assert p["teacher"] == {"id": school.t1, "full_name": "Madina Karimova", "phone": "998901110000", "photo": None}
     assert [(s["weekday"], s["starts_at"][:5], s["ends_at"][:5]) for s in p["schedule"]] == [
         (1, "09:00", "10:30"), (3, "09:00", "10:30"), (5, "09:00", "10:30"),
     ]

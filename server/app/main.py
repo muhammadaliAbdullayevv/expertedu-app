@@ -17,6 +17,7 @@ from .routes import (
     finance,
     follow_ups,
     groups,
+    photos,
     health,
     inquiries,
     leads,
@@ -74,3 +75,4 @@ app.include_router(users.router)
 app.include_router(staff.router)
 app.include_router(timetable.router)
 app.include_router(finance.router)
+app.include_router(photos.router)

@@ -290,7 +290,7 @@ async def group_profile(group_id: int):
         subject_name = await conn.fetchval("select name from subjects where id = $1", group.subject_id)
         teacher = None
         if group.teacher_id is not None:
-            row = await conn.fetchrow("select id, full_name, phone from teachers where id = $1", group.teacher_id)
+            row = await conn.fetchrow("select id, full_name, phone, photo from teachers where id = $1", group.teacher_id)
             teacher = GroupTeacher(**row) if row else None
         slots = await schedule.load_slots(conn, group_ids=[group_id], active_only=False)
         people = await conn.fetchrow(
@@ -435,7 +435,7 @@ async def get_roster(group_id: int, include_withdrawn: bool = False):
     rows = await db.pool().fetch(
         f"""
         select e.id as enrollment_id, e.student_id, s.full_name as student_full_name,
-               s.phone as student_phone, e.joined_at, e.status, eb.owed as balance,
+               s.phone as student_phone, s.photo as student_photo, e.joined_at, e.status, eb.owed as balance,
                e.joined_at > current_date - 14 as is_new
         from enrollments e
         join students s on s.id = e.student_id

@@ -136,6 +136,8 @@ class Teacher(BaseModel):
     note: str | None
     is_active: bool
     created_at: datetime
+    # Stored name of the profile photo (fetch it from /photos/file/{name}); null = none.
+    photo: str | None = None
 
 
 class TeacherListItem(Teacher):
@@ -170,6 +172,7 @@ class Student(BaseModel):
     heard_from: str | None = None
     address: str | None = None
     created_at: datetime
+    photo: str | None = None
 
 
 class StudentListItem(BaseModel):
@@ -184,6 +187,7 @@ class StudentListItem(BaseModel):
     telegram_username: str | None
     note: str | None
     created_at: datetime
+    photo: str | None = None
     balance: int
     # The groups they study in now, and how their last lessons went
     # (oldest first, at most ten) -- the table's attendance indicator.
@@ -225,6 +229,7 @@ class RosterEntry(BaseModel):
     student_id: int
     student_full_name: str
     student_phone: str
+    student_photo: str | None = None
     joined_at: date
     status: str
     balance: int
@@ -1268,6 +1273,11 @@ class GroupTeacher(BaseModel):
     id: int
     full_name: str
     phone: str | None = None
+    photo: str | None = None
+
+
+class PhotoResult(BaseModel):
+    photo: str | None
 
 
 class GroupWaiting(BaseModel):
@@ -1308,3 +1318,70 @@ class GroupProfile(BaseModel):
     next_billing_date: date | None = None
     next_lessons: list[datetime] = []
     waiting: list[GroupWaiting] = []
+
+
+class TeacherGroupCard(BaseModel):
+    """One of a teacher's groups on their page: how big it is, when it meets,
+    and what it brought in this month."""
+
+    group_id: int
+    name: str
+    subject_name: str | None = None
+    level: str | None = None
+    student_count: int
+    capacity: int | None = None
+    schedule: list[ScheduleSlot] = []
+    # The rule this group is paid by: its own, else the teacher's.
+    salary_method: str | None = None
+    salary_percent: float | None = None
+    salary_fixed: int | None = None
+    own_rule: bool = False
+    # This month: what the group's students paid, and the teacher's share of it.
+    collected: int = 0
+    share: int = 0
+    # Over the last 30 days; null until a lesson was marked.
+    attendance_rate: float | None = None
+
+
+class TeacherWeek(BaseModel):
+    """This week's lessons: planned, marked, cancelled, and the ones that
+    already took place but nobody marked."""
+
+    planned: int = 0
+    marked: int = 0
+    cancelled: int = 0
+    unmarked_past: int = 0
+
+
+class TeacherMonthPoint(BaseModel):
+    month: date
+    collected: int
+    earned: int
+    paid: int
+    closed: bool = False
+
+
+class TeacherProfile(BaseModel):
+    """A teacher's page in one answer."""
+
+    teacher: Teacher
+    # The teacher's own pay rule (a group's own rule wins for that group).
+    salary_method: str | None = None
+    salary_percent: float | None = None
+    salary_fixed: int | None = None
+    groups: list[TeacherGroupCard] = []
+    student_total: int = 0
+    # The salary month shown (its first day) and its figures, worked out the
+    # same way as on the Finance page.
+    month: date
+    month_closed: bool = False
+    collected: int = 0
+    earned: int = 0
+    paid: int = 0
+    remaining: int = 0
+    attendance: ProfileAttendance
+    week: TeacherWeek
+    # Today's and tomorrow's lessons.
+    lessons: list[TimetableLesson] = []
+    # The six months up to the one shown, oldest first.
+    history: list[TeacherMonthPoint] = []
