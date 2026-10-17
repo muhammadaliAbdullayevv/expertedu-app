@@ -1,0 +1,40 @@
+name: Windows build
+
+# Windows apps can only be built on Windows, so CI does it: every push that
+# touches the app, or on demand from the Actions tab. Download the result
+# from the run's "expert-edu-center-windows" artifact and ship the whole
+# folder -- the .exe needs the DLLs and data/ beside it.
+on:
+  push:
+    branches: [master]
+    paths:
+      - "lib/**"
+      - "assets/**"
+      - "windows/**"
+      - "pubspec.yaml"
+      - "pubspec.lock"
+      - ".github/workflows/windows.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.0
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter test
+      - run: flutter build windows --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: expert-edu-center-windows
+          path: build/windows/x64/runner/Release/
+          retention-days: 30
