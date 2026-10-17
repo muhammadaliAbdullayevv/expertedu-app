@@ -116,6 +116,33 @@ async def test_0008_converts_old_inquiries_and_rolls_back(server):
         await conn.close()
 
 
+async def test_0011_credits_existing_payments_to_their_groups_teacher(server):
+    conn = await _fresh_db(server, "finance_check")
+    try:
+        for path in MIGRATIONS:
+            if path.name.startswith("0011"):
+                break
+            await _apply(conn, path)
+        await conn.execute(
+            """
+            insert into teachers (full_name) values ('Dilnoza');
+            insert into subjects (name) values ('Ingliz tili');
+            insert into groups (subject_id, name, teacher_id, fee_amount, due_day) values (1, 'IELTS', 1, 400000, 5);
+            insert into students (full_name, phone) values ('Aziz', '998901000001');
+            insert into enrollments (student_id, group_id, joined_at) values (1, 1, '2026-09-01');
+            insert into transactions (enrollment_id, kind, amount, source) values
+              (1, 'charge', 400000, 'auto_recurring'), (1, 'payment', 400000, 'manual');
+            """
+        )
+        await _apply(conn, SERVER_DIR / "migrations" / "0011_finance.sql")
+        rows = await conn.fetch("select kind, teacher_id from transactions order by id")
+        assert [tuple(r) for r in rows] == [("charge", None), ("payment", 1)]
+        await _apply(conn, SERVER_DIR / "migrations" / "rollback" / "0011_finance.sql")
+        assert await conn.fetchval("select count(*) from transactions") == 2
+    finally:
+        await conn.close()
+
+
 def test_migration_files_are_numbered_in_order():
     numbers = [int(path.name[:4]) for path in MIGRATIONS]
     assert numbers == list(range(1, len(numbers) + 1)), [path.name for path in MIGRATIONS]

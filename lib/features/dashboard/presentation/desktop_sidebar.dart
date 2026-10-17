@@ -18,6 +18,8 @@ class DesktopSidebar extends StatelessWidget {
     required this.actionLabel,
     required this.actionIcon,
     required this.onAction,
+    this.accountName,
+    this.accountRole,
   });
 
   final List<SidebarItem> items;
@@ -30,6 +32,8 @@ class DesktopSidebar extends StatelessWidget {
   final String actionLabel;
   final IconData actionIcon;
   final VoidCallback onAction;
+  final String? accountName;
+  final String? accountRole;
 
   @override
   Widget build(BuildContext context) {
@@ -59,13 +63,104 @@ class DesktopSidebar extends StatelessWidget {
                 onPressed: onAction,
               ),
             ),
-            for (var i = 0; i < items.length; i++)
-              _SidebarTile(
-                item: items[i],
-                selected: i == selectedIndex,
-                extended: extended,
-                onTap: () => onSelect(i),
+            Expanded(
+              child: ListView(
+                primary: false,
+                padding: EdgeInsets.zero,
+                children: <Widget>[
+                  for (var i = 0; i < items.length; i++)
+                    _SidebarTile(
+                      item: items[i],
+                      selected: i == selectedIndex,
+                      extended: extended,
+                      onTap: () => onSelect(i),
+                    ),
+                ],
               ),
+            ),
+            _AccountFooter(
+              name: accountName,
+              role: accountRole,
+              extended: extended,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AccountFooter extends StatelessWidget {
+  const _AccountFooter({
+    required this.name,
+    required this.role,
+    required this.extended,
+  });
+
+  final String? name;
+  final String? role;
+  final bool extended;
+
+  @override
+  Widget build(BuildContext context) {
+    final displayName = name?.trim().isNotEmpty == true
+        ? name!.trim()
+        : 'Hisob';
+    final initial = displayName.isEmpty ? '?' : displayName[0].toUpperCase();
+    return Tooltip(
+      message: <String>[displayName, if (role != null) role!].join(' · '),
+      child: Container(
+        margin: EdgeInsets.fromLTRB(12, 8, 12, extended ? 12 : 10),
+        padding: EdgeInsets.all(extended ? 10 : 7),
+        decoration: BoxDecoration(
+          color: AppColors.canvas,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Row(
+          mainAxisAlignment: extended
+              ? MainAxisAlignment.start
+              : MainAxisAlignment.center,
+          children: <Widget>[
+            CircleAvatar(
+              radius: 17,
+              backgroundColor: AppColors.accentSoft,
+              foregroundColor: AppColors.accent,
+              child: Text(
+                initial,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            if (extended) ...<Widget>[
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.ink,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (role != null)
+                      Text(
+                        role!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.inkMuted,
+                          fontSize: 11,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),

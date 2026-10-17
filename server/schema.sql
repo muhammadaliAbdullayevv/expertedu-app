@@ -34,7 +34,9 @@ create table if not exists teachers (
   note text,
   is_active boolean not null default true,
   created_by bigint references users(id),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Share of their groups' payments, in percent (owner only; 0011).
+  salary_percent numeric(5, 2) check (salary_percent is null or salary_percent between 0 and 100)
 );
 
 create table if not exists groups (
@@ -102,11 +104,29 @@ create table if not exists transactions (
   method text check (method in ('cash','card','click_payme')),
   occurred_at timestamptz not null default now(),
   created_by bigint references users(id),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Payments: the group's teacher when paid -- set by the trigger below.
+  teacher_id bigint references teachers(id)
 );
 create unique index if not exists uq_charge_enrollment_due_date
   on transactions (enrollment_id, due_date) where kind = 'charge';
 create index if not exists idx_transactions_enrollment on transactions(enrollment_id);
+create index if not exists idx_transactions_payment_teacher on transactions (teacher_id, occurred_at) where kind = 'payment';
+create or replace function transactions_payment_teacher() returns trigger language plpgsql as $$
+begin
+  if new.kind = 'payment' and new.teacher_id is null then
+    select g.teacher_id into new.teacher_id
+    from enrollments e join groups g on g.id = e.group_id
+    where e.id = new.enrollment_id;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists transactions_payment_teacher on transactions;
+create trigger transactions_payment_teacher
+  before insert on transactions
+  for each row execute function transactions_payment_teacher();
+
 
 -- A lead: someone who called or walked in about a course -- not a student
 -- and never in a group. Only POST /leads/{id}/enroll turns one into an
@@ -309,6 +329,32 @@ create table if not exists attendance (
   constraint uq_attendance_lesson_enrollment unique (lesson_id, enrollment_id)
 );
 create index if not exists idx_attendance_enrollment on attendance (enrollment_id);
+
+-- Money the center spends. Never deleted: a mistake is voided, with who,
+-- when and why, and voided rows count nowhere.
+create table if not exists expenses (
+  id bigserial primary key,
+  category text not null
+    check (category in ('salary', 'rent', 'utilities', 'marketing', 'supplies', 'tax', 'other')),
+  amount bigint not null check (amount > 0),
+  spent_on date not null,
+  note text,
+  method text check (method in ('cash', 'card', 'click_payme')),
+  -- Salary payouts: whose, and for which month (its first day).
+  teacher_id bigint references teachers(id),
+  salary_month date,
+  created_by bigint references users(id),
+  created_at timestamptz not null default now(),
+  voided_at timestamptz,
+  voided_by bigint references users(id),
+  void_reason text,
+  constraint expenses_salary_fields check (
+    (category = 'salary') = (teacher_id is not null and salary_month is not null)
+  ),
+  constraint expenses_salary_month_first check (salary_month is null or extract(day from salary_month) = 1)
+);
+create index if not exists idx_expenses_spent_on on expenses (spent_on) where voided_at is null;
+create index if not exists idx_expenses_salary on expenses (teacher_id, salary_month) where category = 'salary' and voided_at is null;
 
 create table if not exists sms_log (
   id bigserial primary key,

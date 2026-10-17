@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -112,6 +114,7 @@ class _WeekView extends ConsumerStatefulWidget {
 
 class _WeekViewState extends ConsumerState<_WeekView> {
   DateTime _weekStart = _mondayOf(DateTime.now());
+  final _horizontal = ScrollController();
   int? _teacherId;
   int? _groupId;
   late Future<_Week> _data = _load();
@@ -121,6 +124,12 @@ class _WeekViewState extends ConsumerState<_WeekView> {
   late final Future<List<Group>> _groups = ref
       .read(groupsRepositoryProvider)
       .list();
+
+  @override
+  void dispose() {
+    _horizontal.dispose();
+    super.dispose();
+  }
 
   void reload() {
     if (mounted) setState(() => _data = _load());
@@ -206,6 +215,7 @@ class _WeekViewState extends ConsumerState<_WeekView> {
                 child: FutureBuilder<List<Teacher>>(
                   future: _teachers,
                   builder: (context, snapshot) => DropdownButtonFormField<int?>(
+                    isExpanded: true,
                     initialValue: _teacherId,
                     decoration: const InputDecoration(
                       isDense: true,
@@ -235,6 +245,7 @@ class _WeekViewState extends ConsumerState<_WeekView> {
                 child: FutureBuilder<List<Group>>(
                   future: _groups,
                   builder: (context, snapshot) => DropdownButtonFormField<int?>(
+                    isExpanded: true,
                     initialValue: _groupId,
                     decoration: const InputDecoration(
                       isDense: true,
@@ -304,38 +315,57 @@ class _WeekViewState extends ConsumerState<_WeekView> {
             ),
           ),
         Expanded(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              for (var i = 0; i < 7; i++)
-                Expanded(
-                  child: _DayColumn(
-                    day: _weekStart.add(Duration(days: i)),
-                    isToday: DateUtils.isSameDay(
-                      _weekStart.add(Duration(days: i)),
-                      today,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final dayWidth = constraints.maxWidth < 1250
+                  ? 170.0
+                  : constraints.maxWidth / 7;
+              final gridWidth = math.max(constraints.maxWidth, dayWidth * 7);
+              return Scrollbar(
+                controller: _horizontal,
+                thumbVisibility: gridWidth > constraints.maxWidth,
+                child: SingleChildScrollView(
+                  controller: _horizontal,
+                  scrollDirection: Axis.horizontal,
+                  child: SizedBox(
+                    width: gridWidth,
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        for (var i = 0; i < 7; i++)
+                          Expanded(
+                            child: _DayColumn(
+                              day: _weekStart.add(Duration(days: i)),
+                              isToday: DateUtils.isSameDay(
+                                _weekStart.add(Duration(days: i)),
+                                today,
+                              ),
+                              lessons: week.lessons
+                                  .where(
+                                    (l) => DateUtils.isSameDay(
+                                      l.startsAt.toLocal(),
+                                      _weekStart.add(Duration(days: i)),
+                                    ),
+                                  )
+                                  .toList(),
+                              trials: week.trials
+                                  .where(
+                                    (t) => DateUtils.isSameDay(
+                                      t.startsAt.toLocal(),
+                                      _weekStart.add(Duration(days: i)),
+                                    ),
+                                  )
+                                  .toList(),
+                              last: i == 6,
+                              onOpen: _open,
+                            ),
+                          ),
+                      ],
                     ),
-                    lessons: week.lessons
-                        .where(
-                          (l) => DateUtils.isSameDay(
-                            l.startsAt.toLocal(),
-                            _weekStart.add(Duration(days: i)),
-                          ),
-                        )
-                        .toList(),
-                    trials: week.trials
-                        .where(
-                          (t) => DateUtils.isSameDay(
-                            t.startsAt.toLocal(),
-                            _weekStart.add(Duration(days: i)),
-                          ),
-                        )
-                        .toList(),
-                    last: i == 6,
-                    onOpen: _open,
                   ),
                 ),
-            ],
+              );
+            },
           ),
         ),
       ],
@@ -421,6 +451,8 @@ class _LessonCard extends StatelessWidget {
             'Keldi: ${lesson.presentCount}/${lesson.markedCount}',
             AppColors.success,
           )
+        : lesson.studentCount == 0
+        ? ('O\'quvchi yo\'q', AppColors.inkMuted)
         : lesson.hasStarted
         ? ('Davomat belgilanmagan', AppColors.danger)
         : ('${lesson.studentCount} o\'quvchi', AppColors.inkMuted);
@@ -592,6 +624,7 @@ Future<bool?> _showExtraLessonDialog(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
                     DropdownButtonFormField<int>(
+                      isExpanded: true,
                       initialValue: groupId,
                       decoration: const InputDecoration(labelText: 'Guruh'),
                       items: <DropdownMenuItem<int>>[
@@ -656,6 +689,7 @@ Future<bool?> _showExtraLessonDialog(
                         const SizedBox(width: 12),
                         Expanded(
                           child: DropdownButtonFormField<int>(
+                            isExpanded: true,
                             initialValue: minutes,
                             decoration: const InputDecoration(
                               labelText: 'Davomiyligi',
@@ -808,6 +842,7 @@ class _AttendanceReportViewState extends ConsumerState<_AttendanceReportView> {
                 child: FutureBuilder<List<Group>>(
                   future: _groups,
                   builder: (context, snapshot) => DropdownButtonFormField<int?>(
+                    isExpanded: true,
                     initialValue: _groupId,
                     decoration: const InputDecoration(
                       isDense: true,

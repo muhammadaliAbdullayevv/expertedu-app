@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/theme/app_theme.dart';
 import '../../../core/extensions/build_context_x.dart';
 import '../../../core/formatters/currency_formatter.dart';
 import '../../../core/formatters/date_formatters.dart';
@@ -178,21 +179,29 @@ class DebtorsScreenState extends ConsumerState<DebtorsScreen> {
                           ),
                         ),
                       ),
-                      DropdownButton<int?>(
-                        value: _groupId,
-                        borderRadius: BorderRadius.circular(12),
-                        onChanged: (value) => setState(() => _groupId = value),
-                        items: <DropdownMenuItem<int?>>[
-                          const DropdownMenuItem(
-                            value: null,
-                            child: Text('Barcha guruhlar'),
+                      SizedBox(
+                        width: 220,
+                        child: DropdownButtonFormField<int?>(
+                          isExpanded: true,
+                          initialValue: _groupId,
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            labelText: 'Guruh',
                           ),
-                          for (final group in groups)
-                            DropdownMenuItem(
-                              value: group.key,
-                              child: Text(group.value),
+                          onChanged: (value) =>
+                              setState(() => _groupId = value),
+                          items: <DropdownMenuItem<int?>>[
+                            const DropdownMenuItem(
+                              value: null,
+                              child: Text('Barcha guruhlar'),
                             ),
-                        ],
+                            for (final group in groups)
+                              DropdownMenuItem(
+                                value: group.key,
+                                child: Text(group.value),
+                              ),
+                          ],
+                        ),
                       ),
                       FilterChip(
                         label: const Text('Chiqib ketganlar ham'),
@@ -203,13 +212,82 @@ class DebtorsScreenState extends ConsumerState<DebtorsScreen> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  Text(
-                    'Jami: ${CurrencyFormatter.format(total)} · $students o\'quvchi',
-                    style: context.textTheme.titleMedium?.copyWith(
-                      color: total > 0 ? context.colors.error : null,
+                  Card(
+                    margin: EdgeInsets.zero,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 14,
+                      ),
+                      child: Row(
+                        children: <Widget>[
+                          CircleAvatar(
+                            radius: 18,
+                            backgroundColor: total > 0
+                                ? context.colors.errorContainer
+                                : AppColors.success.withValues(alpha: 0.1),
+                            foregroundColor: total > 0
+                                ? context.colors.error
+                                : AppColors.success,
+                            child: Icon(
+                              total > 0
+                                  ? Icons.warning_amber_rounded
+                                  : Icons.check_rounded,
+                              size: 19,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(
+                                  'Jami qarzdorlik',
+                                  style: context.textTheme.bodySmall?.copyWith(
+                                    color: context.colors.onSurfaceVariant,
+                                  ),
+                                ),
+                                Text(
+                                  CurrencyFormatter.format(total),
+                                  style: context.textTheme.titleLarge?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                    color: total > 0
+                                        ? context.colors.error
+                                        : null,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            width: 1,
+                            height: 40,
+                            color: context.colors.outlineVariant,
+                          ),
+                          const SizedBox(width: 18),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Text(
+                                'Qarzdor o\'quvchilar',
+                                style: context.textTheme.bodySmall?.copyWith(
+                                  color: context.colors.onSurfaceVariant,
+                                ),
+                              ),
+                              Text(
+                                '$students ta',
+                                style: context.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(width: 10),
+                        ],
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 14),
                   Expanded(
                     child: Card(
                       margin: const EdgeInsets.only(bottom: 16),

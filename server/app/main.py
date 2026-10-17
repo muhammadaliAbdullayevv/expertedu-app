@@ -13,6 +13,7 @@ from .routes import (
     dashboard,
     debtors,
     enrollments,
+    finance,
     follow_ups,
     groups,
     health,
@@ -70,3 +71,4 @@ app.include_router(admissions_report.router)
 app.include_router(users.router)
 app.include_router(staff.router)
 app.include_router(timetable.router)
+app.include_router(finance.router)

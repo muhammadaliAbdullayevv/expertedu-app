@@ -6,6 +6,8 @@ import '../../../core/layout/breakpoints.dart';
 import '../../../services/sync/sync_engine.dart';
 import '../../admissions/presentation/admissions_screen.dart';
 import '../../timetable/presentation/timetable_screen.dart';
+import '../../auth/application/session_controller.dart';
+import '../../finance/presentation/finance_screen.dart';
 import '../../debtors/presentation/debtors_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../../stats/presentation/stats_screen.dart';
@@ -36,6 +38,13 @@ enum _Tab {
     'Qarzdorlar',
     desktopOnly: true,
   ),
+  finance(
+    Icons.account_balance_outlined,
+    Icons.account_balance_rounded,
+    'Moliya',
+    desktopOnly: true,
+    ownerOnly: true,
+  ),
   stats(Icons.query_stats_outlined, Icons.query_stats_rounded, 'Statistika'),
   settings(Icons.settings_outlined, Icons.settings_rounded, 'Sozlamalar');
 
@@ -44,6 +53,7 @@ enum _Tab {
     this.selectedIcon,
     this.label, {
     this.desktopOnly = false,
+    this.ownerOnly = false,
   });
 
   final IconData icon;
@@ -53,6 +63,10 @@ enum _Tab {
   /// Only reachable from the wide layout's side rail -- the phone app keeps
   /// its five tabs.
   final bool desktopOnly;
+
+  /// Salaries, expenses, profit: the owner's eyes only (the server says no
+  /// to admins too).
+  final bool ownerOnly;
 }
 
 class HomeShell extends ConsumerStatefulWidget {
@@ -69,12 +83,26 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   _Tab _currentTab = _Tab.home;
 
+  late final SessionController _session = ref.read(sessionControllerProvider);
+
   @override
   void initState() {
     super.initState();
     // Signed in from here on: send anything queued offline (this or an
     // earlier run), and keep sending as connectivity comes and goes.
     ref.read(syncEngineProvider).start();
+    // Owner-only tabs follow who's signed in.
+    _session.addListener(_onSessionChanged);
+  }
+
+  @override
+  void dispose() {
+    _session.removeListener(_onSessionChanged);
+    super.dispose();
+  }
+
+  void _onSessionChanged() {
+    if (mounted) setState(() {});
   }
 
   final _dashboardKey = GlobalKey<DashboardScreenState>();
@@ -83,6 +111,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   final _debtorsKey = GlobalKey<DebtorsScreenState>();
   final _admissionsKey = GlobalKey<AdmissionsScreenState>();
   final _timetableKey = GlobalKey<TimetableScreenState>();
+  final _financeKey = GlobalKey<FinanceScreenState>();
 
   // Resizing a desktop window across the wide-layout breakpoint moves the
   // content Scaffold to a different spot in the tree -- this key carries it
@@ -100,6 +129,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ),
     _Tab.admissions: AdmissionsScreen(key: _admissionsKey),
     _Tab.timetable: TimetableScreen(key: _timetableKey),
+    _Tab.finance: FinanceScreen(key: _financeKey),
     _Tab.subjects: SubjectsListScreen(key: _subjectsKey),
     _Tab.students: StudentsListScreen(key: _studentsKey),
     _Tab.debtors: DebtorsScreen(key: _debtorsKey),
@@ -124,7 +154,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
     final useRail = width >= kWideLayoutBreakpoint;
-    final tabs = _Tab.values.where((t) => useRail || !t.desktopOnly).toList();
+    final isOwner = _session.isOwner;
+    final tabs = _Tab.values
+        .where((t) => (useRail || !t.desktopOnly) && (isOwner || !t.ownerOnly))
+        .toList();
     // Shrinking the window to the phone layout while on a desktop-only tab
     // falls back to Home rather than showing a tab the bottom bar lacks.
     final tab = tabs.contains(_currentTab) ? _currentTab : _Tab.home;
@@ -170,9 +203,13 @@ class _HomeShellState extends ConsumerState<HomeShell> {
               (tab == _Tab.home ||
                   tab == _Tab.debtors ||
                   tab == _Tab.admissions ||
-                  tab == _Tab.timetable))
+                  tab == _Tab.timetable ||
+                  tab == _Tab.finance))
             IconButton(
-              tooltip: tab == _Tab.admissions || tab == _Tab.timetable
+              tooltip:
+                  tab == _Tab.admissions ||
+                      tab == _Tab.timetable ||
+                      tab == _Tab.finance
                   ? 'Yangilash (F5)'
                   : 'Yangilash',
               icon: const Icon(Icons.refresh_rounded),
@@ -180,6 +217,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                 _Tab.home => _dashboardKey.currentState?.reload(),
                 _Tab.admissions => _admissionsKey.currentState?.reload(),
                 _Tab.timetable => _timetableKey.currentState?.reload(),
+                _Tab.finance => _financeKey.currentState?.reload(),
                 _ => _debtorsKey.currentState?.reload(),
               },
             ),
@@ -194,8 +232,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           children: <Widget>[
             for (final t in _Tab.values)
               // A desktop-only page isn't built at all on the phone layout,
-              // so it never loads data there.
-              if (t.desktopOnly && !useRail)
+              // nor an owner-only one for an admin, so neither loads data.
+              if ((t.desktopOnly && !useRail) || (t.ownerOnly && !isOwner))
                 const SizedBox.shrink()
               else
                 _pages[t]!,
@@ -241,6 +279,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                     actionIcon: Icons.person_add_alt_1_rounded,
                     onAction: () =>
                         _studentsKey.currentState?.showCreateSheet(),
+                    accountName: _session.user?.fullName,
+                    accountRole: isOwner ? 'Markaz egasi' : 'Administrator',
                   ),
                   Expanded(child: content),
                 ],

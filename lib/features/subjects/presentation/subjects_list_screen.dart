@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/extensions/build_context_x.dart';
+import '../../../core/layout/breakpoints.dart';
 import '../../../core/widgets/bordered_list_tile.dart';
+import '../../../core/widgets/table_card.dart';
 import '../data/subjects_repository.dart';
 import 'subject_groups_screen.dart';
 
@@ -56,7 +59,7 @@ class SubjectsListScreenState extends ConsumerState<SubjectsListScreen> {
   Widget build(BuildContext context) {
     return Column(
       children: <Widget>[
-        if (_searchVisible)
+        if (_searchVisible && !isWideLayout(context))
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: TextField(
@@ -80,7 +83,7 @@ class SubjectsListScreenState extends ConsumerState<SubjectsListScreen> {
                 return const Center(child: CircularProgressIndicator());
               }
               if (snapshot.hasError) {
-                return Center(child: Text('Xatolik: ${snapshot.error}'));
+                return _LoadFailed(onRetry: _reload);
               }
               final subjects = (snapshot.data ?? const <Subject>[])
                   .where(
@@ -88,8 +91,15 @@ class SubjectsListScreenState extends ConsumerState<SubjectsListScreen> {
                         _query.isEmpty || s.name.toLowerCase().contains(_query),
                   )
                   .toList();
+              if (isWideLayout(context)) {
+                return _desktopDirectory(context, subjects);
+              }
               if (subjects.isEmpty) {
-                return const Center(child: Text('Hali fanlar yo\'q'));
+                return Center(
+                  child: Text(
+                    _query.isEmpty ? 'Hali fanlar yo\'q' : 'Mos fan topilmadi',
+                  ),
+                );
               }
               return ListView.builder(
                 padding: const EdgeInsets.symmetric(
@@ -107,15 +117,7 @@ class SubjectsListScreenState extends ConsumerState<SubjectsListScreen> {
                           : '${subject.groupCount} ta guruh',
                     ),
                     trailing: const Icon(Icons.chevron_right),
-                    onTap: () async {
-                      await Navigator.of(context).push<void>(
-                        MaterialPageRoute(
-                          builder: (context) =>
-                              SubjectGroupsScreen(subject: subject),
-                        ),
-                      );
-                      _reload();
-                    },
+                    onTap: () => _openSubject(subject),
                   );
                 },
               );
@@ -123,6 +125,139 @@ class SubjectsListScreenState extends ConsumerState<SubjectsListScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  Future<void> _openSubject(Subject subject) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => SubjectGroupsScreen(subject: subject),
+      ),
+    );
+    _reload();
+  }
+
+  Widget _desktopDirectory(BuildContext context, List<Subject> subjects) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      'Fan yo\'nalishlari',
+                      style: context.textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Har bir yo\'nalishdagi guruhlarni boshqaring',
+                      style: context.textTheme.bodySmall?.copyWith(
+                        color: context.colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 9,
+                ),
+                decoration: BoxDecoration(
+                  color: context.colors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: context.colors.outlineVariant),
+                ),
+                child: Text(
+                  '${subjects.length} ta fan',
+                  style: context.textTheme.labelLarge,
+                ),
+              ),
+            ],
+          ),
+          if (_searchVisible) ...<Widget>[
+            const SizedBox(height: 16),
+            SizedBox(
+              width: 360,
+              child: TextField(
+                controller: _searchController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: 'Fan nomi bo\'yicha qidirish',
+                  prefixIcon: const Icon(Icons.search),
+                  isDense: true,
+                  suffixIcon: IconButton(
+                    tooltip: 'Tozalash',
+                    onPressed: () {
+                      _searchController.clear();
+                      setState(() => _query = '');
+                    },
+                    icon: const Icon(Icons.close),
+                  ),
+                ),
+                onChanged: (value) =>
+                    setState(() => _query = value.trim().toLowerCase()),
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+          Expanded(
+            child: TableCard(
+              emptyText: _query.isEmpty
+                  ? 'Hali fanlar yo\'q. "Yangi fan" orqali yo\'nalish qo\'shing.'
+                  : 'Mos fan topilmadi',
+              columns: const <TableColumn>[
+                TableColumn('Fan yo\'nalishi', flex: 5),
+                TableColumn('Guruhlar', flex: 2, alignEnd: true),
+                TableColumn('', width: 32),
+              ],
+              rowCount: subjects.length,
+              onRowTap: (row) => _openSubject(subjects[row]),
+              cell: (context, row, column) {
+                final subject = subjects[row];
+                return switch (column) {
+                  0 => Row(
+                    children: <Widget>[
+                      CircleAvatar(
+                        radius: 17,
+                        backgroundColor: context.colors.primaryContainer,
+                        foregroundColor: context.colors.primary,
+                        child: const Icon(Icons.menu_book_rounded, size: 18),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          subject.name,
+                          overflow: TextOverflow.ellipsis,
+                          style: context.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  1 => Text(
+                    '${subject.groupCount}',
+                    textAlign: TextAlign.end,
+                    style: context.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  _ => Icon(
+                    Icons.chevron_right_rounded,
+                    color: context.colors.outline,
+                  ),
+                };
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -206,5 +341,35 @@ class SubjectsListScreenState extends ConsumerState<SubjectsListScreen> {
     if (created == true) {
       _reload();
     }
+  }
+}
+
+class _LoadFailed extends StatelessWidget {
+  const _LoadFailed({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(
+            Icons.cloud_off_outlined,
+            size: 36,
+            color: context.colors.outline,
+          ),
+          const SizedBox(height: 12),
+          const Text('Fanlarni yuklab bo\'lmadi'),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('Qayta urinish'),
+          ),
+        ],
+      ),
+    );
   }
 }

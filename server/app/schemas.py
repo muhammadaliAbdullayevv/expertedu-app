@@ -820,3 +820,80 @@ class AttendanceReportRow(BaseModel):
 
 
 GroupListItem.model_rebuild()
+
+
+# Finance (owner only) --------------------------------------------------------
+
+
+class CreateExpenseRequest(BaseModel):
+    category: str
+    amount: int
+    spent_on: date
+    note: str | None = None
+    method: str | None = None
+    # Salary payouts only.
+    teacher_id: int | None = None
+    salary_month: date | None = None
+
+
+class Expense(BaseModel):
+    id: int
+    category: str
+    amount: int
+    spent_on: date
+    note: str | None
+    method: str | None
+    teacher_id: int | None
+    teacher_name: str | None = None
+    salary_month: date | None
+    created_by_name: str | None = None
+    created_at: datetime
+    voided_at: datetime | None
+    void_reason: str | None
+
+
+class VoidExpenseRequest(BaseModel):
+    reason: str
+
+
+class SetSalaryPercentRequest(BaseModel):
+    salary_percent: float | None
+
+
+class TeacherSalary(BaseModel):
+    """One teacher's month: what their groups' students paid, their share
+    of it, and what has been paid out to them for that month."""
+
+    teacher_id: int
+    full_name: str
+    is_active: bool
+    salary_percent: float | None
+    collected: int
+    earned: int
+    paid: int
+    remaining: int
+
+
+class SalaryMonth(BaseModel):
+    month: date
+    teachers: list[TeacherSalary]
+    total_earned: int
+    total_paid: int
+    total_remaining: int
+
+
+class FinanceMonth(BaseModel):
+    month: date
+    income: int
+    expenses: int
+    profit: int
+    by_category: dict[str, int]
+
+
+class FinanceSummary(BaseModel):
+    """Income (payments received), expenses (salary payouts included) and
+    profit per calendar month, oldest first, ending with the current one;
+    plus salaries earned but not yet paid this month."""
+
+    months: list[FinanceMonth]
+    salaries_unpaid_this_month: int

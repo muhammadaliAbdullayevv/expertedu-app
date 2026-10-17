@@ -29,7 +29,16 @@ class DesktopSettings extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isOwner = ref.watch(sessionControllerProvider).isOwner;
+    // The session is a ChangeNotifier behind a plain Provider: listen to it,
+    // so the owner's tabs appear once it knows who's signed in.
+    final session = ref.watch(sessionControllerProvider);
+    return ListenableBuilder(
+      listenable: session,
+      builder: (context, _) => _tabs(context, isOwner: session.isOwner),
+    );
+  }
+
+  Widget _tabs(BuildContext context, {required bool isOwner}) {
     return DefaultTabController(
       // Rebuilt from scratch if the tab count changes (another account).
       key: ValueKey<bool>(isOwner),
