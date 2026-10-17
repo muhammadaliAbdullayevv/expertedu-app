@@ -207,13 +207,13 @@ class _SubjectGroupsScreenState extends ConsumerState<SubjectGroupsScreen> {
                   TextFormField(
                     controller: dueDayController,
                     decoration: const InputDecoration(
-                      labelText: 'To\'lov kuni (1-31)',
+                      labelText: 'To\'lov kuni (1-28)',
                     ),
                     keyboardType: TextInputType.number,
                     validator: (v) {
                       final n = int.tryParse(v ?? '');
-                      if (n == null || n < 1 || n > 31) {
-                        return '1 dan 31 gacha bo\'lishi kerak';
+                      if (n == null || n < 1 || n > 28) {
+                        return '1 dan 28 gacha bo\'lishi kerak';
                       }
                       return null;
                     },
@@ -235,7 +235,8 @@ class _SubjectGroupsScreenState extends ConsumerState<SubjectGroupsScreen> {
                                   feeController.text,
                                 ) ??
                                 0,
-                            dueDay: int.parse(dueDayController.text),
+                            billingMode: BillingMode.fixedDay,
+                            billingDay: int.parse(dueDayController.text),
                           );
                       if (context.mounted) Navigator.of(context).pop(true);
                     },

@@ -78,7 +78,9 @@ class TeacherSalary {
     required this.teacherId,
     required this.fullName,
     required this.isActive,
+    this.salaryMethod,
     this.salaryPercent,
+    this.salaryFixed,
     required this.collected,
     required this.earned,
     required this.paid,
@@ -88,7 +90,10 @@ class TeacherSalary {
   final int teacherId;
   final String fullName;
   final bool isActive;
+  /// How they are paid: 'percent', 'fixed' or null (no rule).
+  final String? salaryMethod;
   final double? salaryPercent;
+  final int? salaryFixed;
 
   /// What their groups' students paid in the month.
   final int collected;
@@ -104,7 +109,9 @@ class TeacherSalary {
     teacherId: json['teacher_id'] as int,
     fullName: json['full_name'] as String,
     isActive: json['is_active'] as bool,
+    salaryMethod: json['salary_method'] as String?,
     salaryPercent: (json['salary_percent'] as num?)?.toDouble(),
+    salaryFixed: json['salary_fixed'] as int?,
     collected: json['collected'] as int,
     earned: json['earned'] as int,
     paid: json['paid'] as int,
@@ -204,9 +211,20 @@ class FinanceRepository {
     return SalaryMonth.fromJson(json as Map<String, dynamic>);
   }
 
-  Future<void> setSalaryPercent(int teacherId, double? percent) => _api.put(
-    '/finance/teachers/$teacherId/percent',
-    body: <String, dynamic>{'salary_percent': percent},
+  /// OWNER ONLY (the server refuses anyone else): [method] is 'percent'
+  /// (with [percent]), 'fixed' (with [fixed] so'm a month) or null.
+  Future<void> setSalaryRule(
+    int teacherId, {
+    String? method,
+    double? percent,
+    int? fixed,
+  }) => _api.put(
+    '/finance/teachers/$teacherId/salary',
+    body: <String, dynamic>{
+      'method': method,
+      'percent': percent,
+      'fixed': fixed,
+    },
   );
 
   Future<List<Expense>> expenses(

@@ -938,7 +938,7 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
             ),
             if (monthly != group.feeAmount)
               const TextSpan(text: ' (chegirma bilan)'),
-            TextSpan(text: ' · To\'lov kuni: har oy ${group.dueDay}-sana'),
+            TextSpan(text: ' · ${group.billingLabel}'),
             TextSpan(
               text: ' · O\'qituvchi: ${group.teacherName ?? 'tanlanmagan'}',
             ),

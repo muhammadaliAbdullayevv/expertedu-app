@@ -100,9 +100,9 @@ void main() {
       expect(find.text('Egasi'), findsOneWidget);
     });
 
-    testWidgets('an admin does not get Moliya', (tester) async {
+    testWidgets('an admin gets Moliya and Hisobotlar', (tester) async {
       await tester.pumpWidget(sidebar(role: AppRole.admin));
-      expect(find.text('Moliya'), findsNothing);
+      expect(find.text('Moliya'), findsOneWidget);
       expect(find.text('Hisobotlar'), findsOneWidget);
       expect(find.text('Ma\'mur'), findsOneWidget);
     });
@@ -198,9 +198,8 @@ void main() {
     testWidgets('selecting a tab', (tester) async {
       Destination? picked;
       await tester.pumpWidget(bar(AppRole.admin, onSelect: (d) => picked = d));
-      await tester.tap(find.text('Qabul'));
-      expect(picked, Destination.admissions);
-      expect(find.text('Moliya'), findsNothing);
+      await tester.tap(find.text('Moliya'));
+      expect(picked, Destination.finance);
     });
 
     testWidgets('a teacher has no payment button', (tester) async {

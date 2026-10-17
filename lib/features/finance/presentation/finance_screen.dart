@@ -11,6 +11,7 @@ import '../../../core/formatters/date_formatters.dart';
 import '../../../core/formatters/thousands_input_formatter.dart';
 import '../../../core/widgets/table_card.dart';
 import '../../admissions/presentation/admissions_ui.dart';
+import '../../auth/application/session_controller.dart';
 import '../../billing/payment_methods.dart';
 import '../../teachers/data/teachers_repository.dart';
 import '../data/finance_repository.dart';
@@ -404,42 +405,20 @@ class _SalariesViewState extends ConsumerState<_SalariesView>
     reload();
   }
 
-  Future<void> _editPercent(TeacherSalary teacher) async {
-    final controller = TextEditingController(
-      text: teacher.salaryPercent == null
-          ? ''
-          : teacher.salaryPercent!.toStringAsFixed(
-              teacher.salaryPercent! % 1 == 0 ? 0 : 1,
-            ),
-    );
-    final saved = await showReasonlessFormDialog(
-      context,
-      title: 'Oylik foizi · ${teacher.fullName}',
-      subtitle: 'Guruhlaridagi o\'quvchilar to\'lovidan ulushi',
-      field: TextField(
-        controller: controller,
-        autofocus: true,
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        inputFormatters: <TextInputFormatter>[
-          FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
-        ],
-        decoration: const InputDecoration(
-          labelText: 'Foiz',
-          suffixText: '%',
-          helperText: 'Bo\'sh qoldirilsa, foiz bilan hisoblanmaydi',
-        ),
-      ),
-      onSave: () {
-        final text = controller.text.trim().replaceAll(',', '.');
-        final value = text.isEmpty ? null : double.tryParse(text);
-        if (text.isNotEmpty && value == null) throw 'Son kiriting.';
-        return ref
-            .read(financeRepositoryProvider)
-            .setSalaryPercent(teacher.teacherId, value);
-      },
+  Future<void> _editRule(TeacherSalary teacher) async {
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => _SalaryRuleDialog(teacher: teacher),
     );
     if (saved == true) widget.onChanged();
   }
+
+  static String _ruleLabel(TeacherSalary t) => switch (t.salaryMethod) {
+    'percent' when t.salaryPercent != null =>
+      '${t.salaryPercent!.toStringAsFixed(t.salaryPercent! % 1 == 0 ? 0 : 1)}%',
+    'fixed' when t.salaryFixed != null => 'Qat\'iy ${_money(t.salaryFixed!)}',
+    _ => '—',
+  };
 
   Future<void> _pay(SalaryMonth month, TeacherSalary teacher) async {
     final saved = await showExpenseDialog(
@@ -523,7 +502,7 @@ class _SalariesViewState extends ConsumerState<_SalariesView>
       emptyText: 'O\'qituvchilar yo\'q',
       columns: const <TableColumn>[
         TableColumn('O\'qituvchi', flex: 3),
-        TableColumn('Foiz', alignEnd: true),
+        TableColumn('Oylik turi', flex: 2, alignEnd: true),
         TableColumn('Yig\'ilgan', flex: 2, alignEnd: true),
         TableColumn('Hisoblangan', flex: 2, alignEnd: true),
         TableColumn('To\'langan', flex: 2, alignEnd: true),
@@ -531,7 +510,9 @@ class _SalariesViewState extends ConsumerState<_SalariesView>
         TableColumn('', width: 130),
       ],
       rowCount: teachers.length,
-      onRowTap: (row) => _editPercent(teachers[row]),
+      onRowTap: ref.read(sessionControllerProvider).isOwner
+          ? (row) => _editRule(teachers[row])
+          : null,
       cell: (context, row, column) {
         final t = teachers[row];
         return switch (column) {
@@ -540,11 +521,7 @@ class _SalariesViewState extends ConsumerState<_SalariesView>
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontWeight: FontWeight.w600),
           ),
-          1 => Text(
-            t.salaryPercent == null
-                ? '—'
-                : '${t.salaryPercent!.toStringAsFixed(t.salaryPercent! % 1 == 0 ? 0 : 1)}%',
-          ),
+          1 => Text(_ruleLabel(t)),
           2 => Text(_money(t.collected)),
           3 => Text(_money(t.earned)),
           4 => Text(_money(t.paid)),
@@ -562,11 +539,13 @@ class _SalariesViewState extends ConsumerState<_SalariesView>
           _ => Row(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              IconButton(
-                tooltip: 'Foizni o\'zgartirish',
-                onPressed: () => _editPercent(t),
-                icon: const Icon(Icons.percent_rounded, size: 20),
-              ),
+              // Changing how someone is paid is the owner's alone.
+              if (ref.read(sessionControllerProvider).isOwner)
+                IconButton(
+                  tooltip: 'Oylik turini o\'zgartirish',
+                  onPressed: () => _editRule(t),
+                  icon: const Icon(Icons.percent_rounded, size: 20),
+                ),
               TextButton(
                 onPressed: () => _pay(month, t),
                 child: const Text('To\'lash'),
@@ -1159,4 +1138,141 @@ Future<bool?> showExpenseDialog(
       },
     ),
   );
+}
+
+/// How a teacher is paid -- a percent of payments, a fixed amount a month,
+/// or no rule. Owner only; a group can override it (set from the group).
+class _SalaryRuleDialog extends ConsumerStatefulWidget {
+  const _SalaryRuleDialog({required this.teacher});
+
+  final TeacherSalary teacher;
+
+  @override
+  ConsumerState<_SalaryRuleDialog> createState() => _SalaryRuleDialogState();
+}
+
+class _SalaryRuleDialogState extends ConsumerState<_SalaryRuleDialog> {
+  late String? _method = widget.teacher.salaryMethod;
+  late final _value = TextEditingController(
+    text: switch (widget.teacher.salaryMethod) {
+      'percent' => widget.teacher.salaryPercent?.toStringAsFixed(
+        widget.teacher.salaryPercent! % 1 == 0 ? 0 : 1,
+      ),
+      'fixed' => widget.teacher.salaryFixed == null
+          ? null
+          : ThousandsInputFormatter.format(widget.teacher.salaryFixed!),
+      _ => null,
+    },
+  );
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _value.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final text = _value.text.trim().replaceAll(',', '.');
+    double? percent;
+    int? fixed;
+    if (_method == 'percent') {
+      percent = double.tryParse(text);
+      if (percent == null || percent < 0 || percent > 100) {
+        setState(() => _error = 'Foiz 0 dan 100 gacha bo\'lsin.');
+        return;
+      }
+    } else if (_method == 'fixed') {
+      fixed = ThousandsInputFormatter.unformat(_value.text);
+      if (fixed == null) {
+        setState(() => _error = 'Summani kiriting.');
+        return;
+      }
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await ref
+          .read(financeRepositoryProvider)
+          .setSalaryRule(
+            widget.teacher.teacherId,
+            method: _method,
+            percent: percent,
+            fixed: fixed,
+          );
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Oylik turi · ${widget.teacher.fullName}'),
+      content: SizedBox(
+        width: 420,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            DropdownButtonFormField<String?>(
+              initialValue: _method,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Hisoblash usuli'),
+              items: const <DropdownMenuItem<String?>>[
+                DropdownMenuItem(value: 'percent', child: Text('To\'lovlardan foiz')),
+                DropdownMenuItem(value: 'fixed', child: Text('Qat\'iy oylik')),
+                DropdownMenuItem(value: null, child: Text('Qoida yo\'q')),
+              ],
+              onChanged: (value) => setState(() {
+                _method = value;
+                _value.clear();
+              }),
+            ),
+            if (_method != null) ...<Widget>[
+              const SizedBox(height: 12),
+              TextField(
+                controller: _value,
+                autofocus: true,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: _method == 'fixed'
+                    ? <TextInputFormatter>[ThousandsInputFormatter()]
+                    : <TextInputFormatter>[
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.,]')),
+                      ],
+                decoration: InputDecoration(
+                  labelText: _method == 'fixed' ? 'Oylik summasi' : 'Foiz',
+                  suffixText: _method == 'fixed' ? 'so\'m' : '%',
+                  helperText: _method == 'fixed'
+                      ? 'Har oy, o\'quvchilar to\'lovidan qat\'i nazar'
+                      : 'Guruhlaridagi o\'quvchilar to\'lovidan ulushi',
+                ),
+              ),
+            ],
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(_error!, style: const TextStyle(color: AppColors.danger)),
+              ),
+          ],
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(false),
+          child: const Text('Bekor qilish'),
+        ),
+        FilledButton(
+          onPressed: _saving ? null : _save,
+          child: const Text('Saqlash'),
+        ),
+      ],
+    );
+  }
 }

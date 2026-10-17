@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../../app/theme/app_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -40,7 +42,9 @@ class _GroupFormDialogState extends ConsumerState<_GroupFormDialog> {
   late final _note = TextEditingController(text: widget.group?.note);
   late int? _subjectId = widget.group?.subjectId;
   late int? _teacherId = widget.group?.teacherId;
-  late int? _dueDay = widget.group?.dueDay;
+  late String _billingMode = widget.group?.billingMode ?? BillingMode.fixedDay;
+  late int? _billingDay = widget.group?.billingDay ?? 1;
+  late bool _prorate = widget.group?.prorateFirstPeriod ?? true;
   bool _saving = false;
   String? _error;
 
@@ -85,7 +89,9 @@ class _GroupFormDialogState extends ConsumerState<_GroupFormDialog> {
           name: _name.text.trim(),
           teacherId: _teacherId,
           feeAmount: fee,
-          dueDay: _dueDay!,
+          billingMode: _billingMode,
+          billingDay: _billingMode == BillingMode.fixedDay ? _billingDay : null,
+          prorateFirstPeriod: _prorate,
           capacity: capacity,
           note: note,
         );
@@ -96,7 +102,9 @@ class _GroupFormDialogState extends ConsumerState<_GroupFormDialog> {
           name: _name.text.trim(),
           teacherId: _teacherId,
           feeAmount: fee,
-          dueDay: _dueDay!,
+          billingMode: _billingMode,
+          billingDay: _billingMode == BillingMode.fixedDay ? _billingDay : null,
+          prorateFirstPeriod: _prorate,
           capacity: capacity,
           note: note,
         );
@@ -204,28 +212,77 @@ class _GroupFormDialogState extends ConsumerState<_GroupFormDialog> {
                           },
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        flex: 2,
-                        child: DropdownButtonFormField<int>(
-                          initialValue: _dueDay,
-                          menuMaxHeight: 320,
-                          decoration: const InputDecoration(
-                            labelText: 'To\'lov kuni',
-                          ),
-                          items: <DropdownMenuItem<int>>[
-                            for (var day = 1; day <= 31; day++)
-                              DropdownMenuItem(
-                                value: day,
-                                child: Text('$day-sana'),
-                              ),
-                          ],
-                          onChanged: (value) => setState(() => _dueDay = value),
-                          validator: (v) => v == null ? 'Tanlang' : null,
-                        ),
-                      ),
                     ],
                   ),
+                  const SizedBox(height: 12),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Expanded(
+                        flex: 3,
+                        child: DropdownButtonFormField<String>(
+                          initialValue: _billingMode,
+                          isExpanded: true,
+                          decoration: const InputDecoration(
+                            labelText: 'To\'lov turi',
+                          ),
+                          items: const <DropdownMenuItem<String>>[
+                            DropdownMenuItem(
+                              value: BillingMode.fixedDay,
+                              child: Text('Hamma bir kunda'),
+                            ),
+                            DropdownMenuItem(
+                              value: BillingMode.studentAnniversary,
+                              child: Text('Har kim o\'z kunida'),
+                            ),
+                          ],
+                          onChanged: (value) =>
+                              setState(() => _billingMode = value!),
+                        ),
+                      ),
+                      if (_billingMode == BillingMode.fixedDay) ...<Widget>[
+                        const SizedBox(width: 12),
+                        Expanded(
+                          flex: 2,
+                          child: DropdownButtonFormField<int>(
+                            initialValue: _billingDay,
+                            menuMaxHeight: 320,
+                            decoration: const InputDecoration(
+                              labelText: 'To\'lov kuni',
+                            ),
+                            items: <DropdownMenuItem<int>>[
+                              for (var day = 1; day <= 28; day++)
+                                DropdownMenuItem(
+                                  value: day,
+                                  child: Text('$day-sana'),
+                                ),
+                            ],
+                            onChanged: (value) =>
+                                setState(() => _billingDay = value),
+                            validator: (v) => v == null ? 'Tanlang' : null,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  if (_billingMode == BillingMode.fixedDay)
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Birinchi davrni kunlarga qarab hisoblash'),
+                      subtitle: const Text(
+                        'O\'rtadan qo\'shilgan o\'quvchi keyingi to\'lov kunigacha bo\'lgan kunlar uchun to\'laydi. O\'chirilsa, to\'liq narx.',
+                      ),
+                      value: _prorate,
+                      onChanged: (value) => setState(() => _prorate = value),
+                    )
+                  else
+                    const Padding(
+                      padding: EdgeInsets.only(top: 6),
+                      child: Text(
+                        'Har bir o\'quvchi guruhga qo\'shilgan kunida to\'laydi (masalan 14-sanada qo\'shilsa, har oyning 14-sanasida). Birinchi oy bo\'lib hisoblanmaydi.',
+                        style: TextStyle(color: AppColors.inkMuted),
+                      ),
+                    ),
                   const SizedBox(height: 12),
                   TextFormField(
                     controller: _capacity,

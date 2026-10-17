@@ -57,7 +57,7 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
               [
                 if (group.teacherName != null && group.teacherName!.isNotEmpty)
                   'O\'qituvchi: ${group.teacherName}',
-                'Har oyning ${group.dueDay}-kuni',
+                group.billingLabel,
               ].join(' • '),
               style: Theme.of(context).textTheme.bodyMedium,
             ),

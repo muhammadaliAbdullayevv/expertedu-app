@@ -7,6 +7,14 @@ final groupsRepositoryProvider = Provider<GroupsRepository>((ref) {
   return GroupsRepository(ref.watch(apiClientProvider));
 });
 
+/// The two ways a group bills (see server/app/money/rules.py).
+class BillingMode {
+  const BillingMode._();
+
+  static const fixedDay = 'fixed_day';
+  static const studentAnniversary = 'student_anniversary';
+}
+
 class Group {
   const Group({
     required this.id,
@@ -15,7 +23,9 @@ class Group {
     this.teacherId,
     this.teacherName,
     required this.feeAmount,
-    required this.dueDay,
+    required this.billingMode,
+    this.billingDay,
+    this.prorateFirstPeriod = true,
     this.capacity,
     required this.isActive,
     this.note,
@@ -32,7 +42,23 @@ class Group {
   /// The linked teacher's name, joined in by the server.
   final String? teacherName;
   final int feeAmount;
-  final int dueDay;
+
+  /// How the group bills: [BillingMode.fixedDay] (everyone pays on
+  /// [billingDay], 1-28) or [BillingMode.studentAnniversary] (each student
+  /// on their own start day -- no billing day).
+  final String billingMode;
+  final int? billingDay;
+
+  /// Fixed-day groups: a student joining between billing days first pays a
+  /// prorated part (the default); off, the first charge is the full price.
+  final bool prorateFirstPeriod;
+
+  bool get isAnniversary => billingMode == BillingMode.studentAnniversary;
+
+  /// "Har oyning 14-kuni" / "Har o'quvchining boshlangan kuni".
+  String get billingLabel => isAnniversary
+      ? 'Har o\'quvchining boshlangan kuni'
+      : 'Har oyning $billingDay-kuni';
 
   /// Seat limit; null = no limit (never shown as full).
   final int? capacity;
@@ -56,7 +82,9 @@ class Group {
     teacherId: json['teacher_id'] as int?,
     teacherName: json['teacher_name'] as String?,
     feeAmount: json['fee_amount'] as int,
-    dueDay: json['due_day'] as int,
+    billingMode: json['billing_mode'] as String? ?? BillingMode.fixedDay,
+    billingDay: json['billing_day'] as int?,
+    prorateFirstPeriod: json['prorate_first_period'] as bool? ?? true,
     capacity: json['capacity'] as int?,
     isActive: json['is_active'] as bool,
     note: json['note'] as String?,
@@ -129,7 +157,9 @@ class GroupsRepository {
     int? teacherId,
     String? teacherName,
     required int feeAmount,
-    required int dueDay,
+    required String billingMode,
+    int? billingDay,
+    bool prorateFirstPeriod = true,
     int? capacity,
     String? note,
   }) async {
@@ -142,7 +172,9 @@ class GroupsRepository {
                 'teacher_id': teacherId,
                 'teacher_name': teacherName,
                 'fee_amount': feeAmount,
-                'due_day': dueDay,
+                'billing_mode': billingMode,
+                'billing_day': billingDay,
+                'prorate_first_period': prorateFirstPeriod,
                 'capacity': capacity,
                 'note': note,
               },
@@ -159,7 +191,9 @@ class GroupsRepository {
     required String name,
     int? teacherId,
     required int feeAmount,
-    required int dueDay,
+    required String billingMode,
+    int? billingDay,
+    bool prorateFirstPeriod = true,
     int? capacity,
     String? note,
   }) async {
@@ -171,7 +205,9 @@ class GroupsRepository {
                 'name': name,
                 'teacher_id': teacherId,
                 'fee_amount': feeAmount,
-                'due_day': dueDay,
+                'billing_mode': billingMode,
+                'billing_day': billingDay,
+                'prorate_first_period': prorateFirstPeriod,
                 'capacity': capacity,
                 'note': note,
               },
