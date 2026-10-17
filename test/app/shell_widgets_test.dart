@@ -1,0 +1,446 @@
+import 'dart:ui' show Tristate;
+
+import 'package:expert_edu_center/app/navigation/destinations.dart';
+import 'package:expert_edu_center/app/shell/app_sidebar.dart';
+import 'package:expert_edu_center/app/shell/command_palette.dart';
+import 'package:expert_edu_center/app/shell/phone_bottom_bar.dart';
+import 'package:expert_edu_center/app/shell/top_bar.dart';
+import 'package:expert_edu_center/app/theme/app_theme.dart';
+import 'package:expert_edu_center/core/widgets/status_chip.dart';
+import 'package:expert_edu_center/features/dashboard/presentation/home_shell.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import '../helpers/load_fonts.dart';
+
+Widget host(Widget child) => MaterialApp(
+  theme: AppTheme.light(),
+  home: Scaffold(body: child),
+);
+
+void main() {
+  setUpAll(loadAppFonts);
+
+  group('theme tokens', () {
+    test('one accent, the V2 palette', () {
+      expect(AppColors.accent, const Color(0xFF5B4DDB));
+      expect(AppColors.accentSoft, const Color(0xFFEFEDFD));
+      expect(AppColors.canvas, const Color(0xFFF7F7F5));
+      expect(AppRadius.card, 14);
+      expect(AppRadius.button, 10);
+      final theme = AppTheme.light();
+      expect(theme.colorScheme.primary, AppColors.accent);
+      expect(theme.textTheme.bodyMedium?.fontFamily, 'DM Sans');
+    });
+
+    testWidgets('status chips always show their text', (tester) async {
+      await tester.pumpWidget(
+        host(
+          Column(
+            children: [
+              for (final tone in StatusTone.values)
+                StatusChip('Matn ${tone.name}', tone: tone),
+            ],
+          ),
+        ),
+      );
+      for (final tone in StatusTone.values) {
+        expect(find.text('Matn ${tone.name}'), findsOneWidget);
+      }
+    });
+  });
+
+  group('sidebar', () {
+    Widget sidebar({
+      AppRole role = AppRole.owner,
+      Destination selected = Destination.today,
+      ValueChanged<Destination>? onSelect,
+      bool compact = false,
+    }) => host(
+      Row(
+        children: [
+          AppSidebar(
+            role: role,
+            selected: selected,
+            onSelect: onSelect ?? (_) {},
+            counts: const {
+              Destination.admissions: 4,
+              Destination.students: 125,
+            },
+            userName: 'Madina Karimova',
+            onUserTap: () {},
+            compact: compact,
+          ),
+        ],
+      ),
+    );
+
+    testWidgets('groups, badges and the user card', (tester) async {
+      await tester.pumpWidget(sidebar());
+      expect(find.text('ISH STOLI'), findsOneWidget);
+      expect(find.text('BOSHQARUV'), findsOneWidget);
+      for (final label in [
+        'Bugun',
+        'Qabul',
+        'O\'quvchilar',
+        'Jadval',
+        'Guruhlar',
+        'O\'qituvchilar',
+        'Moliya',
+        'Hisobotlar',
+        'Sozlamalar',
+      ]) {
+        expect(find.text(label), findsOneWidget, reason: label);
+      }
+      expect(find.text('4'), findsOneWidget);
+      expect(find.text('125'), findsOneWidget);
+      expect(find.text('MK'), findsOneWidget);
+      expect(find.text('Madina Karimova'), findsOneWidget);
+      expect(find.text('Egasi'), findsOneWidget);
+    });
+
+    testWidgets('an admin does not get Moliya', (tester) async {
+      await tester.pumpWidget(sidebar(role: AppRole.admin));
+      expect(find.text('Moliya'), findsNothing);
+      expect(find.text('Hisobotlar'), findsOneWidget);
+      expect(find.text('Ma\'mur'), findsOneWidget);
+    });
+
+    testWidgets('a teacher gets two items and Sozlamalar', (tester) async {
+      await tester.pumpWidget(sidebar(role: AppRole.teacher));
+      expect(find.text('Bugun'), findsOneWidget);
+      expect(find.text('Jadval'), findsOneWidget);
+      expect(find.text('Sozlamalar'), findsOneWidget);
+      expect(find.text('Qabul'), findsNothing);
+      expect(find.text('BOSHQARUV'), findsNothing);
+    });
+
+    testWidgets('tapping selects a destination', (tester) async {
+      Destination? picked;
+      await tester.pumpWidget(sidebar(onSelect: (d) => picked = d));
+      await tester.tap(find.text('Jadval'));
+      expect(picked, Destination.timetable);
+      await tester.tap(find.text('Sozlamalar'));
+      expect(picked, Destination.settings);
+    });
+
+    testWidgets('the selected item is marked for screen readers', (
+      tester,
+    ) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(sidebar(selected: Destination.students));
+      final selected = tester.getSemantics(
+        find.bySemanticsLabel('O\'quvchilar').first,
+      );
+      expect(selected.flagsCollection.isSelected, Tristate.isTrue);
+      expect(selected.flagsCollection.isButton, isTrue);
+      final other = tester.getSemantics(find.bySemanticsLabel('Jadval').first);
+      expect(other.flagsCollection.isSelected, Tristate.isFalse);
+      handle.dispose();
+    });
+
+    testWidgets('the compact rail keeps tooltips, drops labels', (
+      tester,
+    ) async {
+      await tester.pumpWidget(sidebar(compact: true));
+      expect(find.text('Bugun'), findsNothing);
+      expect(find.byTooltip('Bugun'), findsOneWidget);
+      expect(find.byTooltip('Moliya'), findsOneWidget);
+    });
+  });
+
+  group('phone bottom bar', () {
+    Widget bar(
+      AppRole role, {
+      ValueChanged<Destination>? onSelect,
+      VoidCallback? onPayment,
+    }) => host(
+      Column(
+        children: [
+          const Spacer(),
+          PhoneBottomBar(
+            layout: phoneBarFor(role),
+            selected: Destination.today,
+            onSelect: onSelect ?? (_) {},
+            onPayment: onPayment ?? () {},
+          ),
+        ],
+      ),
+    );
+
+    testWidgets('the centre + takes a payment', (tester) async {
+      var payments = 0;
+      await tester.pumpWidget(bar(AppRole.owner, onPayment: () => payments++));
+      await tester.tap(find.bySemanticsLabel('To\'lov qabul qilish'));
+      expect(payments, 1);
+      expect(find.text('Bugun'), findsOneWidget);
+      expect(find.text('O\'quvchi'), findsOneWidget);
+      expect(find.text('Moliya'), findsOneWidget);
+    });
+
+    testWidgets('touch targets are at least 44 high', (tester) async {
+      await tester.pumpWidget(bar(AppRole.owner));
+      for (final label in ['Bugun', 'O\'quvchi', 'Jadval', 'Moliya']) {
+        final size = tester.getSize(
+          find
+              .ancestor(of: find.text(label), matching: find.byType(InkWell))
+              .first,
+        );
+        expect(size.height, greaterThanOrEqualTo(44), reason: label);
+      }
+      expect(
+        tester.getSize(find.bySemanticsLabel('To\'lov qabul qilish')).height,
+        greaterThanOrEqualTo(44),
+      );
+    });
+
+    testWidgets('selecting a tab', (tester) async {
+      Destination? picked;
+      await tester.pumpWidget(bar(AppRole.admin, onSelect: (d) => picked = d));
+      await tester.tap(find.text('Qabul'));
+      expect(picked, Destination.admissions);
+      expect(find.text('Moliya'), findsNothing);
+    });
+
+    testWidgets('a teacher has no payment button', (tester) async {
+      await tester.pumpWidget(bar(AppRole.teacher));
+      expect(find.bySemanticsLabel('To\'lov qabul qilish'), findsNothing);
+    });
+  });
+
+  group('top bar', () {
+    testWidgets('command bar opens, + Yangi lists the actions', (tester) async {
+      var opened = 0;
+      var chosen = '';
+      await tester.pumpWidget(
+        host(
+          AppTopBar(
+            onOpenCommandBar: () => opened++,
+            newMenuItems: [
+              NewMenuItem(
+                'To\'lov qabul qilish',
+                Icons.payments_outlined,
+                () => chosen = 'pay',
+              ),
+              NewMenuItem(
+                'Yangi so\'rov',
+                Icons.phone_in_talk_outlined,
+                () => chosen = 'lead',
+              ),
+            ],
+          ),
+        ),
+      );
+      expect(find.text('Qidirish yoki buyruq yozish'), findsOneWidget);
+      expect(find.text('Ctrl K'), findsOneWidget);
+      await tester.tap(find.text('Qidirish yoki buyruq yozish'));
+      expect(opened, 1);
+      await tester.tap(find.text('Yangi'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Yangi so\'rov'));
+      await tester.pumpAndSettle();
+      expect(chosen, 'lead');
+    });
+
+    testWidgets('no actions, no + Yangi button', (tester) async {
+      await tester.pumpWidget(
+        host(AppTopBar(onOpenCommandBar: () {}, newMenuItems: const [])),
+      );
+      expect(find.text('Yangi'), findsNothing);
+    });
+  });
+
+  group('command bar', () {
+    final ran = <String>[];
+    List<PaletteEntry> entries() => [
+      PaletteEntry(
+        group: 'Amallar',
+        label: 'To\'lov qabul qilish',
+        icon: Icons.payments_outlined,
+        keywords: const ['kassa'],
+        run: () => ran.add('pay'),
+      ),
+      PaletteEntry(
+        group: 'Amallar',
+        label: 'Yangi so\'rov',
+        icon: Icons.add,
+        run: () => ran.add('lead'),
+      ),
+      PaletteEntry(
+        group: 'Bo\'limlar',
+        label: 'Qabul',
+        icon: Icons.filter_alt_outlined,
+        run: () => ran.add('go qabul'),
+      ),
+      PaletteEntry(
+        group: 'Bo\'limlar',
+        label: 'O\'quvchilar',
+        icon: Icons.people_outline,
+        run: () => ran.add('go students'),
+      ),
+      PaletteEntry(
+        group: 'Bo\'limlar',
+        label: 'Moliya',
+        icon: Icons.credit_card,
+        run: () => ran.add('go moliya'),
+      ),
+    ];
+
+    setUp(ran.clear);
+
+    test('filtering: prefix, word, keyword, apostrophes, case', () {
+      final all = entries();
+      List<String> labels(String q) =>
+          filterEntries(all, q).map((e) => e.label).toList();
+      expect(labels(''), all.map((e) => e.label).toList());
+      expect(labels('q'), ['Qabul', 'To\'lov qabul qilish', 'O\'quvchilar']);
+      expect(labels('QAB'), ['Qabul', 'To\'lov qabul qilish']);
+      expect(labels('kassa'), ['To\'lov qabul qilish']);
+      // Any of the Uzbek apostrophes finds the same entries.
+      expect(labels('oʻquv'), ['O\'quvchilar']);
+      expect(labels('o’quv'), ['O\'quvchilar']);
+      expect(labels('zzz'), isEmpty);
+    });
+
+    testWidgets('Enter runs the highlighted entry; arrows move it', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () =>
+                    showCommandPalette(context, entries: entries()),
+                child: const Text('ochish'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('ochish'));
+      await tester.pumpAndSettle();
+      expect(find.text('AMALLAR'), findsOneWidget);
+      expect(find.text('BO\'LIMLAR'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), 'qab');
+      await tester.pump();
+      expect(find.text('Moliya'), findsNothing);
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      await tester.pump();
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(ran, ['pay']);
+      expect(find.byType(TextField), findsNothing);
+    });
+
+    testWidgets('Escape closes it without running anything', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () =>
+                    showCommandPalette(context, entries: entries()),
+                child: const Text('ochish'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('ochish'));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsNothing);
+      expect(ran, isEmpty);
+    });
+
+    testWidgets('people come from the server after two characters', (
+      tester,
+    ) async {
+      final queries = <String>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () => showCommandPalette(
+                  context,
+                  entries: entries(),
+                  searchRemote: (q) async {
+                    queries.add(q);
+                    return [
+                      PaletteEntry(
+                        group: 'O\'quvchilar',
+                        label: 'Botir Aliyev',
+                        subtitle: '+998 90 123 45 67',
+                        icon: Icons.person_outline,
+                        run: () => ran.add('open botir'),
+                      ),
+                    ];
+                  },
+                ),
+                child: const Text('ochish'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('ochish'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'b');
+      await tester.pump(const Duration(seconds: 1));
+      expect(queries, isEmpty);
+      await tester.enterText(find.byType(TextField), 'bot');
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(queries, isEmpty, reason: 'debounced');
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(queries, ['bot']);
+      expect(find.text('Botir Aliyev'), findsOneWidget);
+      await tester.tap(find.text('Botir Aliyev'));
+      await tester.pumpAndSettle();
+      expect(ran, ['open botir']);
+    });
+
+    testWidgets('a failing server search leaves the local entries working', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () => showCommandPalette(
+                  context,
+                  entries: entries(),
+                  searchRemote: (q) async => throw Exception('offline'),
+                ),
+                child: const Text('ochish'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('ochish'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'moli');
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.text('Moliya'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), 'zzzz');
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.text('Hech narsa topilmadi'), findsOneWidget);
+    });
+  });
+
+  test('the date line reads "Shanba, 17-oktyabr"', () {
+    expect(uzLongDate(DateTime(2026, 10, 17)), 'Shanba, 17-oktyabr');
+    expect(uzLongDate(DateTime(2026, 1, 5)), 'Dushanba, 5-yanvar');
+    expect(uzLongDate(DateTime(2026, 12, 31)), 'Payshanba, 31-dekabr');
+  });
+}

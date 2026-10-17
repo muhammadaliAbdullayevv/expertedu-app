@@ -49,6 +49,16 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
     });
   }
 
+  /// Shows the search box with [query] already typed -- the command bar
+  /// jumps here when a student is picked.
+  void applySearch(String query) {
+    setState(() {
+      _searchVisible = true;
+      _searchController.text = query;
+    });
+    _reload(query: query);
+  }
+
   /// True (and search cleared) if there was something to clear -- lets
   /// HomeShell's back-button handling behave like the shop app's.
   bool clearSearchIfActive() {

@@ -75,7 +75,7 @@ class DesktopSettings extends ConsumerWidget {
             child: TabBarView(
               children: <Widget>[
                 const _GroupsTab(),
-                const _TeachersTab(),
+                const TeachersTab(),
                 if (isOwner) const StaffTab(),
                 Align(
                   alignment: Alignment.topCenter,
@@ -305,14 +305,15 @@ class _GroupsTabState extends ConsumerState<_GroupsTab> {
   }
 }
 
-class _TeachersTab extends ConsumerStatefulWidget {
-  const _TeachersTab();
+/// The teachers table; the sidebar's "O'qituvchilar" shows it too.
+class TeachersTab extends ConsumerStatefulWidget {
+  const TeachersTab({super.key});
 
   @override
-  ConsumerState<_TeachersTab> createState() => _TeachersTabState();
+  ConsumerState<TeachersTab> createState() => _TeachersTabState();
 }
 
-class _TeachersTabState extends ConsumerState<_TeachersTab> {
+class _TeachersTabState extends ConsumerState<TeachersTab> {
   late Future<List<Teacher>> _future = ref
       .read(teachersRepositoryProvider)
       .list();
