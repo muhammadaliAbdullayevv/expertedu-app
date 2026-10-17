@@ -120,9 +120,7 @@ async def test_salaries_for_a_month(api):
     jasur = next(t for t in month["teachers"] if t["teacher_id"] == ids["jasur"])
     assert (jasur["salary_percent"], jasur["earned"]) == (None, 0)
 
-    payout = await api.client.post(
-        "/expenses",
-        json={
+    payout_body = {
             "category": "salary",
             "amount": 200000,
             "spent_on": clock.today().isoformat(),
@@ -130,15 +128,19 @@ async def test_salaries_for_a_month(api):
             # Any day of the month means that month.
             "salary_month": (this_month() + timedelta(days=9)).isoformat(),
             "method": "cash",
-        },
-    )
+        }
+    # Not before the month is closed...
+    early = await api.client.post("/expenses", json=payout_body)
+    assert early.status_code == 409 and "yoping" in early.json()["detail"]
+    assert (await api.client.post("/finance/salaries/close", params={"month": this_month().isoformat()})).status_code == 200
+    payout = await api.client.post("/expenses", json=payout_body)
     assert payout.status_code == 201, payout.text
     assert payout.json()["salary_month"] == this_month().isoformat()
     month = (await api.client.get("/finance/salaries")).json()
     assert (month["total_earned"], month["total_paid"], month["total_remaining"]) == (260000, 200000, 60000)
     assert await api.pool.fetchval("select count(*) from salary_payouts where voided_at is null") == 1
 
-    voided = await api.client.post(f"/expenses/{payout.json()['id']}/void", json={"reason": "Xato summa"})
+    voided = await api.client.post(f"/expenses/{payout.json()['id']}/void", json={"reason": "Xato summa"})  # owner
     assert voided.status_code == 200 and voided.json()["voided_at"] is not None
     assert (await api.client.get("/finance/salaries")).json()["total_paid"] == 0
     assert await api.pool.fetchval("select count(*) from salary_payouts where voided_at is null") == 0
@@ -179,10 +181,12 @@ async def test_summary_shows_income_expenses_and_profit_by_month(api):
     await pay(api, ids["enrollment"], 1000000)
     today = clock.today().isoformat()
     await api.client.post("/expenses", json={"category": "rent", "amount": 300000, "spent_on": today})
-    await api.client.post(
+    await api.client.post("/finance/salaries/close", params={"month": today})
+    paid = await api.client.post(
         "/expenses",
         json={"category": "salary", "amount": 200000, "spent_on": today, "teacher_id": ids["dilnoza"], "salary_month": today},
     )
+    assert paid.status_code == 201, paid.text
 
     summary = (await api.client.get("/finance/summary", params={"months": 3})).json()
     assert [m["month"] for m in summary["months"]][-1] == this_month().isoformat()

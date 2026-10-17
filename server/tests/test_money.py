@@ -435,6 +435,7 @@ async def test_payouts_reduce_what_is_left(w):
     await w.charge(e, M, 400000)
     await w.pay(w.s1, 400000)
     async with w.pool.acquire() as conn:
+        await money.close_month(conn, M, w.api.owner_id)
         await money.record_payout(
             conn, teacher_id=w.t1, month=M, amount=100000, paid_on=clock.today(), method="cash", note=None,
             user_id=w.api.owner_id,

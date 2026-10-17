@@ -122,6 +122,7 @@ class TeacherSalary {
 class SalaryMonth {
   const SalaryMonth({
     required this.month,
+    this.closed = false,
     required this.teachers,
     required this.totalEarned,
     required this.totalPaid,
@@ -129,6 +130,9 @@ class SalaryMonth {
   });
 
   final DateTime month;
+
+  /// "Oyni yopish" has frozen the month -- only then can pay be paid out.
+  final bool closed;
   final List<TeacherSalary> teachers;
   final int totalEarned;
   final int totalPaid;
@@ -136,6 +140,7 @@ class SalaryMonth {
 
   factory SalaryMonth.fromJson(Map<String, dynamic> json) => SalaryMonth(
     month: _date(json['month']),
+    closed: json['closed'] as bool? ?? false,
     teachers: (json['teachers'] as List<dynamic>)
         .map((e) => TeacherSalary.fromJson(e as Map<String, dynamic>))
         .toList(),
@@ -225,6 +230,11 @@ class FinanceRepository {
       'percent': percent,
       'fixed': fixed,
     },
+  );
+
+  /// OWNER ONLY: freezes the month so its pay can be paid out.
+  Future<void> closeSalaryMonth(DateTime month) => _api.post(
+    '/finance/salaries/close?month=${_day(month)}',
   );
 
   Future<List<Expense>> expenses(

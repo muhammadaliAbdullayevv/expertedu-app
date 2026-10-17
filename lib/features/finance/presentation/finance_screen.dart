@@ -9,6 +9,7 @@ import '../../../core/extensions/build_context_x.dart';
 import '../../../core/formatters/currency_formatter.dart';
 import '../../../core/formatters/date_formatters.dart';
 import '../../../core/formatters/thousands_input_formatter.dart';
+import '../../../core/widgets/status_chip.dart';
 import '../../../core/widgets/table_card.dart';
 import '../../admissions/presentation/admissions_ui.dart';
 import '../../auth/application/session_controller.dart';
@@ -420,6 +421,38 @@ class _SalariesViewState extends ConsumerState<_SalariesView>
     _ => '—',
   };
 
+  Future<void> _closeMonth(SalaryMonth month) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${DateFormatters.monthYearLabel(month.month)} oyini yopish'),
+        content: const Text(
+          'Yopilgandan keyin bu oyning hisobi o\'zgarmaydi: foiz yoki summa keyin o\'zgartirilsa ham. '
+          'Oylik faqat yopilgan oy uchun to\'lanadi.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Bekor qilish'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Yopish'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await ref.read(financeRepositoryProvider).closeSalaryMonth(month.month);
+      widget.onChanged();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+      }
+    }
+  }
+
   Future<void> _pay(SalaryMonth month, TeacherSalary teacher) async {
     final saved = await showExpenseDialog(
       context,
@@ -464,6 +497,16 @@ class _SalariesViewState extends ConsumerState<_SalariesView>
                     DateFormatters.monthYearLabel(_month),
                     style: context.textTheme.titleMedium,
                   ),
+                  const SizedBox(width: 12),
+                  if (month != null)
+                    month.closed
+                        ? const StatusChip('Yopilgan', tone: StatusTone.ok)
+                        : ref.read(sessionControllerProvider).isOwner
+                        ? OutlinedButton(
+                            onPressed: () => _closeMonth(month),
+                            child: const Text('Oyni yopish'),
+                          )
+                        : const StatusChip('Ochiq', tone: StatusTone.neutral),
                   const Spacer(),
                   if (month != null)
                     Text(
@@ -546,9 +589,17 @@ class _SalariesViewState extends ConsumerState<_SalariesView>
                   onPressed: () => _editRule(t),
                   icon: const Icon(Icons.percent_rounded, size: 20),
                 ),
-              TextButton(
-                onPressed: () => _pay(month, t),
-                child: const Text('To\'lash'),
+              // Pay is paid out only for a closed month, up to what is left.
+              Tooltip(
+                message: month.closed
+                    ? ''
+                    : 'Oylik yopilgan oy uchun to\'lanadi. Avval oyni yoping.',
+                child: TextButton(
+                  onPressed: month.closed && t.remaining > 0
+                      ? () => _pay(month, t)
+                      : null,
+                  child: const Text('To\'lash'),
+                ),
               ),
             ],
           ),
@@ -775,7 +826,8 @@ class _ExpensesViewState extends ConsumerState<_ExpensesView>
                               ),
                             ),
                             _ =>
-                              e.isVoided
+                              // Voiding is the owner's alone.
+                              e.isVoided || !ref.read(sessionControllerProvider).isOwner
                                   ? const SizedBox.shrink()
                                   : IconButton(
                                       tooltip: 'Bekor qilish',

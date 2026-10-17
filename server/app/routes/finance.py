@@ -116,13 +116,17 @@ async def create_expense(payload: CreateExpenseRequest, user: CurrentUser = Depe
             salary_month,
             user.id,
         )
+        await money.audit(
+            conn, user.id, "expense", expense_id, "create",
+            after={"category": payload.category, "amount": payload.amount, "spent_on": payload.spent_on},
+        )
         row = await conn.fetchrow(f"{_EXPENSE_SELECT} where x.id = $1", expense_id)
     return Expense(**row)
 
 
 @router.post("/expenses/{expense_id}/void", response_model=Expense)
-async def void_expense(expense_id: int, payload: VoidExpenseRequest, user: CurrentUser = Depends(get_current_user)):
-    """Cancels a mistaken expense. It stays on record, marked void."""
+async def void_expense(expense_id: int, payload: VoidExpenseRequest, user: CurrentUser = Depends(require_owner)):
+    """OWNER ONLY. Cancels a mistaken expense or salary payout. It stays on record, marked void."""
     reason = payload.reason.strip()
     if not reason:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sababini yozing.")

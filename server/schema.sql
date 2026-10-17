@@ -458,6 +458,8 @@ create table if not exists charges (
   created_at timestamptz not null default now(),
   constraint charges_period_order check (period_end > period_start),
   constraint charges_due_on_start check (due_date = period_start),
+  -- A prorated charge is part of a month, so never more than the full price.
+  constraint charges_prorated_within_price check (not is_prorated or amount <= base_fee - discount_amount),
   constraint charges_cancel_fields check (
     (status = 'cancelled') = (cancelled_at is not null and cancel_reason is not null)
   )

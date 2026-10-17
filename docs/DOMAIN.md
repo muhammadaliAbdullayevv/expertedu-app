@@ -66,14 +66,18 @@ Fixed pay accrues for the current and past months from the month the teacher (or
 | | Owner | Admin |
 |---|---|---|
 | See Moliya, salary pages, payments, expenses | yes | yes |
-| Take and cancel payments, record expenses and salary payouts | yes | yes |
+| Take and cancel payments, record expenses | yes | yes |
+| Record a salary payout — **only for a closed month, never above what is still owed** (for both roles) | yes | yes |
+| **Void an expense or a salary payout** | yes | **no** |
 | **Close a salary month** | yes | **no** |
 | **Edit a teacher's or group's percent / fixed amount** | yes | **no** |
 | **Manage users and roles** (Xodimlar) | yes | **no** |
 | **Backups** | yes (server cron and the owner's PC) | no |
 | Book a **second trial** for the same person | yes | no |
 
-The owner/admin split is enforced on the server (`require_owner`), not only in the menu.
+The owner/admin split is enforced on the server (`require_owner`), not only in the menu. Everything here is audit-logged: expenses and payouts (create, void), month closings, pay-rule changes, payment and charge cancellations, extra trials, settings.
+
+A payout is checked under a per-teacher lock, so two payouts at once cannot both pass the balance check.
 
 ### 2d. Trials
 
@@ -141,7 +145,7 @@ No group is capped (all due days were ≤ 28) and none becomes `student_annivers
 10. The legacy API keeps its sign (`balance` > 0 = owed, per enrollment); the money layer returns `balance = payments − charges` (negative = debt) per student.
 11. A student who joins and leaves the same day owes nothing.
 12. A salary payout writes a `salary_payouts` row and an `expenses` row together; voiding voids both.
-13. The admin may record expenses and salary payouts and void expenses (only the owner-only items in §2c are blocked) — tell me if payouts should be owner-only too.
+13. The admin may record expenses and salary payouts; payouts need a closed month and stay within what is owed (also for the owner); voiding is owner-only.
 14. Pay-rule and billing-rule edits are audited; the billing rule is locked once the group has charges.
 15. Fixed salaries accrue per calendar month from the month the teacher/group was created; not for future months; not for inactive teachers/groups.
 16. A fixed-day group cannot use the 29th–31st (billing day is capped at 28).
@@ -152,7 +156,7 @@ No group is capped (all due days were ≤ 28) and none becomes `student_annivers
 
 ## 7. Open questions
 
-1. **Expenses and payouts by the admin:** allowed today (§2c, assumption 13). Should recording a salary payout be owner-only?
-2. **Changing a group's billing rule later:** locked once it has charges. Do you want a "change from this date" tool in a later phase?
-3. **Existing test data:** may I remove the 126 test students/charges in Phase 8 (after a backup), or keep them until the pilot?
-4. **Teacher login:** should teachers see only their own groups/attendance (default), and may they see their own salary?
+1. **Existing test data:** may I remove the 126 test students/charges in Phase 8 (after a backup), or keep them until the pilot?
+2. **Teacher login:** should teachers see only their own groups/attendance (default), and may they see their own salary?
+
+Decided: no "change billing from date" tool for now (a group's billing rule stays locked once it has charges).

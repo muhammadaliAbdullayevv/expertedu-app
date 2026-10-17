@@ -89,4 +89,24 @@ void main() {
     expect(AppRole.owner.label(s), 'Egasi');
     expect(AppRole.admin.label(s), 'Ma\'mur');
   });
+
+  test('screens without a phone layout say so rather than render broken', () {
+    // The screens built only for the wide layout so far.
+    for (final d in [
+      Destination.admissions,
+      Destination.timetable,
+      Destination.finance,
+      Destination.teachers,
+      Destination.debtors,
+    ]) {
+      expect(d.phoneReady, isFalse, reason: '$d');
+    }
+    for (final d in [
+      Destination.today,
+      Destination.students,
+      Destination.settings,
+    ]) {
+      expect(d.phoneReady, isTrue, reason: '$d');
+    }
+  });
 }

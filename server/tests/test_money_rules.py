@@ -1,9 +1,9 @@
-import pytest
-
 """The money rules as plain functions -- no database."""
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
+
+import pytest
 
 from app.money import rules
 
@@ -120,3 +120,62 @@ def test_bad_billing_rules_are_refused():
     for day in (None, 0, 29):
         with pytest.raises(ValueError):
             rules.billing_periods("fixed_day", day, date(2026, 1, 1), date(2026, 2, 1))
+
+
+FEES = (1, 99, 100, 100_001, 300_000, 350_000, 380_000, 1_234_567)
+
+
+def test_a_prorated_charge_never_exceeds_the_full_price():
+    """Every billing day, every start date for two years, awkward fees and
+    discounts: a part of a month is never more than the month."""
+    checked = 0
+    for billing_day in range(1, 29):
+        for offset in range(0, 731):
+            start = date(2026, 1, 1) + timedelta(days=offset)
+            first = rules.billing_periods("fixed_day", billing_day, start, start)[0]
+            for fee in FEES:
+                for discount in (None, ("percent", 30), ("amount", 70)):
+                    price = rules.discounted_fee(fee, *(discount or (None, None)))
+                    amount = first.amount(price)
+                    assert 0 <= amount <= price, (billing_day, start, fee, discount, amount, price)
+                    if first.prorated:
+                        assert first.days < first.cycle_days
+                    checked += 1
+    assert checked > 100_000
+
+
+def test_a_later_start_in_the_same_cycle_never_costs_more():
+    for billing_day in (1, 5, 14, 28):
+        previous = None
+        for offset in range(0, 31):
+            start = date(2026, 10, 1) + timedelta(days=offset)
+            first = rules.billing_periods("fixed_day", billing_day, start, start)[0]
+            same_cycle = (first.start, first.end)
+            amount = first.amount(380_000)
+            cycle_end = first.end
+            if previous and previous[0] == cycle_end:
+                assert amount <= previous[1], (billing_day, start)
+            previous = (cycle_end, amount)
+
+
+def test_periods_never_overlap_and_leave_no_gap_in_either_mode():
+    for mode, day in (("fixed_day", 1), ("fixed_day", 14), ("fixed_day", 28), ("student_anniversary", None)):
+        for offset in range(0, 400, 7):
+            start = date(2026, 1, 1) + timedelta(days=offset)
+            periods = rules.billing_periods(mode, day, start, start + timedelta(days=500))
+            assert periods[0].start == start
+            for before, after in zip(periods, periods[1:]):
+                assert before.end == after.start, (mode, day, start)
+            assert all(p.end > p.start for p in periods)
+            # Charged once per period start: no two periods share a start.
+            assert len({p.start for p in periods}) == len(periods)
+
+
+def test_joining_the_day_before_the_billing_day_is_two_periods_in_one_month():
+    """Not a duplicate: one day of the old cycle, then the new cycle."""
+    periods = rules.billing_periods("fixed_day", 15, date(2026, 10, 14), date(2026, 10, 17))
+    assert [(p.start, p.end) for p in periods] == [
+        (date(2026, 10, 14), date(2026, 10, 15)), (date(2026, 10, 15), date(2026, 11, 15)),
+    ]
+    assert [p.amount(380_000) for p in periods] == [12_667, 380_000]
+    assert periods[0].days == 1 and periods[0].cycle_days == 30

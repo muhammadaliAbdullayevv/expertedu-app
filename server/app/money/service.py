@@ -33,6 +33,7 @@ FIXED_SALARY_LABEL = "Qat'iy oylik"
 
 _LOCK_STUDENT = 7001
 _LOCK_MONTHS = 7002
+_LOCK_PAYOUT = 7003
 
 
 # --- Settings and audit ---------------------------------------------------------------
@@ -730,8 +731,10 @@ async def record_payout(
     conn, *, teacher_id: int, month: date, amount: int, paid_on: date, method: str | None,
     note: str | None, user_id: int | None,
 ) -> dict:
-    """Pays a teacher for a month. Also writes the expense row, so the cash
-    that left shows in the center's profit."""
+    """Pays a teacher for a month. Two rules: only against a **closed**
+    month (the figures are frozen, so there is a definite amount owed), and
+    never more than what is still owed for it. Also writes the expense row,
+    so the cash that left shows in the center's profit, and an audit entry."""
     if amount <= 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Summa musbat bo'lishi kerak.")
     if method is not None and method not in PAYMENT_METHODS:
@@ -740,6 +743,20 @@ async def record_payout(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "O'qituvchi topilmadi.")
     month = rules.month_start(month)
     async with conn.transaction():
+        # Two payouts for the same teacher at once must not both pass the check.
+        await conn.execute("select pg_advisory_xact_lock($1, $2)", _LOCK_PAYOUT, teacher_id)
+        if not await conn.fetchval("select 1 from salary_months where month = $1", month):
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "Oylik faqat yopilgan oy uchun to'lanadi. Avval oyni yoping."
+            )
+        report = await salary_month(conn, month)
+        teacher = next((t for t in report["teachers"] if t["teacher_id"] == teacher_id), None)
+        remaining = 0 if teacher is None else teacher["remaining"]
+        if amount > remaining:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                f"To'lov qoldiqdan oshib ketdi: bu oy uchun {max(remaining, 0)} so'm qolgan.",
+            )
         expense_id = await conn.fetchval(
             "insert into expenses (category, amount, spent_on, note, method, teacher_id, salary_month, created_by) "
             "values ('salary', $1, $2, $3, $4, $5, $6, $7) returning id",
@@ -750,12 +767,18 @@ async def record_payout(
             "values ($1, $2, $3, $4, $5, $6, $7, $8) returning id",
             teacher_id, month, amount, paid_on, method, note, expense_id, user_id,
         )
+        await audit(
+            conn, user_id, "salary_payout", payout_id, "create",
+            after={"teacher_id": teacher_id, "month": month, "amount": amount, "remaining_before": remaining},
+        )
     return {"id": payout_id, "expense_id": expense_id}
 
 
 async def void_payout_for_expense(conn, expense_id: int, reason: str, user_id: int | None) -> None:
-    await conn.execute(
+    payout_id = await conn.fetchval(
         "update salary_payouts set voided_at = now(), voided_by = $2, void_reason = $3 "
-        "where expense_id = $1 and voided_at is null",
+        "where expense_id = $1 and voided_at is null returning id",
         expense_id, user_id, reason,
     )
+    if payout_id is not None:
+        await audit(conn, user_id, "salary_payout", payout_id, "void", reason=reason)
