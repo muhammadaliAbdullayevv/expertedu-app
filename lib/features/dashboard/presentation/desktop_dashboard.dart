@@ -347,7 +347,7 @@ class _KpiCard extends StatelessWidget {
                   child: LinearProgressIndicator(
                     value: progress,
                     minHeight: 6,
-                    color: AppColors.brandYellow,
+                    color: AppColors.accent,
                     backgroundColor: context.colors.surfaceContainerHighest,
                   ),
                 ),

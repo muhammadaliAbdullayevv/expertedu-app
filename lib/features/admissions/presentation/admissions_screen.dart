@@ -132,7 +132,7 @@ class AdmissionsScreenState extends ConsumerState<AdmissionsScreen>
                       isScrollable: true,
                       tabAlignment: TabAlignment.start,
                       dividerHeight: 0,
-                      indicatorColor: AppColors.brandYellow,
+                      indicatorColor: AppColors.accent,
                       indicatorWeight: 3,
                       labelColor: context.colors.onSurface,
                       unselectedLabelColor: context.colors.onSurfaceVariant,
@@ -146,8 +146,6 @@ class AdmissionsScreenState extends ConsumerState<AdmissionsScreen>
                     message: 'Ctrl+N',
                     child: FilledButton.icon(
                       style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.brandYellow,
-                        foregroundColor: AppColors.ink,
                         padding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 12,

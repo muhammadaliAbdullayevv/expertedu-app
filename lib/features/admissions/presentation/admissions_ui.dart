@@ -20,8 +20,8 @@ void refreshAdmissions(WidgetRef ref) =>
     ref.read(admissionsRefreshProvider).value++;
 
 /// Stage colours: neutral while new, warm while a trial is in play, green
-/// once enrolled, grey once closed. Only the brand yellow and these few
-/// tones -- the board stays calm.
+/// once enrolled, grey once closed. Only these few tones next to the
+/// interface blue -- the board stays calm.
 Color stageColor(String stage) => switch (stage) {
   LeadStage.newLead => const Color(0xFF2563EB),
   LeadStage.contacted => const Color(0xFF7C3AED),

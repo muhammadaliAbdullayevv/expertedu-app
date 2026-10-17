@@ -41,7 +41,7 @@ class DesktopSettings extends StatelessWidget {
               isScrollable: true,
               tabAlignment: TabAlignment.start,
               dividerHeight: 0,
-              indicatorColor: AppColors.brandYellow,
+              indicatorColor: AppColors.accent,
               indicatorWeight: 3,
               labelColor: context.colors.onSurface,
               unselectedLabelColor: context.colors.onSurfaceVariant,

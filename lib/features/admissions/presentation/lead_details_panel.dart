@@ -33,17 +33,32 @@ Future<void> showLeadDetails(BuildContext context, {int? leadId, Lead? lead}) {
     context: context,
     barrierDismissible: true,
     barrierLabel: 'Yopish',
-    barrierColor: Colors.black26,
+    barrierColor: const Color(0x330F172A),
     transitionDuration: const Duration(milliseconds: 180),
     pageBuilder: (context, _, _) => Align(
       alignment: Alignment.centerRight,
-      child: Material(
-        color: context.colors.surface,
-        elevation: 8,
-        child: SizedBox(
-          width: 600,
-          height: double.infinity,
-          child: SafeArea(child: panel),
+      // A hairline edge and a soft, wide shadow -- Material elevation draws
+      // a hard dark band against the dimmed screen.
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(
+            left: BorderSide(color: context.colors.outlineVariant),
+          ),
+          boxShadow: const <BoxShadow>[
+            BoxShadow(
+              color: Color(0x1A0F172A),
+              blurRadius: 32,
+              offset: Offset(-8, 0),
+            ),
+          ],
+        ),
+        child: Material(
+          color: context.colors.surface,
+          child: SizedBox(
+            width: 600,
+            height: double.infinity,
+            child: SafeArea(child: panel),
+          ),
         ),
       ),
     ),
@@ -236,13 +251,9 @@ class _LeadDetailsPanelState extends ConsumerState<_LeadDetailsPanel> {
                 ),
               ],
               if (enrollable)
-                // The one explicit way in: brand yellow, like every main
+                // The one explicit way in: a filled button, like every main
                 // action.
                 FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.brandYellow,
-                    foregroundColor: AppColors.ink,
-                  ),
                   onPressed: () => _enroll(detail),
                   icon: const Icon(Icons.how_to_reg_rounded, size: 18),
                   label: const Text('Guruhga yozish'),

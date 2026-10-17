@@ -11,29 +11,37 @@ class AppRadius {
   static const double sheet = 24;
 }
 
-/// The brand palette, taken from the logo: a yellow X on black. Neutrals are
-/// plain zinc greys -- no tint -- so the yellow is the only colour that
-/// draws the eye. Everything colour-related in the app comes from here or
-/// from the ColorScheme built on it below; swapping to a dark look later
-/// means changing this one file.
+/// The palette: cool slate neutrals on a faintly blue canvas, with one
+/// blue for everything interactive -- the main action, the selected item,
+/// focus. The logo keeps its own yellow; nothing else uses it. Everything
+/// colour-related in the app comes from here or from the ColorScheme built
+/// on it below, so a re-theme is a change to this one file.
 class AppColors {
   AppColors._();
 
+  /// The logo's yellow -- the logo only.
   static const Color brandYellow = Color(0xFFFECA26);
-  static const Color yellowSoft = Color(0xFFFEF3C7);
 
-  /// Primary text, and the fill of ordinary (non-brand) filled buttons.
-  static const Color ink = Color(0xFF18181B);
-  static const Color inkSecondary = Color(0xFF52525B);
-  static const Color inkMuted = Color(0xFF71717A);
+  /// The interactive colour: main buttons, selection, focus, links.
+  static const Color accent = Color(0xFF2563EB);
+  static const Color accentHover = Color(0xFF1D4ED8);
 
-  static const Color canvas = Color(0xFFF4F4F5);
+  /// Tinted backgrounds for selected items and highlights.
+  static const Color accentSoft = Color(0xFFEAF1FF);
+
+  /// Primary text.
+  static const Color ink = Color(0xFF0F172A);
+  static const Color inkSecondary = Color(0xFF475569);
+  static const Color inkMuted = Color(0xFF64748B);
+
+  static const Color canvas = Color(0xFFF3F6FB);
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color border = Color(0xFFE4E4E7);
+  static const Color border = Color(0xFFE2E8F0);
 
-  static const Color sidebar = Color(0xFF111113);
-  static const Color sidebarHover = Color(0xFF232327);
-  static const Color sidebarText = Color(0xFFA1A1AA);
+  /// The desktop sidebar: white, like the cards, set off by a border.
+  static const Color sidebar = surface;
+  static const Color sidebarHover = Color(0xFFF1F5F9);
+  static const Color sidebarText = inkSecondary;
 
   static const Color danger = Color(0xFFDC2626);
   static const Color success = Color(0xFF16A34A);
@@ -45,14 +53,14 @@ class AppTheme {
   static ThemeData light() {
     const colorScheme = ColorScheme(
       brightness: Brightness.light,
-      primary: AppColors.ink,
+      primary: AppColors.accent,
       onPrimary: Colors.white,
-      primaryContainer: AppColors.yellowSoft,
-      onPrimaryContainer: AppColors.ink,
-      secondary: AppColors.brandYellow,
-      onSecondary: AppColors.ink,
-      secondaryContainer: AppColors.yellowSoft,
-      onSecondaryContainer: AppColors.ink,
+      primaryContainer: AppColors.accentSoft,
+      onPrimaryContainer: AppColors.accentHover,
+      secondary: AppColors.accent,
+      onSecondary: Colors.white,
+      secondaryContainer: AppColors.accentSoft,
+      onSecondaryContainer: AppColors.accentHover,
       tertiary: AppColors.inkSecondary,
       onTertiary: Colors.white,
       error: AppColors.danger,
@@ -62,33 +70,37 @@ class AppTheme {
       surface: AppColors.surface,
       onSurface: AppColors.ink,
       onSurfaceVariant: AppColors.inkSecondary,
-      surfaceDim: Color(0xFFE4E4E7),
+      surfaceDim: Color(0xFFE2E8F0),
       surfaceBright: AppColors.surface,
       surfaceContainerLowest: AppColors.surface,
-      surfaceContainerLow: Color(0xFFFAFAFA),
+      surfaceContainerLow: Color(0xFFF8FAFC),
       surfaceContainer: AppColors.canvas,
-      surfaceContainerHigh: Color(0xFFEDEDEF),
+      surfaceContainerHigh: Color(0xFFEEF2F7),
       surfaceContainerHighest: AppColors.border,
-      outline: Color(0xFFA1A1AA),
+      outline: Color(0xFF94A3B8),
       outlineVariant: AppColors.border,
       inverseSurface: AppColors.ink,
       onInverseSurface: Colors.white,
-      inversePrimary: AppColors.brandYellow,
+      inversePrimary: Color(0xFF93C5FD),
       shadow: Colors.black,
       scrim: Colors.black,
       surfaceTint: Colors.transparent,
     );
 
-    final base = ThemeData(useMaterial3: true, colorScheme: colorScheme);
+    final base = ThemeData(
+      useMaterial3: true,
+      colorScheme: colorScheme,
+      fontFamily: 'Inter',
+    );
     final text = base.textTheme;
     final textTheme = text.copyWith(
       headlineSmall: text.headlineSmall?.copyWith(
         fontWeight: FontWeight.w700,
-        letterSpacing: -0.5,
+        letterSpacing: -0.6,
       ),
       titleLarge: text.titleLarge?.copyWith(
         fontWeight: FontWeight.w600,
-        letterSpacing: -0.2,
+        letterSpacing: -0.4,
       ),
       titleMedium: text.titleMedium?.copyWith(fontWeight: FontWeight.w600),
       labelLarge: text.labelLarge?.copyWith(fontWeight: FontWeight.w600),
@@ -120,7 +132,7 @@ class AppTheme {
           color: AppColors.ink,
           fontSize: 20,
           fontWeight: FontWeight.w600,
-          letterSpacing: -0.2,
+          letterSpacing: -0.4,
         ),
       ),
       cardTheme: CardThemeData(
@@ -157,12 +169,12 @@ class AppTheme {
         border: fieldBorder,
         enabledBorder: fieldBorder,
         focusedBorder: fieldBorder.copyWith(
-          borderSide: const BorderSide(color: AppColors.ink, width: 1.5),
+          borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: AppColors.surface,
-        indicatorColor: AppColors.brandYellow,
+        indicatorColor: AppColors.accentSoft,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         iconTheme: const WidgetStatePropertyAll(
@@ -185,11 +197,9 @@ class AppTheme {
           borderRadius: BorderRadius.circular(AppRadius.card),
         ),
       ),
-      // The brand yellow is reserved for the one main action on a screen
-      // (and the selected navigation item) -- not every filled button.
       floatingActionButtonTheme: FloatingActionButtonThemeData(
-        backgroundColor: AppColors.brandYellow,
-        foregroundColor: AppColors.ink,
+        backgroundColor: AppColors.accent,
+        foregroundColor: Colors.white,
         elevation: 0,
         highlightElevation: 0,
         shape: RoundedRectangleBorder(
@@ -216,7 +226,7 @@ class AppTheme {
         ),
       ),
       progressIndicatorTheme: const ProgressIndicatorThemeData(
-        color: AppColors.ink,
+        color: AppColors.accent,
       ),
     );
   }

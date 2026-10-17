@@ -4,7 +4,7 @@ import '../../../app/theme/app_theme.dart';
 
 typedef SidebarItem = ({IconData icon, IconData selectedIcon, String label});
 
-/// The wide layout's navigation: a black sidebar with the logo, one brand
+/// The wide layout's navigation: a white sidebar with the logo, one main
 /// action, and the destinations. Replaces Material's NavigationRail, whose
 /// selection pill hugs only the icon -- each item here highlights as one
 /// piece, icon and label together, so they clearly belong to each other.
@@ -35,7 +35,10 @@ class DesktopSidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: extended ? 240 : 88,
-      color: AppColors.sidebar,
+      decoration: const BoxDecoration(
+        color: AppColors.sidebar,
+        border: Border(right: BorderSide(color: AppColors.border)),
+      ),
       child: SafeArea(
         right: false,
         child: Column(
@@ -98,7 +101,7 @@ class _Logo extends StatelessWidget {
                       Text(
                         'EXPERT',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: AppColors.ink,
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
                           letterSpacing: 2.4,
@@ -108,7 +111,7 @@ class _Logo extends StatelessWidget {
                       Text(
                         'LEARNING CENTER',
                         style: TextStyle(
-                          color: AppColors.sidebarText,
+                          color: AppColors.inkMuted,
                           fontSize: 9,
                           fontWeight: FontWeight.w600,
                           letterSpacing: 1.6,
@@ -140,8 +143,8 @@ class _ActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final style = FilledButton.styleFrom(
-      backgroundColor: AppColors.brandYellow,
-      foregroundColor: AppColors.ink,
+      backgroundColor: AppColors.accent,
+      foregroundColor: Colors.white,
       minimumSize: const Size.fromHeight(44),
       padding: EdgeInsets.zero,
       // Built on the theme's style -- a bare TextStyle here would replace
@@ -196,14 +199,14 @@ class _SidebarTileState extends State<_SidebarTile> {
   Widget build(BuildContext context) {
     final selected = widget.selected;
     final background = selected
-        ? AppColors.brandYellow
+        ? AppColors.accentSoft
         : _hovered
         ? AppColors.sidebarHover
         : Colors.transparent;
     final foreground = selected
-        ? AppColors.ink
+        ? AppColors.accent
         : _hovered
-        ? Colors.white
+        ? AppColors.ink
         : AppColors.sidebarText;
     final icon = Icon(
       selected ? widget.item.selectedIcon : widget.item.icon,
@@ -217,7 +220,7 @@ class _SidebarTileState extends State<_SidebarTile> {
       style: DefaultTextStyle.of(context).style.copyWith(
         color: foreground,
         fontSize: widget.extended ? 14 : 11,
-        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
       ),
       child: Text(
         widget.item.label,
