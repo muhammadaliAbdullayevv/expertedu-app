@@ -131,7 +131,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   bool _hasRefresh(Destination d) => switch (d) {
     Destination.today ||
     Destination.debtors ||
-    Destination.admissions ||
     Destination.timetable ||
     Destination.finance => true,
     _ => false,

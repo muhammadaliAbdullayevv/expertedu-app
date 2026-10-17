@@ -139,17 +139,6 @@ void main() {
     await settle(tester);
     await tester.tap(find.byKey(const ValueKey('view-add')));
     await settle(tester);
-
-    await tester.tap(find.text('Batafsil qidirish'));
-    await shot(tester, 'qabul-finder');
-    await tester.tap(find.text('Du · Chor · Ju'));
-    await shot(tester, 'qabul-finder-days');
-    await tester.enterText(find.widgetWithText(TextField, 'Ism'), 'Test Mijoz');
-    await tester.enterText(find.byType(TextField).at(1), '901112299');
-    await tester.tap(find.text('Sinov darsiga yozish').first);
-    await settle(tester);
-    await settle(tester);
-    await shot(tester, 'qabul-trial-dialog');
   }
 
   testWidgets('render the shell', (tester) async {

@@ -6,7 +6,6 @@ import '../../../app/theme/app_theme.dart';
 import '../../../core/extensions/build_context_x.dart';
 import '../../../services/sync/sync_engine.dart';
 import 'admissions_ui.dart';
-import 'course_finder_screen.dart';
 import 'pending_changes_dialog.dart';
 import 'qabul_form.dart';
 import 'qabul_list.dart';
@@ -32,7 +31,6 @@ class AdmissionsScreen extends ConsumerStatefulWidget {
 
 class AdmissionsScreenState extends ConsumerState<AdmissionsScreen> {
   late QabulView _view = widget.initialView;
-  bool _finder = false;
 
   final _searchFocus = FocusNode();
   final _formKey = GlobalKey<QabulFormState>();
@@ -59,13 +57,11 @@ class AdmissionsScreenState extends ConsumerState<AdmissionsScreen> {
   /// "+ Yangi" / Ctrl+N: back to the form, ready to type.
   void newInquiry() => setState(() {
     _view = QabulView.add;
-    _finder = false;
   });
 
   void _focusSearch() {
     setState(() {
       _view = QabulView.list;
-      _finder = false;
     });
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _searchFocus.requestFocus(),
@@ -81,36 +77,30 @@ class AdmissionsScreenState extends ConsumerState<AdmissionsScreen> {
         const SingleActivator(LogicalKeyboardKey.keyL, control: true): () =>
             setState(() {
               _view = QabulView.list;
-              _finder = false;
             }),
         const SingleActivator(LogicalKeyboardKey.keyF, control: true):
             _focusSearch,
         const SingleActivator(LogicalKeyboardKey.f5): reload,
       },
-      child: _finder
-          ? CourseFinderScreen(onBack: () => setState(() => _finder = false))
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                _header(),
-                Expanded(
-                  child: switch (_view) {
-                    QabulView.add => QabulForm(
-                      key: _formKey,
-                      onOpenFinder: () => setState(() => _finder = true),
-                    ),
-                    QabulView.list => QabulList(searchFocus: _searchFocus),
-                  },
-                ),
-              ],
-            ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          _header(),
+          Expanded(
+            child: switch (_view) {
+              QabulView.add => QabulForm(key: _formKey),
+              QabulView.list => QabulList(searchFocus: _searchFocus),
+            },
+          ),
+        ],
+      ),
     );
   }
 
   Widget _header() {
     final adding = _view == QabulView.add;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(32, 0, 32, 16),
+      padding: const EdgeInsets.fromLTRB(32, 0, 32, 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[

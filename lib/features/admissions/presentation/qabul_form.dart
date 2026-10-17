@@ -55,10 +55,7 @@ List<GroupMatch> filterGroups(
 /// anywhere. A save goes into the local queue first and the form is free at
 /// once; it is sent in the background, again later if the internet fails.
 class QabulForm extends ConsumerStatefulWidget {
-  const QabulForm({super.key, this.onOpenFinder});
-
-  /// "Batafsil qidirish" -- the full course finder.
-  final VoidCallback? onOpenFinder;
+  const QabulForm({super.key});
 
   @override
   ConsumerState<QabulForm> createState() => QabulFormState();
@@ -343,53 +340,61 @@ class QabulFormState extends ConsumerState<QabulForm> {
     return Focus(
       canRequestFocus: false,
       onKeyEvent: _onKey,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
-        child: Align(
-          alignment: Alignment.topLeft,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 780),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                _notice(),
-                Container(
-                  padding: const EdgeInsets.all(28),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface,
-                    borderRadius: BorderRadius.circular(AppRadius.card),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: FocusTraversalGroup(
-                    policy: ReadingOrderTraversalPolicy(),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: <Widget>[
-                        _nameAndPhone(),
-                        const SizedBox(height: 22),
-                        _groupSection(groups),
-                        const SizedBox(height: 22),
-                        _trialSection(),
-                        const SizedBox(height: 22),
-                        const FieldCaption('Izoh (ixtiyoriy)'),
-                        TextField(
-                          key: const ValueKey('qabul-note'),
-                          controller: _note,
-                          focusNode: _noteFocus,
-                          decoration: const InputDecoration(
-                            hintText: 'Masalan: kechqurun qulay',
-                          ),
+      child: Stack(
+        children: <Widget>[
+          Positioned.fill(child: _scroll(groups)),
+          Positioned(right: 28, bottom: 24, child: _notice()),
+        ],
+      ),
+    );
+  }
+
+  Widget _scroll(AsyncValue<List<GroupMatch>> groups) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 780),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Container(
+                padding: const EdgeInsets.all(28),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(AppRadius.card),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: FocusTraversalGroup(
+                  policy: ReadingOrderTraversalPolicy(),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: <Widget>[
+                      _nameAndPhone(),
+                      const SizedBox(height: 22),
+                      _groupSection(groups),
+                      const SizedBox(height: 22),
+                      _trialSection(),
+                      const SizedBox(height: 22),
+                      const FieldCaption('Izoh (ixtiyoriy)'),
+                      TextField(
+                        key: const ValueKey('qabul-note'),
+                        controller: _note,
+                        focusNode: _noteFocus,
+                        decoration: const InputDecoration(
+                          hintText: 'Masalan: kechqurun qulay',
                         ),
-                        const SizedBox(height: 20),
-                        const Divider(height: 1, color: AppColors.divider),
-                        const SizedBox(height: 20),
-                        _footer(),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(height: 20),
+                      const Divider(height: 1, color: AppColors.divider),
+                      const SizedBox(height: 20),
+                      _footer(),
+                    ],
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -398,17 +403,12 @@ class QabulFormState extends ConsumerState<QabulForm> {
 
   Widget _notice() {
     final saved = _saved;
-    // Always the same height, so the form never jumps when a notice comes.
-    return SizedBox(
-      height: 52,
-      child: saved == null
-          ? null
-          : _NoticeBar(
-              saved: saved,
-              onUndo: _undo,
-              onShowQueue: () => showPendingChangesDialog(context),
-              onClose: () => setState(() => _saved = null),
-            ),
+    if (saved == null) return const SizedBox.shrink();
+    return _NoticeBar(
+      saved: saved,
+      onUndo: _undo,
+      onShowQueue: () => showPendingChangesDialog(context),
+      onClose: () => setState(() => _saved = null),
     );
   }
 
@@ -537,14 +537,6 @@ class QabulFormState extends ConsumerState<QabulForm> {
                         () => _patterns.contains(i)
                             ? _patterns.remove(i)
                             : _patterns.add(i),
-                      ),
-                    ),
-                  if (widget.onOpenFinder != null)
-                    // Mouse only: Tab goes name -> phone -> group -> trial -> note.
-                    ExcludeFocus(
-                      child: TextButton(
-                        onPressed: widget.onOpenFinder,
-                        child: const Text('Batafsil qidirish'),
                       ),
                     ),
                 ],
@@ -818,7 +810,8 @@ class _GroupFacts extends StatelessWidget {
   }
 }
 
-/// "Saqlandi / Qaytarish": what just happened to the last save.
+/// The dark toast at the bottom right: "Zilola saqlandi", the group under
+/// it, and "Qaytarish". It floats over the page, so the form never moves.
 class _NoticeBar extends StatelessWidget {
   const _NoticeBar({
     required this.saved,
@@ -837,8 +830,7 @@ class _NoticeBar extends StatelessWidget {
     final result = saved.result;
     final refused = result?.state == SaveState.refused;
     final undone = saved.undone;
-    final tone = refused ? StatusTone.danger : StatusTone.ok;
-    final text =
+    final title =
         undone ??
         switch (result?.state) {
           SaveState.refused =>
@@ -847,50 +839,89 @@ class _NoticeBar extends StatelessWidget {
             '${saved.name} saqlandi — internet qaytganda yuboriladi',
           _ => '${saved.name} saqlandi',
         };
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        decoration: BoxDecoration(
-          color: undone != null ? AppColors.neutralBg : tone.background,
-          borderRadius: BorderRadius.circular(AppRadius.button),
-        ),
-        child: Row(
-          children: <Widget>[
-            Icon(
-              refused
-                  ? Icons.error_outline
-                  : undone != null
-                  ? Icons.undo
-                  : Icons.check_circle_outline,
-              size: 18,
-              color: undone != null ? AppColors.neutralText : tone.foreground,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                text,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: undone != null
-                      ? AppColors.neutralText
-                      : tone.foreground,
+    final subtitle = undone == null && !refused
+        ? (saved.group == null ? 'Guruhsiz' : groupTitle(saved.group!))
+        : null;
+    final icon = refused
+        ? Icons.error_outline
+        : undone != null
+        ? Icons.undo
+        : Icons.check;
+    final iconColor = refused
+        ? const Color(0xFFE5645A)
+        : const Color(0xFF2FBF71);
+    return Material(
+      color: AppColors.ink,
+      borderRadius: BorderRadius.circular(AppRadius.card),
+      elevation: 6,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 300, maxWidth: 460),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: iconColor,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, size: 15, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              Flexible(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (subtitle != null)
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          color: Color(0xFFB9B9C2),
+                          fontSize: 12,
+                        ),
+                      ),
+                  ],
                 ),
               ),
-            ),
-            if (undone == null && !refused)
-              TextButton(onPressed: onUndo, child: const Text('Qaytarish')),
-            if (refused)
-              TextButton(onPressed: onShowQueue, child: const Text('Ko\'rish')),
-            IconButton(
-              tooltip: 'Yopish',
-              visualDensity: VisualDensity.compact,
-              onPressed: onClose,
-              icon: const Icon(Icons.close, size: 16),
-            ),
-          ],
+              const SizedBox(width: 12),
+              if (undone == null && !refused)
+                TextButton(
+                  onPressed: onUndo,
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFB8B0F5),
+                  ),
+                  child: const Text('Qaytarish'),
+                ),
+              if (refused)
+                TextButton(
+                  onPressed: onShowQueue,
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFB8B0F5),
+                  ),
+                  child: const Text('Ko\'rish'),
+                ),
+              IconButton(
+                tooltip: 'Yopish',
+                visualDensity: VisualDensity.compact,
+                onPressed: onClose,
+                icon: const Icon(Icons.close, size: 16, color: Colors.white70),
+              ),
+            ],
+          ),
         ),
       ),
     );
