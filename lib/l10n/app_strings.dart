@@ -48,20 +48,12 @@ class AppStrings {
 
   // --- Top bar and command bar ---------------------------------------
   String get commandBarHint => 'Qidirish yoki buyruq yozish';
-  String get commandBarShortcut => 'Ctrl K';
-  String get commandBarShortcutMac => '⌘ K';
-  String get commandBarTitle => 'Buyruqlar paneli';
-  String get commandSectionActions => 'Amallar';
-  String get commandSectionGoTo => 'Bo\'limlar';
-  String get commandSectionStudents => 'O\'quvchilar';
   String get commandNothingFound => 'Hech narsa topilmadi';
   String get commandSearching => 'Qidirilmoqda...';
   String get commandOpenHint => 'Ochish';
   String get newItem => 'Yangi';
 
   // --- Quick actions -------------------------------------------------
-  String get newLead => 'Yangi so\'rov';
-  String get newStudent => 'Yangi o\'quvchi';
   String get paymentRecorded => 'To\'lov qabul qilindi';
   String get pickStudent => 'O\'quvchini tanlang';
   String get searchStudentHint => 'Ism yoki telefon bo\'yicha qidiring';

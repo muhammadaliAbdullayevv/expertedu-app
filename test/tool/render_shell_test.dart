@@ -11,7 +11,6 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
-import 'package:expert_edu_center/app/shell/top_bar.dart';
 import 'package:expert_edu_center/app/theme/app_theme.dart';
 import 'package:expert_edu_center/features/admissions/presentation/qabul_widgets.dart';
 import 'package:expert_edu_center/features/auth/application/session_controller.dart';
@@ -262,27 +261,6 @@ void main() {
 
       await tester.tap(find.text('Bugun').first);
       await settle(tester);
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-      await tester.sendKeyEvent(LogicalKeyboardKey.keyK);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-      await tester.pump(const Duration(milliseconds: 400));
-      await shot(tester, 'desktop-command-bar');
-      await tester.enterText(find.byType(TextField).last, 'bot');
-      await shot(tester, 'desktop-command-bar-search');
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pump(const Duration(milliseconds: 400));
-
-      await tester.tap(
-        find.descendant(
-          of: find.byType(AppTopBar),
-          matching: find.text('Yangi'),
-        ),
-      );
-      await tester.pump(const Duration(milliseconds: 400));
-      await shot(tester, 'desktop-new-menu');
-      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
-      await tester.pump(const Duration(milliseconds: 400));
-
       // Narrow desktop window: the icon rail.
       await mount(const Size(1000, 700));
       await shot(tester, 'desktop-narrow');

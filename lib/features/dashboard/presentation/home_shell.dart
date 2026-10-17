@@ -6,12 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/navigation/destinations.dart';
 import '../../../app/shell/app_sidebar.dart';
-import '../../../app/shell/command_palette.dart';
 import '../../../app/shell/phone_bottom_bar.dart';
 import '../../../app/shell/shell_counts.dart';
-import '../../../app/shell/top_bar.dart';
 import '../../../app/theme/app_theme.dart';
-import '../../../core/formatters/phone_formatter.dart';
 import '../../../core/layout/breakpoints.dart';
 import '../../../l10n/app_strings.dart';
 import '../../../services/sync/sync_engine.dart';
@@ -24,7 +21,6 @@ import '../../finance/presentation/finance_screen.dart';
 import '../../settings/presentation/desktop_settings.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../../stats/presentation/stats_screen.dart';
-import '../../students/data/students_repository.dart';
 import '../../students/presentation/open_student.dart';
 import '../../students/presentation/students_list_screen.dart';
 import '../../subjects/presentation/subjects_list_screen.dart';
@@ -196,78 +192,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     if (_openStudent.value != null) _go(Destination.students);
   }
 
-  void _newLead() {
-    _go(Destination.admissions);
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _admissionsKey.currentState?.newInquiry(),
-    );
-  }
-
-  void _newStudent() {
-    _go(Destination.students);
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _studentsKey.currentState?.showCreateSheet(),
-    );
-  }
-
-  List<NewMenuItem> get _newMenu => [
-    if (_role != AppRole.teacher) ...[
-      NewMenuItem(_s.newLead, Icons.phone_in_talk_outlined, _newLead),
-      NewMenuItem(_s.newStudent, Icons.person_add_alt_1_outlined, _newStudent),
-    ],
-  ];
-
-  // --- Command bar --------------------------------------------------------
-
-  List<PaletteEntry> get _paletteEntries => [
-    if (_role != AppRole.teacher) ...[
-      PaletteEntry(
-        group: _s.commandSectionActions,
-        label: _s.newLead,
-        icon: Icons.phone_in_talk_outlined,
-        keywords: const ['qo\'ng\'iroq', 'lid'],
-        run: _newLead,
-      ),
-      PaletteEntry(
-        group: _s.commandSectionActions,
-        label: _s.newStudent,
-        icon: Icons.person_add_alt_1_outlined,
-        run: _newStudent,
-      ),
-    ],
-    for (final d in reachableFor(_role))
-      PaletteEntry(
-        group: _s.commandSectionGoTo,
-        label: d.label(_s),
-        icon: d.icon,
-        run: () => _go(d),
-      ),
-  ];
-
-  Future<List<PaletteEntry>> _searchStudents(String query) async {
-    if (_role == AppRole.teacher) return const [];
-    final found = await ref.read(studentsRepositoryProvider).list(query: query);
-    return [
-      for (final Student student in found.take(6))
-        PaletteEntry(
-          group: _s.commandSectionStudents,
-          label: student.fullName,
-          subtitle: PhoneFormatter.display(student.phone),
-          icon: Icons.person_outline_rounded,
-          // The profile, where payments are taken.
-          run: () => _openStudent.value = student.id,
-        ),
-    ];
-  }
-
-  void _openCommandBar() {
-    showCommandPalette(
-      context,
-      entries: _paletteEntries,
-      searchRemote: _searchStudents,
-    );
-  }
-
   // --- Layout -------------------------------------------------------------
 
   @override
@@ -308,10 +232,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             key: _contentKey,
             body: Column(
               children: <Widget>[
-                AppTopBar(
-                  onOpenCommandBar: _openCommandBar,
-                  newMenuItems: _newMenu,
-                ),
                 _PageHeader(
                   title: _title(current),
                   subtitle: _subtitle(current),
@@ -379,15 +299,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         if (didPop) return;
         _handleBackPressed(current);
       },
-      child: CallbackShortcuts(
-        bindings: <ShortcutActivator, VoidCallback>{
-          const SingleActivator(LogicalKeyboardKey.keyK, control: true):
-              _openCommandBar,
-          const SingleActivator(LogicalKeyboardKey.keyK, meta: true):
-              _openCommandBar,
-        },
-        child: Focus(autofocus: true, child: shell),
-      ),
+      child: Focus(autofocus: true, child: shell),
     );
   }
 
