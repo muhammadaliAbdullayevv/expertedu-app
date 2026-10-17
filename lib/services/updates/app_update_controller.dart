@@ -48,6 +48,13 @@ class AppUpdateController extends ChangeNotifier {
   }
 
   Future<void> checkNow() async {
+    // version.json only ever points at an APK, installed through an
+    // Android-only method channel -- desktop builds would otherwise offer
+    // every new Android release as an "update" they can't actually install.
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return;
+    }
+
     checking = true;
     error = null;
     notifyListeners();

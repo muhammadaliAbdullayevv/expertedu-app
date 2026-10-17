@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Expert Edu Center
+Comment=O'quvchilar, guruhlar va to'lovlarni boshqarish
+Exec=expert-edu-center
+Icon=uz.expertedu.expert_edu_center
+Terminal=false
+Categories=Office;
+StartupWMClass=uz.expertedu.expert_edu_center
