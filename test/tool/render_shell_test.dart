@@ -230,7 +230,9 @@ void main() {
       await shot(tester, 'students-pay-dialog');
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await settle(tester);
-      await tester.tap(find.byKey(const ValueKey('panel-add-group')));
+      await tester.tap(find.byKey(const ValueKey('panel-menu')));
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('menu-add-group')));
       await settle(tester);
       await tester.enterText(
         find.byKey(const ValueKey('add-group-search')),

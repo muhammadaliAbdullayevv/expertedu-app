@@ -139,6 +139,7 @@ class ProfileGroup {
     required this.status,
     required this.balance,
     this.nextDueDate,
+    this.debtSince,
     this.schedule = const [],
     required this.attendance,
   });
@@ -155,6 +156,9 @@ class ProfileGroup {
   /// > 0: owes this much on this group.
   final int balance;
   final DateTime? nextDueDate;
+
+  /// The oldest charge on this group that is still unpaid.
+  final DateTime? debtSince;
   final List<ScheduleSlot> schedule;
   final ProfileAttendance attendance;
 
@@ -173,6 +177,9 @@ class ProfileGroup {
     nextDueDate: json['next_due_date'] == null
         ? null
         : DateTime.parse(json['next_due_date'] as String),
+    debtSince: json['debt_since'] == null
+        ? null
+        : DateTime.parse(json['debt_since'] as String),
     schedule: [
       for (final s in json['schedule'] as List<dynamic>? ?? const [])
         ScheduleSlot.fromJson(s as Map<String, dynamic>),
@@ -187,6 +194,7 @@ class ProfilePayment {
   const ProfilePayment({
     required this.id,
     this.enrollmentId,
+    this.groupId,
     this.groupName,
     required this.amount,
     this.method,
@@ -200,6 +208,7 @@ class ProfilePayment {
 
   final int id;
   final int? enrollmentId;
+  final int? groupId;
   final String? groupName;
   final int amount;
   final String? method;
@@ -217,6 +226,7 @@ class ProfilePayment {
   factory ProfilePayment.fromJson(Map<String, dynamic> json) => ProfilePayment(
     id: json['id'] as int,
     enrollmentId: json['enrollment_id'] as int?,
+    groupId: json['group_id'] as int?,
     groupName: json['group_name'] as String?,
     amount: json['amount'] as int,
     method: json['method'] as String?,
@@ -232,16 +242,19 @@ class ProfilePayment {
 class ProfileMark {
   const ProfileMark({
     required this.at,
+    this.groupId,
     required this.groupName,
     required this.status,
   });
 
   final DateTime at;
+  final int? groupId;
   final String groupName;
   final String status;
 
   factory ProfileMark.fromJson(Map<String, dynamic> json) => ProfileMark(
     at: _dt(json['at']),
+    groupId: json['group_id'] as int?,
     groupName: json['group_name'] as String,
     status: json['status'] as String,
   );
@@ -254,6 +267,7 @@ class ActivityItem {
     required this.title,
     this.detail,
     this.amount,
+    this.groupId,
   });
 
   final DateTime at;
@@ -264,12 +278,16 @@ class ActivityItem {
   final String? detail;
   final int? amount;
 
+  /// The group it was about.
+  final int? groupId;
+
   factory ActivityItem.fromJson(Map<String, dynamic> json) => ActivityItem(
     at: _dt(json['at']),
     kind: json['kind'] as String,
     title: json['title'] as String,
     detail: json['detail'] as String?,
     amount: json['amount'] as int?,
+    groupId: json['group_id'] as int?,
   );
 }
 
@@ -287,10 +305,14 @@ class StudentProfileData {
     this.overdueDays = 0,
     this.activity = const [],
     this.marks = const [],
+    this.scope,
   });
 
   final Student student;
   final bool isNew;
+
+  /// Set when this is a view of one group only (see [scopedTo]).
+  final ProfileGroup? scope;
 
   /// > 0: owes this much across every group.
   final int balance;
@@ -305,6 +327,45 @@ class StudentProfileData {
 
   List<ProfileGroup> get activeGroups =>
       groups.where((g) => g.isActive).toList();
+
+  /// The same student seen from one group's page: only that group, its debt
+  /// and how long it has been due, its attendance, its payments, its lessons
+  /// and what happened in it -- nothing about their other groups.
+  StudentProfileData scopedTo(int groupId) {
+    final mine = groups.where((g) => g.groupId == groupId).toList();
+    final myPayments = payments.where((p) => p.groupId == groupId).toList();
+    final owed = mine.fold<int>(0, (sum, g) => sum + g.balance);
+    DateTime? since;
+    for (final g in mine) {
+      final d = g.debtSince;
+      if (d != null && (since == null || d.isBefore(since))) since = d;
+    }
+    final today = DateTime.now();
+    final overdue = since == null
+        ? 0
+        : DateTime(today.year, today.month, today.day)
+              .difference(DateTime(since.year, since.month, since.day))
+              .inDays
+              .clamp(0, 100000);
+    return StudentProfileData(
+      student: student,
+      isNew: isNew,
+      balance: owed,
+      paidTotal: myPayments
+          .where((p) => !p.isCancelled)
+          .fold<int>(0, (sum, p) => sum + p.amount),
+      groups: mine,
+      attendance: mine.isEmpty
+          ? const ProfileAttendance()
+          : mine.first.attendance,
+      payments: myPayments,
+      debtSince: owed > 0 ? since : null,
+      overdueDays: owed > 0 ? overdue : 0,
+      activity: activity.where((a) => a.groupId == groupId).toList(),
+      marks: marks.where((m) => m.groupId == groupId).toList(),
+      scope: mine.isEmpty ? null : mine.first,
+    );
+  }
 
   factory StudentProfileData.fromJson(Map<String, dynamic> json) =>
       StudentProfileData(

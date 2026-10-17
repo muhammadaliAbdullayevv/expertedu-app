@@ -62,9 +62,14 @@ class StudentPanel extends ConsumerStatefulWidget {
     super.key,
     required this.studentId,
     required this.onChanged,
+    this.groupId,
   });
 
   final int studentId;
+
+  /// Opened from one group's page: show only that group -- its debt, attendance,
+  /// payments and what happened in it. Null (from O'quvchilar) shows everything.
+  final int? groupId;
 
   /// Something changed (a payment, an edit, a new group): the table reloads.
   final VoidCallback onChanged;
@@ -77,6 +82,10 @@ class StudentPanelState extends ConsumerState<StudentPanel> {
   static const _tabs = <String>['Umumiy', 'To\'lovlar', 'Davomat', 'Izohlar'];
 
   late Future<StudentProfileData> _profile = _load();
+
+  /// Everything about the student, even when only one group is shown -- adding
+  /// to another group needs to know all the groups they are already in.
+  StudentProfileData? _full;
   int _tab = 0;
 
   Future<StudentProfileData> _load() =>
@@ -154,10 +163,14 @@ class StudentPanelState extends ConsumerState<StudentPanel> {
           if (snapshot.hasError) {
             return LoadFailed(error: snapshot.error!, onRetry: _reload);
           }
-          final p = snapshot.data;
-          if (p == null) {
+          final full = snapshot.data;
+          if (full == null) {
             return const Center(child: CircularProgressIndicator());
           }
+          _full = full;
+          final p = widget.groupId == null
+              ? full
+              : full.scopedTo(widget.groupId!);
           return SingleChildScrollView(
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -234,6 +247,18 @@ class StudentPanelState extends ConsumerState<StudentPanel> {
                 ),
               if (s.address != null && s.address!.isNotEmpty)
                 Text(s.address!, style: muted),
+              if (p.scope != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Tooltip(
+                    message: 'Bu yerda faqat shu guruh ko\'rsatilgan.',
+                    child: StatusChip(
+                      'Guruh: ${p.scope!.groupName}',
+                      key: const ValueKey('panel-scope'),
+                      tone: StatusTone.info,
+                    ),
+                  ),
+                ),
               if (p.isNew)
                 const Padding(
                   padding: EdgeInsets.only(top: 6),
@@ -265,10 +290,11 @@ class StudentPanelState extends ConsumerState<StudentPanel> {
         PopupMenuButton<String>(
           key: const ValueKey('panel-menu'),
           tooltip: 'Sozlamalar',
-          onSelected: (value) => value == 'edit' ? _edit(p) : _addToGroup(p),
+          // Editing has its own pencil; this menu is for adding another group.
+          onSelected: (_) => _addToGroup(_full ?? p),
           itemBuilder: (_) => const <PopupMenuEntry<String>>[
-            PopupMenuItem(value: 'edit', child: Text('Profilni tahrirlash')),
             PopupMenuItem(
+              key: ValueKey('menu-add-group'),
               value: 'group',
               child: Text('Boshqa guruhga qo\'shish'),
             ),
@@ -289,22 +315,13 @@ class StudentPanelState extends ConsumerState<StudentPanel> {
   }
 
   Widget _actions(StudentProfileData p) {
-    return Row(
-      children: <Widget>[
-        Expanded(
-          child: FilledButton(
-            key: const ValueKey('panel-pay'),
-            onPressed: p.activeGroups.isEmpty ? null : () => _takePayment(p),
-            child: const Text('To\'lov qabul qilish'),
-          ),
-        ),
-        const SizedBox(width: 10),
-        OutlinedButton(
-          key: const ValueKey('panel-add-group'),
-          onPressed: () => _addToGroup(p),
-          child: const Text('Boshqa guruhga qo\'shish'),
-        ),
-      ],
+    return SizedBox(
+      width: double.infinity,
+      child: FilledButton(
+        key: const ValueKey('panel-pay'),
+        onPressed: p.activeGroups.isEmpty ? null : () => _takePayment(p),
+        child: const Text('To\'lov qabul qilish'),
+      ),
     );
   }
 

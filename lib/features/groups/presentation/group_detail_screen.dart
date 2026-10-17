@@ -69,7 +69,11 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
         child: SizedBox(
           width: 480,
           height: MediaQuery.sizeOf(dialogContext).height * 0.9,
-          child: StudentPanel(studentId: studentId, onChanged: _reload),
+          child: StudentPanel(
+            studentId: studentId,
+            groupId: widget.group.id,
+            onChanged: _reload,
+          ),
         ),
       ),
     );
@@ -190,6 +194,7 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
                                             'group-panel-$selected',
                                           ),
                                           studentId: selected,
+                                          groupId: widget.group.id,
                                           onChanged: _reload,
                                         ),
                                 ),

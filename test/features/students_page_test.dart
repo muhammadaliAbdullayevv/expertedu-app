@@ -171,10 +171,14 @@ ProfilePayment payment(
   int amount, {
   String status = 'valid',
   String? reason,
+  int groupId = 1,
+  int enrollmentId = 11,
+  String groupName = 'Fransuz tili, A1',
 }) => ProfilePayment(
   id: id,
-  enrollmentId: 11,
-  groupName: 'Fransuz tili, A1',
+  enrollmentId: enrollmentId,
+  groupId: groupId,
+  groupName: groupName,
   amount: amount,
   method: 'cash',
   receivedAt: DateTime.now(),
@@ -850,16 +854,31 @@ void main() {
     );
 
     testWidgets(
-      'the menu has Profilni tahrirlash and Boshqa guruhga qo\'shish',
+      'the pencil edits; the three dots only add another group (no second edit button)',
       (tester) async {
         await pump(tester, Rig());
         await tester.tap(find.byKey(const ValueKey('panel-menu')));
         await tester.pumpAndSettle();
-        expect(find.text('Profilni tahrirlash'), findsOneWidget);
-        expect(find.text('Boshqa guruhga qo\'shish'), findsWidgets);
-        await tester.tap(find.text('Profilni tahrirlash'));
+        expect(find.text('Boshqa guruhga qo\'shish'), findsOneWidget);
+        expect(find.text('Profilni tahrirlash'), findsNothing);
+        // Closing the menu, the pencil opens the form.
+        await tester.tapAt(const Offset(10, 10));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('panel-edit')));
         await tester.pumpAndSettle();
         expect(find.byKey(const ValueKey('edit-name')), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      '"Boshqa guruhga qo\'shish" is no longer a button on the panel',
+      (tester) async {
+        await pump(tester, Rig());
+        expect(find.byKey(const ValueKey('panel-add-group')), findsNothing);
+        expect(
+          find.text('Boshqa guruhga qo\'shish'),
+          findsNothing,
+        ); // only inside the menu
       },
     );
 
@@ -1064,7 +1083,9 @@ void main() {
 
   group('Boshqa guruhga qo\'shish', () {
     Future<void> openDialog(WidgetTester tester) async {
-      await tester.tap(find.byKey(const ValueKey('panel-add-group')));
+      await tester.tap(find.byKey(const ValueKey('panel-menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('menu-add-group')));
       await tester.pumpAndSettle();
     }
 
@@ -1237,6 +1258,295 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(panelName(tester), 'Dilnoza Ergasheva');
+      },
+    );
+  });
+
+  group('opened from one group: only that group', () {
+    // Dilnoza is in two groups; each has its own debt, payments, lessons and history.
+    StudentProfileData twoGroups() {
+      ProfileGroup g(
+        int enr,
+        int gid,
+        String name,
+        int owed,
+        DateTime since,
+        List<String> marks,
+      ) => ProfileGroup(
+        enrollmentId: enr,
+        groupId: gid,
+        groupName: name,
+        subjectName: name,
+        teacherName: 'O\'qituvchi $name',
+        feeAmount: 300000,
+        joinedAt: DateTime(2026, 9, 5),
+        status: 'active',
+        balance: owed,
+        debtSince: owed > 0 ? since : null,
+        schedule: [slot(1, 10)],
+        attendance: ProfileAttendance(
+          present: marks.where((m) => m == 'present').length,
+          absent: marks.where((m) => m == 'absent').length,
+          total: marks.length,
+          rate: marks.isEmpty
+              ? null
+              : marks.where((m) => m == 'present').length / marks.length,
+          recent: marks,
+        ),
+      );
+      final now = DateTime.now();
+      return StudentProfileData(
+        student: const Student(
+          id: 2,
+          fullName: 'Dilnoza Ergasheva',
+          phone: '998900000002',
+        ),
+        isNew: false,
+        balance: 300000,
+        paidTotal: 350000,
+        groups: [
+          g(
+            21,
+            1,
+            'Fransuz tili, A1',
+            100000,
+            now.subtract(const Duration(days: 40)),
+            ['present', 'present', 'present', 'absent'],
+          ),
+          g(
+            22,
+            2,
+            'Matematika 9',
+            200000,
+            now.subtract(const Duration(days: 5)),
+            ['absent', 'absent'],
+          ),
+        ],
+        attendance: const ProfileAttendance(
+          present: 3,
+          absent: 3,
+          total: 6,
+          rate: 0.5,
+        ),
+        payments: [
+          payment(
+            31,
+            250000,
+            groupId: 1,
+            enrollmentId: 21,
+            groupName: 'Fransuz tili, A1',
+          ),
+          payment(
+            32,
+            100000,
+            groupId: 2,
+            enrollmentId: 22,
+            groupName: 'Matematika 9',
+          ),
+        ],
+        debtSince: now.subtract(const Duration(days: 40)),
+        overdueDays: 40,
+        activity: [
+          ActivityItem(
+            at: now,
+            kind: 'charge',
+            title: 'Hisob chiqdi',
+            detail: 'Fransuz tili, A1',
+            amount: 300000,
+            groupId: 1,
+          ),
+          ActivityItem(
+            at: now,
+            kind: 'absent',
+            title: 'Darsga kelmadi',
+            detail: 'Matematika 9',
+            groupId: 2,
+          ),
+        ],
+        marks: [
+          ProfileMark(
+            at: now,
+            groupId: 1,
+            groupName: 'Fransuz tili, A1',
+            status: 'present',
+          ),
+          ProfileMark(
+            at: now,
+            groupId: 2,
+            groupName: 'Matematika 9',
+            status: 'absent',
+          ),
+        ],
+      );
+    }
+
+    Rig rigFor() => Rig(
+      profiles: {2: twoGroups()},
+      rows: [
+        row(
+          2,
+          'Dilnoza Ergasheva',
+          balance: 300000,
+          debtor: true,
+          groups: [english, math],
+        ),
+      ],
+    );
+
+    Future<void> pumpPanel(WidgetTester tester, Rig rig, {int? groupId}) async {
+      tester.view.physicalSize = const Size(900, 1100);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            studentsRepositoryProvider.overrideWithValue(rig.students),
+            transactionsRepositoryProvider.overrideWithValue(rig.transactions),
+            enrollmentsRepositoryProvider.overrideWithValue(rig.enrollments),
+            qabulRepositoryProvider.overrideWithValue(rig.qabul),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            home: Scaffold(
+              body: Center(
+                child: SizedBox(
+                  width: 440,
+                  height: 1000,
+                  child: StudentPanel(
+                    studentId: 2,
+                    groupId: groupId,
+                    onChanged: () {},
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets(
+      'from the students page (no group) everything shows: both groups and the whole debt',
+      (tester) async {
+        await pumpPanel(tester, rigFor());
+        expect(find.byKey(const ValueKey('panel-scope')), findsNothing);
+        expect(find.byKey(const ValueKey('group-card-1')), findsOneWidget);
+        expect(find.byKey(const ValueKey('group-card-2')), findsOneWidget);
+        expect(
+          find.byWidgetPredicate(
+            (w) => w is Text && plain(w.data ?? '') == '300 000',
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('40 kun kechikdi'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'from one group: that group alone, its own debt and how long it is due',
+      (tester) async {
+        await pumpPanel(tester, rigFor(), groupId: 2);
+        expect(find.text('Guruh: Matematika 9'), findsOneWidget);
+        expect(find.byKey(const ValueKey('group-card-2')), findsOneWidget);
+        expect(find.byKey(const ValueKey('group-card-1')), findsNothing);
+        // The debt card is this group's: 200 000, 5 days -- not the 300 000 / 40 days of both.
+        expect(
+          find.byWidgetPredicate(
+            (w) => w is Text && plain(w.data ?? '') == '200 000',
+          ),
+          findsOneWidget,
+        );
+        expect(find.text('5 kun kechikdi'), findsOneWidget);
+        expect(find.text('40 kun kechikdi'), findsNothing);
+        // Activity is this group's only.
+        expect(find.text('Darsga kelmadi'), findsOneWidget);
+        expect(find.text('Hisob chiqdi'), findsNothing);
+        // The other group's name is nowhere on the panel.
+        expect(find.textContaining('Fransuz'), findsNothing);
+      },
+    );
+
+    testWidgets('payments and attendance are that group\'s too', (
+      tester,
+    ) async {
+      await pumpPanel(tester, rigFor(), groupId: 2);
+      await tab(tester, 1);
+      expect(find.byKey(const ValueKey('payment-32')), findsOneWidget);
+      expect(find.byKey(const ValueKey('payment-31')), findsNothing);
+      expect(find.textContaining('Jami to\'langan: 100'), findsOneWidget);
+      await tab(tester, 2);
+      // Matematika: two lessons, both missed -- 0%, not the 50% over both groups.
+      expect(
+        tester.widget<Text>(find.byKey(const ValueKey('attendance-rate'))).data,
+        '0%',
+      );
+      expect(find.text('2 ta darsdan'), findsOneWidget);
+    });
+
+    testWidgets(
+      'taking a payment from one group is for that group alone, no group picker',
+      (tester) async {
+        final rig = rigFor();
+        await pumpPanel(tester, rig, groupId: 2);
+        await tester.tap(find.byKey(const ValueKey('panel-pay')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('payment-group')), findsNothing);
+        expect(
+          plain(
+            tester
+                .widget<TextField>(find.byKey(const ValueKey('payment-amount')))
+                .controller!
+                .text,
+          ),
+          '200 000',
+        );
+        await tester.tap(find.byKey(const ValueKey('payment-save')));
+        await tester.pumpAndSettle();
+        expect(rig.transactions.payments.single.enrollmentId, 22);
+      },
+    );
+
+    testWidgets(
+      'from the students page the payment form lets you choose between the groups',
+      (tester) async {
+        await pumpPanel(tester, rigFor());
+        await tester.tap(find.byKey(const ValueKey('panel-pay')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('payment-group')), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'adding another group still leaves out every group they are in, not only the open one',
+      (tester) async {
+        await pumpPanel(
+          tester,
+          Rig(
+            profiles: {2: twoGroups()},
+            groups: [
+              match(1, 'Fransuz tili, A1'),
+              match(2, 'Matematika 9', subject: 'Matematika'),
+              match(7, 'Beginner A'),
+            ],
+          ),
+          groupId: 2,
+        );
+        await tester.tap(find.byKey(const ValueKey('panel-menu')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('menu-add-group')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const ValueKey('add-group-search')),
+          'a',
+        );
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('add-group-7')), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('add-group-1')),
+          findsNothing,
+        ); // in it, though not the one open
+        expect(find.byKey(const ValueKey('add-group-2')), findsNothing);
       },
     );
   });

@@ -418,6 +418,15 @@ void main() {
     },
   );
 
+  testWidgets('the profile opened from a group is that group\'s part only', (
+    tester,
+  ) async {
+    await pump(tester, app(FakeGroups(data()), rig()));
+    // The chip says which group the panel is showing.
+    expect(find.byKey(const ValueKey('panel-scope')), findsOneWidget);
+    expect(find.textContaining('Guruh: '), findsOneWidget);
+  });
+
   testWidgets('a payment taken on the profile reloads the group page', (
     tester,
   ) async {
