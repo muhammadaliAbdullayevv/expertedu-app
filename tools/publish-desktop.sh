@@ -23,11 +23,13 @@ if [[ -n "$(git status --porcelain)" ]]; then
   echo "Commit your changes first -- the published build must match a commit." >&2
   exit 1
 fi
-commit="$(git rev-parse HEAD)"
-if ! git branch -r --contains "$commit" | grep -q .; then
+if ! git branch -r --contains HEAD | grep -q .; then
   echo "Push first: CI builds the Windows installer from the pushed commit." >&2
   exit 1
 fi
+# The newest commit that changed the app itself -- the one CI built. A
+# later server-only commit doesn't change the app, or trigger a build.
+commit="$(git log -1 --format=%H -- lib assets windows pubspec.yaml pubspec.lock .github/workflows/windows.yml)"
 
 version_line="$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml)"
 version="${version_line%%+*}"
