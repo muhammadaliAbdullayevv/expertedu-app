@@ -340,12 +340,13 @@ async def get_roster(group_id: int, include_withdrawn: bool = False):
     rows = await db.pool().fetch(
         f"""
         select e.id as enrollment_id, e.student_id, s.full_name as student_full_name,
-               s.phone as student_phone, e.joined_at, e.status, eb.owed as balance
+               s.phone as student_phone, e.joined_at, e.status, eb.owed as balance,
+               e.joined_at > current_date - 14 as is_new
         from enrollments e
         join students s on s.id = e.student_id
         join enrollment_balances eb on eb.enrollment_id = e.id
         where e.group_id = $1 {where}
-        order by s.full_name asc
+        order by (e.joined_at > current_date - 14) desc, e.joined_at desc, s.full_name asc
         """,
         group_id,
     )

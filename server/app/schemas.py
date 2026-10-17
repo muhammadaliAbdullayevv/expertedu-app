@@ -154,6 +154,8 @@ class CreateStudentRequest(BaseModel):
 class UpdateStudentRequest(BaseModel):
     full_name: str | None = None
     phone: str | None = None
+    parent_phone: str | None = None
+    address: str | None = None
     telegram_username: str | None = None
     note: str | None = None
 
@@ -166,6 +168,7 @@ class Student(BaseModel):
     note: str | None
     parent_phone: str | None = None
     heard_from: str | None = None
+    address: str | None = None
     created_at: datetime
 
 
@@ -182,6 +185,19 @@ class StudentListItem(BaseModel):
     note: str | None
     created_at: datetime
     balance: int
+    # The groups they study in now, and how their last lessons went
+    # (oldest first, at most ten) -- the table's attendance indicator.
+    group_names: list[str] = []
+    groups: list["StudentGroupRef"] = []
+    attendance_recent: list[str] = []
+    # How they did over those lessons (present or late, out of those they
+    # were expected at); null until a lesson was marked.
+    attendance_rate: float | None = None
+    # The table's tabs -- one definition, here, for the app to count.
+    is_new: bool = False
+    is_debtor: bool = False
+    is_at_risk: bool = False
+    is_active: bool = False
 
 
 class CreateEnrollmentRequest(BaseModel):
@@ -214,6 +230,8 @@ class RosterEntry(BaseModel):
     balance: int
     # When this enrollment's next charge falls due (today counts).
     next_due_date: date | None = None
+    # Joined in the last two weeks: shown first on the roster, marked "Yangi".
+    is_new: bool = False
 
 
 class StudentEnrollment(BaseModel):
@@ -1129,3 +1147,104 @@ class TrialDate(BaseModel):
     # if the session doesn't exist yet.
     free_seats: int | None
     suggested_capacity: int
+
+
+class ProfileAttendance(BaseModel):
+    present: int = 0
+    late: int = 0
+    absent: int = 0
+    excused: int = 0
+    # Lessons that were marked for this student, and the share they came to
+    # (present or late). Null until a lesson has been marked.
+    total: int = 0
+    rate: float | None = None
+    # The last ten marks, oldest first.
+    recent: list[str] = []
+
+
+class ProfileGroup(BaseModel):
+    enrollment_id: int
+    group_id: int
+    group_name: str
+    subject_name: str | None
+    teacher_name: str | None
+    fee_amount: int
+    joined_at: date
+    status: str
+    # > 0: the student owes this much on this group (money.enrollment_balances).
+    balance: int
+    next_due_date: date | None = None
+    schedule: list["ScheduleSlot"] = []
+    attendance: ProfileAttendance
+
+
+class ProfilePayment(BaseModel):
+    id: int
+    enrollment_id: int | None
+    group_name: str | None
+    amount: int
+    method: str | None
+    received_at: datetime
+    received_by_name: str | None
+    receipt_no: str | None
+    note: str | None
+    status: str
+    cancel_reason: str | None = None
+
+
+class StudentProfile(BaseModel):
+    """Everything the profile panel shows, in one answer."""
+
+    student: Student
+    is_new: bool
+    # > 0: owes this much across every group.
+    balance: int
+    paid_total: int
+    groups: list[ProfileGroup]
+    attendance: ProfileAttendance
+    payments: list[ProfilePayment]
+    # How long the oldest unpaid charge has been due (null = nothing overdue).
+    debt_since: date | None = None
+    overdue_days: int = 0
+    activity: list["ActivityItem"] = []
+
+
+class StudentGroupRef(BaseModel):
+    """A group a student is in now, as the table shows it: name, teacher, days."""
+
+    group_id: int
+    name: str
+    subject_id: int | None = None
+    subject_name: str | None = None
+    teacher_id: int | None = None
+    teacher_name: str | None = None
+    schedule: list["ScheduleSlot"] = []
+
+
+class ActivityItem(BaseModel):
+    """One line of "So'nggi faollik" on the profile."""
+
+    at: datetime
+    # 'joined' | 'charge' | 'payment' | 'payment_cancelled' | 'absent' | 'late'
+    kind: str
+    title: str
+    detail: str | None = None
+    amount: int | None = None
+
+
+class AddToGroupRequest(BaseModel):
+    group_id: int
+    joined_at: date
+    first_payment_amount: int | None = None
+    first_payment_method: str | None = None
+
+
+class AddedToGroup(BaseModel):
+    enrollment_id: int
+    group_name: str
+    first_charge: int
+    first_payment: int
+
+
+StudentProfile.model_rebuild()
+StudentListItem.model_rebuild()

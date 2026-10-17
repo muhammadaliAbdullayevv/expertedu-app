@@ -649,8 +649,8 @@ async def enroll_lead(
                 async with conn.transaction():
                     student = await conn.fetchrow(
                         """
-                        insert into students (full_name, phone, note, parent_phone, heard_from, created_by)
-                        values ($1, $2, $3, $4, $5, $6)
+                        insert into students (full_name, phone, note, parent_phone, heard_from, created_by, address)
+                        values ($1, $2, $3, $4, $5, $6, $7)
                         returning *
                         """,
                         full_name,
@@ -659,6 +659,7 @@ async def enroll_lead(
                         optional_phone(payload.parent_phone or lead["parent_phone"], "Ota-ona telefoni"),
                         heard_from_value(payload.heard_from or lead["source"]),
                         user.id,
+                        lead["address"],
                     )
             except asyncpg.UniqueViolationError:
                 # Someone saved a student with this phone a moment ago.

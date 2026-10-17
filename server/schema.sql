@@ -89,7 +89,9 @@ create table if not exists students (
   parent_phone text,
   heard_from text check (heard_from in ('instagram','telegram','referral','walk_in','other')),
   created_by bigint references users(id),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Where they live, typed by hand (0019).
+  address text
 );
 
 -- A student can be enrolled in multiple groups at once, each its own
