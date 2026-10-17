@@ -67,8 +67,9 @@ class _CourseFinderScreenState extends ConsumerState<CourseFinderScreen> {
   void initState() {
     super.initState();
     _subjects.then((subjects) {
-      if (mounted && subjects.isNotEmpty && _subjectId == null)
+      if (mounted && subjects.isNotEmpty && _subjectId == null) {
         _pickSubject(subjects.first.id);
+      }
     });
   }
 
@@ -110,8 +111,9 @@ class _CourseFinderScreenState extends ConsumerState<CourseFinderScreen> {
     final name = _name.text.trim();
     final phone = UzPhoneField.toE164(_phone.text);
     if (name.isEmpty || _phone.text.trim().length < 9) {
-      if (!silent)
+      if (!silent) {
         showSnack(context, 'Avval mijoz ismi va telefonini kiriting.');
+      }
       return null;
     }
     setState(() => _busy = true);

@@ -96,8 +96,9 @@ class _AfterTrialFormState extends ConsumerState<AfterTrialForm> {
         tried ??
         bySubject.firstOrNull?.id ??
         groups.firstOrNull?.id;
-    if (pick != null)
+    if (pick != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _pickGroup(pick));
+    }
     return (detail: detail, groups: groups);
   }
 
@@ -109,8 +110,9 @@ class _AfterTrialFormState extends ConsumerState<AfterTrialForm> {
           .read(enrollmentsRepositoryProvider)
           .previewFirstCharge(groupId: id, joinedAt: DateTime.now())
           .then((p) {
-            if (mounted)
+            if (mounted) {
               setState(() => _firstMonth = p.isMidCycle ? 'prorated' : 'full');
+            }
             return p;
           });
     });
@@ -166,10 +168,11 @@ class _AfterTrialFormState extends ConsumerState<AfterTrialForm> {
             LeadStage.followUpLater,
             followUpAt: at,
           );
-          if (mounted)
+          if (mounted) {
             Navigator.of(
               context,
             ).pop('Keyinroq bog\'lanish belgilandi: ${dayMonth(at)}');
+          }
         case AfterTrialOutcome.reject:
           final reason = _reason.text.trim();
           if (reason.isEmpty) {
