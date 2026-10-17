@@ -40,7 +40,14 @@ async def login(payload: LoginRequest):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Telefon yoki parol noto'g'ri.")
 
     await db.pool().execute(
-        "update users set failed_login_attempts = 0, locked_until = null, last_login_at = now() where id = $1",
+        "update users set failed_login_attempts = 0, locked_until = null where id = $1",
+        row["id"],
+    )
+    await db.pool().execute(
+        """
+        insert into staff_logins (user_id, last_login_at) values ($1, now())
+        on conflict (user_id) do update set last_login_at = excluded.last_login_at
+        """,
         row["id"],
     )
 

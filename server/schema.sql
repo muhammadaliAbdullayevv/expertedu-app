@@ -13,8 +13,14 @@ create table if not exists users (
   is_active boolean not null default true,
   failed_login_attempts int not null default 0,
   locked_until timestamptz,
-  created_at timestamptz not null default now(),
-  last_login_at timestamptz
+  created_at timestamptz not null default now()
+);
+
+-- When each account last signed in (0009). Not a users column: in
+-- production users belongs to the postgres superuser.
+create table if not exists staff_logins (
+  user_id bigint primary key references users(id),
+  last_login_at timestamptz not null
 );
 
 -- A subject (e.g. "Ingliz tili") can have several groups under it (e.g.

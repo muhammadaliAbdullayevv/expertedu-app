@@ -14,7 +14,10 @@ from ..security import hash_password
 router = APIRouter(prefix="/staff", tags=["staff"], dependencies=[Depends(require_owner)])
 
 _MIN_PASSWORD = 6
-_COLUMNS = "id, phone, full_name, role, is_active, created_at, last_login_at"
+_SELECT = """
+select u.id, u.phone, u.full_name, u.role, u.is_active, u.created_at, l.last_login_at
+from users u left join staff_logins l on l.user_id = u.id
+"""
 
 
 def _password(value: str) -> str:
@@ -24,7 +27,7 @@ def _password(value: str) -> str:
 
 
 async def _fetch(conn, staff_id: int) -> StaffMember:
-    row = await conn.fetchrow(f"select {_COLUMNS} from users where id = $1", staff_id)
+    row = await conn.fetchrow(f"{_SELECT} where u.id = $1", staff_id)
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Xodim topilmadi.")
     return StaffMember(**row)
@@ -33,7 +36,7 @@ async def _fetch(conn, staff_id: int) -> StaffMember:
 @router.get("", response_model=list[StaffMember])
 async def list_staff():
     rows = await db.pool().fetch(
-        f"select {_COLUMNS} from users order by role = 'owner' desc, is_active desc, full_name"
+        f"{_SELECT} order by u.role = 'owner' desc, u.is_active desc, u.full_name"
     )
     return [StaffMember(**row) for row in rows]
 
