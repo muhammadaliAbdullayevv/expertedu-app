@@ -16,7 +16,7 @@ version_line="$(sed -n 's/^version:[[:space:]]*//p' pubspec.yaml)"
 version="${version_line%%+*}"
 build="${version_line##*+}"
 
-flutter build linux --release
+flutter build linux --release ${BUILD_ARGS:-}
 
 topdir="$root/build/rpmbuild"
 rm -rf "$topdir"

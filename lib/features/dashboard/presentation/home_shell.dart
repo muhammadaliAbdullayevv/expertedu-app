@@ -16,6 +16,7 @@ import '../../../core/layout/breakpoints.dart';
 import '../../../l10n/app_strings.dart';
 import '../../../services/sync/sync_engine.dart';
 import '../../admissions/presentation/admissions_screen.dart';
+import '../../admissions/presentation/admissions_ui.dart' show admissionsRefreshProvider;
 import '../../auth/application/session_controller.dart';
 import '../../debtors/presentation/debtors_screen.dart';
 import '../../finance/presentation/finance_screen.dart';
@@ -65,12 +66,24 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ref.read(syncEngineProvider).start();
     // The menu follows who's signed in.
     _session.addListener(_onSessionChanged);
+    // Any change to a lead moves the sidebar numbers (and Bugun's).
+    _admissionsRefresh.addListener(_onAdmissionsChanged);
   }
 
   @override
   void dispose() {
     _session.removeListener(_onSessionChanged);
+    _admissionsRefresh.removeListener(_onAdmissionsChanged);
     super.dispose();
+  }
+
+  late final ValueNotifier<int> _admissionsRefresh = ref.read(admissionsRefreshProvider);
+
+  void _onAdmissionsChanged() {
+    if (!mounted) return;
+    ref.invalidate(shellCountsProvider);
+    ref.invalidate(studentSummaryProvider);
+    _dashboardKey.currentState?.reload();
   }
 
   void _onSessionChanged() {
@@ -136,12 +149,21 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         break;
     }
     ref.invalidate(shellCountsProvider);
+    ref.invalidate(studentSummaryProvider);
   }
 
   String _title(Destination d) => d.label(_s);
 
-  String? _subtitle(Destination d) =>
-      d == Destination.today ? uzLongDate(DateTime.now()) : null;
+  String? _subtitle(Destination d) {
+    if (d == Destination.today) return uzLongDate(DateTime.now());
+    if (d == Destination.students) {
+      final summary = ref.watch(studentSummaryProvider).value;
+      if (summary == null) return null;
+      return '${summary.activeStudents} ta faol o\'quvchi'
+          '${summary.studentsWithDebt > 0 ? ' · ${summary.studentsWithDebt} tasi qarzdor' : ''}';
+    }
+    return null;
+  }
 
   // --- Navigation ---------------------------------------------------------
 

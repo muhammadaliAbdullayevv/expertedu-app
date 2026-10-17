@@ -4,17 +4,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../core/extensions/build_context_x.dart';
-import '../../../core/formatters/currency_formatter.dart';
 import '../../../core/formatters/date_formatters.dart';
 import '../../../core/formatters/phone_formatter.dart';
 import '../../../core/layout/breakpoints.dart';
 import '../../../services/api/api_client.dart';
-import '../../students/presentation/add_student_dialog.dart';
 import '../../students/presentation/student_summary_dialog.dart';
 import '../data/admissions_models.dart';
 import '../data/admissions_repository.dart';
 import 'admissions_ui.dart';
+import 'after_trial_dialog.dart';
 import 'lead_action_dialogs.dart';
+import 'trial_booking_dialog.dart';
 import 'schedule_trial_dialog.dart';
 
 /// Opens a lead: a panel sliding in from the right on wide layouts, full
@@ -122,28 +122,28 @@ class _LeadDetailsPanelState extends ConsumerState<_LeadDetailsPanel> {
     }
   }
 
+  /// "Sinov darsiga yozish" (V2): pick a group and one of its next lessons.
+  Future<void> _bookTrial(Lead lead) async {
+    final booked = await showTrialBookingDialog(context, lead: lead);
+    if (booked == true && mounted) {
+      refreshAdmissions(ref);
+      showSnack(context, 'Sinov darsiga yozildi.');
+    }
+  }
+
+  /// "Sinovdan keyin" if they came to a trial, otherwise plain "Guruhga qo'shish".
   Future<void> _enroll(LeadDetail detail) async {
-    final lead = detail.lead;
-    final result = await showEnrollLeadWizard(
-      context,
-      LeadEnrollment(
-        leadId: lead.id,
-        fullName: lead.fullName,
-        phone: lead.phone,
-        parentPhone: lead.parentPhone,
-        source: lead.source,
-        note: lead.note,
-        subjectId: lead.subjectId,
-      ),
+    final cameToTrial = detail.bookings.any(
+      (b) => b.status == TrialStatus.attended,
     );
-    if (result == null || !mounted) return;
+    final message = await showAfterTrialDialog(
+      context,
+      lead: detail.lead,
+      afterTrial: cameToTrial,
+    );
+    if (message == null || !mounted) return;
     refreshAdmissions(ref);
-    showSnack(
-      context,
-      '${result.studentName} guruhga yozildi · birinchi oy '
-      '${CurrencyFormatter.format(result.firstCharge)}'
-      '${result.reusedStudent ? ' (mavjud o\'quvchi)' : ''}',
-    );
+    showSnack(context, message);
   }
 
   @override
@@ -229,7 +229,7 @@ class _LeadDetailsPanelState extends ConsumerState<_LeadDetailsPanel> {
                   OutlinedButton.icon(
                     onPressed: lead.nextTrialBookingId != null
                         ? null
-                        : () => showScheduleTrialDialog(context, lead: lead),
+                        : () => _bookTrial(lead),
                     icon: const Icon(Icons.event_available_outlined, size: 18),
                     label: const Text('Sinov darsi'),
                   ),
@@ -256,7 +256,7 @@ class _LeadDetailsPanelState extends ConsumerState<_LeadDetailsPanel> {
                 FilledButton.icon(
                   onPressed: () => _enroll(detail),
                   icon: const Icon(Icons.how_to_reg_rounded, size: 18),
-                  label: const Text('Guruhga yozish'),
+                  label: const Text('Guruhga qo\'shish'),
                 ),
             ],
           ),

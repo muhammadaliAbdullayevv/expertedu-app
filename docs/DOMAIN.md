@@ -83,19 +83,45 @@ A payout is checked under a per-teacher lock, so two payouts at once cannot both
 
 A trial is free: **no charge, no debt**, and a trial person never appears in O'quvchilar. **One trial per person** (the same phone, across subjects); the limit is a setting (`app_settings.trial_limit_per_person`, default 1). Only the owner can book another, and it is written to the audit log (`extra_trial`). A trial that was cancelled, moved or missed does not use up the free one; moving a booking is not a new trial.
 
-## 3. Lead stage mapping
+## 3. Qabul: stages, counts and the course finder
 
-| Today | V2 |
+### Stages — one grouping, built
+
+The app keeps nine lead stages; people see seven (V2 names). The grouping lives in one place, `server/app/funnel.py` (`STAGE_TO_V2`), and the board, the report, Bugun and the sidebar all use it:
+
+| People see | Stored stages |
 |---|---|
-| new | Yangi |
-| contacted | Bog'lanildi |
-| trial_scheduled, trial_completed | Sinov darsi |
-| decision_pending | To'lov kutilmoqda |
-| enrolled | Guruhga qo'shildi |
-| not_interested, unreachable | Rad etildi (reason required) |
-| follow_up_later | Keyinroq |
+| Yangi | `new` |
+| Bog'lanildi | `contacted` |
+| Sinov darsi | `trial_scheduled` |
+| To'lov kutilmoqda | `trial_completed`, `decision_pending` (came to the trial, no answer yet) |
+| Guruhga qo'shildi | `enrolled` |
+| Keyinroq | `follow_up_later` |
+| Rad etildi | `not_interested`, `unreachable` |
 
-The existing 9-stage column stays (the offline outbox and old builds depend on it); V2 stages are a **mapping in one function** used by the board, report and dashboard so all of them count the same way.
+(Earlier draft put `trial_completed` under Sinov darsi; the mockups show someone who came and hasn't decided in To'lov kutilmoqda, so that is what the code does.)
+
+### One definition of every count
+
+`server/app/funnel.py` is the only code that counts leads or students. Bugun, Qabul, O'quvchilar and the sidebar badges call it:
+
+- **Open lead** = any stage except Guruhga qo'shildi and Rad etildi (so Keyinroq is open).
+- **Lead** = one inquiry (a person asking about two subjects is two); the phone identifies the person.
+- **Active student** = a student with at least one active enrollment. A lead — even one with a trial booked or attended — is never a student until "Guruhga qo'shish" (enrollment) makes them one, in one transaction: they leave the open leads, join Guruhga qo'shildi, and appear in O'quvchilar and in Bugun's active students.
+- **Period figures** (this month so far by default): leads created; *people* who attended a trial (counted once however many bookings); leads that enrolled; and the conversion rate = (leads created in the period that are now enrolled) ÷ (leads created in the period), shown with its denominator.
+- Endpoints: `GET /admissions/board` (Qabul), `GET /counts` (sidebar badges), `GET /students/summary` (O'quvchilar header), `GET /dashboard` (Bugun) — all computed from the functions above.
+
+Checked end to end (a new person at every step, same numbers on every screen): see `tests/test_qabul.py::test_one_person_is_counted_the_same_way_on_every_screen`.
+
+### Kurs qidirish (course finder)
+
+`GET /groups/search?subject_id&level&weekdays=1,3,5&time_of_day=` returns active groups of that subject and level whose lessons all fall in the chosen part of the day (morning < 12:00, afternoon 12:00–17:00, evening ≥ 17:00):
+
+- **exact** — every one of the group's lesson days is a day the client can come (with no days chosen, every candidate is exact);
+- **near** — some or none of them are; shown with "matched / total days", best first. (The mockup shows a group with 0 of 3 days as a near variant, so near includes 0.)
+- Full groups are listed after open ones. **Free seats** = capacity − active enrollments (none = no limit).
+- What the client asked for (subject, level, days, part of the day) is saved on the lead (`desired_weekdays`, `desired_time_of_day`, `level`). Groups gained `level` and `start_date`.
+- "Sinov darsiga yozish" offers the group's next lessons (`GET /groups/{id}/trial-dates`, cancelled lessons left out); several guests share one session per lesson. A reminder is a follow-up task for the evening before — the app does not send messages yet.
 
 ## 4. Settings
 
@@ -149,7 +175,7 @@ No group is capped (all due days were ≤ 28) and none becomes `student_annivers
 14. Pay-rule and billing-rule edits are audited; the billing rule is locked once the group has charges.
 15. Fixed salaries accrue per calendar month from the month the teacher/group was created; not for future months; not for inactive teachers/groups.
 16. A fixed-day group cannot use the 29th–31st (billing day is capped at 28).
-17. Existing 9 lead stages are kept internally; V2's names are a display mapping (§3).
+17. Existing 9 lead stages are kept internally; V2's names are one grouping in `funnel.py` (§3).
 18. Rooms become a table in Phase 5; until then room clashes use the existing text.
 19. A new Teacher role (Phase 8) sees only their own groups, attendance and, if the owner allows it, their salary.
 20. Phone/Android work is deferred until the owner says "build".

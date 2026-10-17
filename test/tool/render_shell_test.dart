@@ -18,7 +18,8 @@ import 'package:expert_edu_center/features/dashboard/presentation/home_shell.dar
 import 'package:expert_edu_center/services/api/token_storage.dart';
 import 'package:expert_edu_center/services/local_db/local_database.dart';
 import 'package:expert_edu_center/services/sync/connectivity_service.dart';
-import 'package:flutter/foundation.dart' show debugDefaultTargetPlatformOverride, TargetPlatform;
+import 'package:flutter/foundation.dart'
+    show debugDefaultTargetPlatformOverride, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -30,6 +31,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../helpers/load_fonts.dart';
 
 const _out = String.fromEnvironment('RENDER_OUT');
+const _only = String.fromEnvironment('RENDER_ONLY');
 const _phone = String.fromEnvironment(
   'RENDER_PHONE',
   defaultValue: '998900000001',
@@ -80,6 +82,43 @@ void main() {
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
       File('$_out/$name.png').writeAsBytesSync(data!.buffer.asUint8List());
     });
+  }
+
+  Future<void> qabulScenes(
+    WidgetTester tester,
+    Future<void> Function(WidgetTester, String) shot,
+    Future<void> Function(WidgetTester) settle,
+  ) async {
+    await tester.tap(find.text('Qabul').first);
+    await shot(tester, 'qabul-board');
+    await tester.tap(find.text('Jadval ko\'rinishi'));
+    await shot(tester, 'qabul-table');
+    await tester.tap(find.text('Doska ko\'rinishi'));
+    await settle(tester);
+    // A card's page, with the one step that makes a lead a student.
+    await tester.tap(find.text('Nodira Ismoilova').first);
+    await shot(tester, 'qabul-card-panel');
+    await tester.tap(find.text('Guruhga qo\'shish').first);
+    await settle(tester);
+    await settle(tester);
+    await shot(tester, 'qabul-after-trial');
+    await tester.tap(find.text('Rad etildi').last);
+    await shot(tester, 'qabul-after-trial-reject');
+    await tester.tap(find.text('Bekor qilish').last);
+    await settle(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+
+    await tester.tap(find.text('Kurs qidirish'));
+    await shot(tester, 'qabul-finder');
+    await tester.tap(find.text('Du · Chor · Ju'));
+    await shot(tester, 'qabul-finder-days');
+    await tester.enterText(find.widgetWithText(TextField, 'Ism'), 'Test Mijoz');
+    await tester.enterText(find.byType(TextField).at(1), '901112299');
+    await tester.tap(find.text('Sinov darsiga yozish').first);
+    await settle(tester);
+    await settle(tester);
+    await shot(tester, 'qabul-trial-dialog');
   }
 
   testWidgets('render the shell', (tester) async {
@@ -139,7 +178,12 @@ void main() {
     await mount(const Size(1440, 900));
     await shot(tester, 'desktop-bugun');
 
-    {
+    if (_only == 'qabul') {
+      await qabulScenes(tester, shot, settle);
+      return;
+    }
+
+    if (_only.isEmpty) {
       for (final (label, file) in [
         ('Qabul', 'desktop-qabul'),
         ('O\'quvchilar', 'desktop-oquvchilar'),

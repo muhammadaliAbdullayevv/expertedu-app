@@ -4,20 +4,30 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../core/extensions/build_context_x.dart';
+import '../../../services/api/api_client.dart';
 import '../../../services/sync/sync_engine.dart';
+import '../data/admissions_models.dart';
+import '../data/admissions_repository.dart';
+import '../data/qabul_models.dart';
 import 'admissions_overview.dart';
 import 'admissions_ui.dart';
+import 'after_trial_dialog.dart';
+import 'course_finder_screen.dart';
 import 'follow_ups_view.dart';
 import 'lead_details_panel.dart';
 import 'leads_view.dart';
 import 'new_inquiry_dialog.dart';
 import 'pending_changes_dialog.dart';
-import 'pipeline_view.dart';
+import 'qabul_board.dart';
+import 'trial_booking_dialog.dart';
 import 'trials_view.dart';
 
-/// "Qabul" (desktop): prospects from the first call to enrollment.
+enum _Section { leads, trials, tasks, report }
+
+/// "Qabul" (desktop): from the first call to the first lesson -- the board
+/// (or its table), the course finder, trials, tasks and the report.
 ///
-/// Keyboard: Ctrl+N new inquiry, Ctrl+F search leads, Ctrl+1..5 tabs,
+/// Keyboard: Ctrl+N new inquiry, Ctrl+F search leads, Ctrl+1..4 sections,
 /// F5 reload; inside dialogs Ctrl+Enter saves and Esc closes.
 class AdmissionsScreen extends ConsumerStatefulWidget {
   const AdmissionsScreen({super.key});
@@ -26,28 +36,25 @@ class AdmissionsScreen extends ConsumerStatefulWidget {
   ConsumerState<AdmissionsScreen> createState() => AdmissionsScreenState();
 }
 
-class AdmissionsScreenState extends ConsumerState<AdmissionsScreen>
-    with SingleTickerProviderStateMixin {
-  static const List<String> _tabs = <String>[
-    'Umumiy',
-    'So\'rovlar',
-    'Voronka',
-    'Sinov darslari',
-    'Vazifalar',
-  ];
+class AdmissionsScreenState extends ConsumerState<AdmissionsScreen> {
+  static const Map<_Section, String> _labels = <_Section, String>{
+    _Section.leads: 'So\'rovlar',
+    _Section.trials: 'Sinov darslari',
+    _Section.tasks: 'Vazifalar',
+    _Section.report: 'Hisobot',
+  };
 
-  static const List<LogicalKeyboardKey> _tabKeys = <LogicalKeyboardKey>[
+  static const List<LogicalKeyboardKey> _sectionKeys = <LogicalKeyboardKey>[
     LogicalKeyboardKey.digit1,
     LogicalKeyboardKey.digit2,
     LogicalKeyboardKey.digit3,
     LogicalKeyboardKey.digit4,
-    LogicalKeyboardKey.digit5,
   ];
 
-  late final TabController _tabController = TabController(
-    length: _tabs.length,
-    vsync: this,
-  );
+  _Section _section = _Section.leads;
+  bool _table = false;
+  bool _finder = false;
+
   final _searchFocus = FocusNode();
   late final SyncEngine _sync = ref.read(syncEngineProvider);
 
@@ -61,7 +68,6 @@ class AdmissionsScreenState extends ConsumerState<AdmissionsScreen>
   @override
   void dispose() {
     _sync.syncedRevision.removeListener(_onSynced);
-    _tabController.dispose();
     _searchFocus.dispose();
     super.dispose();
   }
@@ -70,29 +76,91 @@ class AdmissionsScreenState extends ConsumerState<AdmissionsScreen>
 
   void reload() => refreshAdmissions(ref);
 
+  /// "Yangi so'rov" -- on to the lead's page for the next step.
   Future<void> newInquiry() async {
     final result = await showNewInquiryDialog(context);
     if (!mounted || result == null) return;
     refreshAdmissions(ref);
     switch (result) {
       case InquiryCreated(:final lead):
-        if (lead.isPending) {
-          showSnack(
-            context,
-            'Oflayn saqlandi — internet qaytganda yuboriladi.',
-          );
-        } else if (lead.merged) {
-          showSnack(context, 'Bu raqamdagi ochiq so\'rovga qo\'shildi.');
-        }
-        // Straight on to the next step: a trial, a task, a note.
+        _explain(lead);
         await showLeadDetails(context, leadId: lead.id, lead: lead);
       case InquiryOpenExisting(:final leadId):
         await showLeadDetails(context, leadId: leadId);
     }
   }
 
+  void _explain(Lead lead) {
+    if (lead.isPending) {
+      showSnack(context, 'Oflayn saqlandi — internet qaytganda yuboriladi.');
+    } else if (lead.merged) {
+      showSnack(context, 'Bu raqamdagi ochiq so\'rovga qo\'shildi.');
+    }
+  }
+
+  /// "+ Qo'shish" under a column: a new inquiry, taken straight on to that
+  /// column's step.
+  Future<void> _addTo(String column) async {
+    final result = await showNewInquiryDialog(context);
+    if (!mounted || result == null) return;
+    refreshAdmissions(ref);
+    final Lead? lead = switch (result) {
+      InquiryCreated(:final lead) => lead,
+      InquiryOpenExisting(:final leadId) =>
+        await ref
+            .read(admissionsRepositoryProvider)
+            .getLead(leadId)
+            .then((d) => d.lead),
+    };
+    if (lead == null || !mounted) return;
+    _explain(lead);
+    if (lead.isPending) return;
+    try {
+      switch (column) {
+        case BoardStage.contacted:
+          await ref
+              .read(admissionsRepositoryProvider)
+              .changeStage(lead, LeadStage.contacted);
+        case BoardStage.trial:
+          await showTrialBookingDialog(context, lead: lead);
+        case BoardStage.awaitingDecision:
+          await ref
+              .read(admissionsRepositoryProvider)
+              .changeStage(lead, LeadStage.decisionPending);
+        case BoardStage.joined:
+          final message = await showAfterTrialDialog(
+            context,
+            lead: lead,
+            afterTrial: false,
+          );
+          if (message != null && mounted) showSnack(context, message);
+        case BoardStage.later:
+          final message = await showAfterTrialDialog(
+            context,
+            lead: lead,
+            initialOutcome: AfterTrialOutcome.later,
+          );
+          if (message != null && mounted) showSnack(context, message);
+        case BoardStage.rejected:
+          final message = await showAfterTrialDialog(
+            context,
+            lead: lead,
+            initialOutcome: AfterTrialOutcome.reject,
+          );
+          if (message != null && mounted) showSnack(context, message);
+      }
+    } on ApiException catch (e) {
+      if (mounted) showSnack(context, e.message);
+    }
+    refreshAdmissions(ref);
+  }
+
   void _focusSearch() {
-    _tabController.animateTo(1);
+    setState(() {
+      _section = _Section.leads;
+      _table = true;
+      _finder = false;
+    });
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _searchFocus.requestFocus(),
     );
@@ -107,73 +175,137 @@ class AdmissionsScreenState extends ConsumerState<AdmissionsScreen>
         const SingleActivator(LogicalKeyboardKey.keyF, control: true):
             _focusSearch,
         const SingleActivator(LogicalKeyboardKey.f5): reload,
-        for (final (i, key) in _tabKeys.indexed)
-          SingleActivator(key, control: true): () =>
-              _tabController.animateTo(i),
+        for (final (i, key) in _sectionKeys.indexed)
+          SingleActivator(key, control: true): () => setState(() {
+            _section = _Section.values[i];
+            _finder = false;
+          }),
       },
       child: Focus(
         autofocus: true,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Container(
-              decoration: BoxDecoration(
-                color: context.colors.surface,
-                border: Border(
-                  bottom: BorderSide(color: context.colors.outlineVariant),
+        child: _finder
+            ? CourseFinderScreen(onBack: () => setState(() => _finder = false))
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  _header(),
+                  Expanded(child: _content()),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Widget _header() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(32, 0, 32, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              const Expanded(
+                child: Text(
+                  'So\'rovdan o\'quvchigacha: har bir odam qaysi bosqichda ekanini ko\'ring',
+                  style: TextStyle(fontSize: 15, color: AppColors.inkMuted),
                 ),
               ),
-              padding: const EdgeInsets.fromLTRB(12, 0, 16, 0),
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: TabBar(
-                      controller: _tabController,
-                      isScrollable: true,
-                      tabAlignment: TabAlignment.start,
-                      dividerHeight: 0,
-                      indicatorColor: AppColors.accent,
-                      indicatorWeight: 3,
-                      labelColor: context.colors.onSurface,
-                      unselectedLabelColor: context.colors.onSurfaceVariant,
-                      labelStyle: context.textTheme.labelLarge,
-                      tabs: <Tab>[for (final tab in _tabs) Tab(text: tab)],
-                    ),
+              _SyncStatus(sync: _sync),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: () => setState(() => _finder = true),
+                child: const Text('Kurs qidirish'),
+              ),
+              if (_section == _Section.leads) ...<Widget>[
+                const SizedBox(width: 10),
+                OutlinedButton(
+                  onPressed: () => setState(() => _table = !_table),
+                  child: Text(
+                    _table ? 'Doska ko\'rinishi' : 'Jadval ko\'rinishi',
                   ),
-                  _SyncStatus(sync: _sync),
-                  const SizedBox(width: 8),
-                  Tooltip(
-                    message: 'Ctrl+N',
-                    child: FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                      ),
-                      onPressed: newInquiry,
-                      icon: const Icon(Icons.add_call, size: 18),
-                      label: const Text('Yangi so\'rov'),
-                    ),
-                  ),
-                ],
+                ),
+              ],
+              const SizedBox(width: 10),
+              Tooltip(
+                message: 'Ctrl+N',
+                child: FilledButton.icon(
+                  onPressed: newInquiry,
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Yangi so\'rov'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: <Widget>[
+              for (final (i, section) in _Section.values.indexed)
+                _TabLabel(
+                  _labels[section]!,
+                  selected: section == _section,
+                  tooltip: 'Ctrl+${i + 1}',
+                  onTap: () => setState(() => _section = section),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _content() => switch (_section) {
+    _Section.leads =>
+      _table
+          ? LeadsView(searchFocus: _searchFocus)
+          : QabulBoard(
+              onOpenLead: (id) => showLeadDetails(context, leadId: id),
+              onAdd: _addTo,
+            ),
+    _Section.trials => const TrialsView(),
+    _Section.tasks => const FollowUpsView(),
+    _Section.report => AdmissionsOverview(onOpenTab: (_) {}),
+  };
+}
+
+class _TabLabel extends StatelessWidget {
+  const _TabLabel(
+    this.text, {
+    required this.selected,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final String text;
+  final bool selected;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          height: 40,
+          margin: const EdgeInsets.only(right: 20),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: selected ? AppColors.accent : Colors.transparent,
+                width: 2,
               ),
             ),
-            Expanded(
-              child: TabBarView(
-                controller: _tabController,
-                // Drag-and-drop on the board would fight a swipeable tab view.
-                physics: const NeverScrollableScrollPhysics(),
-                children: <Widget>[
-                  AdmissionsOverview(onOpenTab: _tabController.animateTo),
-                  LeadsView(searchFocus: _searchFocus),
-                  const PipelineView(),
-                  const TrialsView(),
-                  const FollowUpsView(),
-                ],
-              ),
+          ),
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: selected ? AppColors.ink : AppColors.inkMuted,
             ),
-          ],
+          ),
         ),
       ),
     );

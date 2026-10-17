@@ -20,7 +20,12 @@ enum StatusTone {
 /// A small pill: "Davomat olingan", "Qarz", "Sinov"... Pass [width] to line
 /// a column of chips up (the Bugun lists do).
 class StatusChip extends StatelessWidget {
-  const StatusChip(this.label, {super.key, this.tone = StatusTone.neutral, this.width});
+  const StatusChip(
+    this.label, {
+    super.key,
+    this.tone = StatusTone.neutral,
+    this.width,
+  });
 
   final String label;
   final StatusTone tone;
@@ -32,21 +37,24 @@ class StatusChip extends StatelessWidget {
       width: width,
       height: 24,
       padding: const EdgeInsets.symmetric(horizontal: 9),
-      alignment: width == null ? null : Alignment.center,
       decoration: BoxDecoration(
         color: tone.background,
         borderRadius: BorderRadius.circular(AppRadius.chip),
       ),
-      child: Text(
-        label,
-        maxLines: 1,
-        softWrap: false,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: tone.foreground,
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          height: 1.0,
+      // Centred in the 24 px pill; the width still hugs the text.
+      child: Center(
+        widthFactor: 1,
+        child: Text(
+          label,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: tone.foreground,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            height: 1.0,
+          ),
         ),
       ),
     );

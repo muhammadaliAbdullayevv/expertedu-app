@@ -1,23 +1,32 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../features/dashboard/data/dashboard_repository.dart';
-import '../../features/teachers/data/teachers_repository.dart';
+import '../../features/admissions/data/qabul_models.dart';
+import '../../features/admissions/data/qabul_repository.dart';
 import '../navigation/destinations.dart';
 
-/// The small numbers beside sidebar labels. Each count comes from data the
-/// app already loads; one that can't be fetched (offline, a role without
-/// access) is simply missing and shows no badge.
+/// The small numbers beside sidebar labels. They come from the server's one
+/// definition of every lead/student count (server/app/funnel.py), so they
+/// are the very numbers Qabul, Bugun and O'quvchilar show. One that can't be
+/// fetched (offline) is simply missing and shows no badge.
 final shellCountsProvider = FutureProvider<Map<Destination, int>>((ref) async {
-  final counts = <Destination, int>{};
   try {
-    final summary = await ref.read(dashboardRepositoryProvider).fetch();
-    counts[Destination.admissions] = summary.openLeads;
-    counts[Destination.students] = summary.activeStudents;
-    counts[Destination.groups] = summary.activeGroups;
-  } catch (_) {}
+    final c = await ref.read(qabulRepositoryProvider).shellCounts();
+    return {
+      Destination.admissions: c.openLeads,
+      Destination.students: c.activeStudents,
+      Destination.groups: c.activeGroups,
+      Destination.teachers: c.activeTeachers,
+    };
+  } catch (_) {
+    return const {};
+  }
+});
+
+/// O'quvchilar' header numbers -- leads, trials included, are not students.
+final studentSummaryProvider = FutureProvider<StudentSummary?>((ref) async {
   try {
-    final teachers = await ref.read(teachersRepositoryProvider).list();
-    counts[Destination.teachers] = teachers.where((t) => t.isActive).length;
-  } catch (_) {}
-  return counts;
+    return await ref.read(qabulRepositoryProvider).studentSummary();
+  } catch (_) {
+    return null;
+  }
 });

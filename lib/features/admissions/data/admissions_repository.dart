@@ -369,6 +369,7 @@ class AdmissionsRepository {
     Lead lead, {
     int? sessionId,
     NewTrialSession? session,
+    bool remind = false,
   }) async {
     final outcome = await _offlineCapablePost(
       lead: lead,
@@ -377,6 +378,7 @@ class AdmissionsRepository {
       body: <String, dynamic>{
         'session_id': sessionId,
         'session': session?.toJson(),
+        'remind': remind,
       },
       leadIdField: 'lead_id',
       description: 'Sinov darsi: ${lead.fullName}',
