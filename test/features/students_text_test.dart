@@ -127,11 +127,11 @@ void main() {
     // Debt is never hidden, even for someone archived or between groups.
     expect(
       statusOf(row(7, active: false, archived: true, debtor: true)).text,
-      'Arxiv · qarzi bor',
+      'Arxiv · qarz',
     );
     expect(
       statusOf(row(8, active: false, debtor: true)).text,
-      'Guruhsiz · qarzi bor',
+      'Guruhsiz · qarz',
     );
     // A debt outweighs the risk.
     expect(statusOf(row(5, debtor: true, atRisk: true)).text, 'Qarzdor');

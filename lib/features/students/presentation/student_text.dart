@@ -65,7 +65,7 @@ String signedBalance(int owed) {
 ({String text, StatusTone tone, String hint}) statusOf(StudentRow s) {
   if (s.isArchived) {
     return (
-      text: s.isDebtor ? 'Arxiv · qarzi bor' : 'Arxiv',
+      text: s.isDebtor ? 'Arxiv · qarz' : 'Arxiv',
       tone: s.isDebtor ? StatusTone.danger : StatusTone.neutral,
       hint: s.isDebtor
           ? 'Arxivga o\'tkazilgan, lekin to\'lanmagan hisobi bor'
@@ -74,7 +74,7 @@ String signedBalance(int owed) {
   }
   if (!s.isActive) {
     return (
-      text: s.isDebtor ? 'Guruhsiz · qarzi bor' : 'Guruhsiz',
+      text: s.isDebtor ? 'Guruhsiz · qarz' : 'Guruhsiz',
       tone: s.isDebtor ? StatusTone.danger : StatusTone.neutral,
       hint: 'Hozir hech qaysi guruhda emas',
     );

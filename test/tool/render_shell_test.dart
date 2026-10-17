@@ -252,6 +252,41 @@ void main() {
       return;
     }
 
+    if (_only == 'actions') {
+      await tester.tap(find.text('O\'quvchilar').first);
+      await settle(tester);
+      await tester.enterText(
+        find.byKey(const ValueKey('students-search')),
+        'Bekzod',
+      );
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('student-69')));
+      await settle(tester);
+      await shot(tester, 'actions-transfer-notice');
+      await tester.tap(find.byKey(const ValueKey('panel-menu')));
+      await settle(tester);
+      await shot(tester, 'actions-menu');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('panel-tab-4')));
+      await settle(tester);
+      await shot(tester, 'actions-amallar');
+      await tester.enterText(find.byKey(const ValueKey('students-search')), '');
+      await tester.tap(find.byKey(const ValueKey('tab-archive')));
+      await settle(tester);
+      await tester.tap(
+        find
+            .descendant(
+              of: find.byKey(const ValueKey('students-list')),
+              matching: find.byType(InkWell),
+            )
+            .first,
+      );
+      await settle(tester);
+      await shot(tester, 'actions-archived');
+      return;
+    }
+
     if (_only == 'teachers') {
       await tester.tap(find.text('O\'qituvchilar').first);
       await shot(tester, 'teachers-page');

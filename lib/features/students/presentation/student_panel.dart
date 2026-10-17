@@ -698,6 +698,8 @@ class _GroupCard extends StatelessWidget {
                   opacity: faded,
                   child: Text(
                     g.groupName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
@@ -723,7 +725,10 @@ class _GroupCard extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                   ),
                   onPressed: onActivate,
-                  child: const Text('Guruhni faollashtirish'),
+                  child: const Tooltip(
+                    message: 'Guruhni qayta faollashtirish',
+                    child: Text('Faollashtirish'),
+                  ),
                 ),
               ],
             ],

@@ -192,6 +192,56 @@ served only to logged-in users from `/photos/file/{name}`, one file per person
 (a new photo deletes the old one). Without a photo the first letters of the name
 are drawn on a colour taken from the name.
 
+## 3c. O'qituvchilar and profile photos
+
+The page is laid out like O'quvchilar: tabs **Faol / Guruhsiz / Arxiv**, search
+by name or phone, a table and the chosen teacher's page on the right. It
+replaces the old Settings tab.
+
+- **The table shows no money**: only the teacher, number of groups and students.
+- **The teacher's page** shows the groups (name, students, days and times -- no
+  attendance or other group stats, those live on the group's own page), the pay,
+  today's and tomorrow's lessons, and six months of earned / paid.
+- **Pay = one figure for all groups.** `GET /teachers/{id}/profile` uses
+  `money.salary_month` -- the same calculation as Finance -- so the numbers can
+  never differ: the teacher's share of what ALL their groups collected so far this
+  month (a group's own percent wins for that group; a fixed salary counts once).
+  It grows as payments come in and freezes when the owner closes the month; the
+  arrows browse earlier months. **Only the owner** changes the agreement.
+- Archiving a teacher keeps their groups; the confirmation says so.
+
+**Photos** (teachers and students): `PUT/DELETE /photos/{teachers|students}/{id}`
+-- the picture is the request body (PNG, JPEG or WebP, up to 2 MB; the app crops
+the middle square and sends 400 px). Stored as `<kind>-<id>-<random>` in
+`PHOTOS_DIR` (never under the public `uploads/`), served only to logged-in users
+from `/photos/file/{name}`, one file per person. Without a photo the first letters
+of the name are drawn on a colour taken from the name.
+
+## 3d. Student actions: archive, remove, change group, activate
+
+Nothing is ever deleted: every lesson, attendance mark, charge and payment stays.
+Each action is written to `student_events` (the **Amallar** tab, after Izohlar)
+with the comment, the group(s), who did it and what he still owed at the time.
+
+- **Where the buttons are** (the profile's three dots): opened from O'quvchilar ->
+  *Arxivga o'tkazish* (or *Arxivdan chiqarish*); opened from a group's page ->
+  *Guruhdan chiqarish* (that group only). *Guruhni almashtirish* and *Boshqa guruhga
+  qo'shish* are in both. The old per-row remove button on the group's list is gone.
+- **Remove from a group / archive** ask for a reason (required) and show whether
+  he has paid everything (that group's debt, or all). The debt is not erased.
+  Archiving removes him from every group and sets `students.archived_at`.
+- **Unarchive** puts no group back by itself: the groups he had show on his profile
+  faded ("Muzlatilgan"), each with a **Faollashtirish** button on its top row next
+  to the paid / unpaid chip. It opens the add-to-group dialog with that group
+  chosen; joining any group also takes him out of the archive.
+- **Change group**: pick which current group he leaves (if more than one), then
+  the new one. The new group bills him by its own price and rule from today; the
+  old group's debt stays owed and a reminder shows on his profile until the first
+  payment on the new group (or until the old debt is paid).
+- **Tabs**: Hammasi = everyone not archived (between groups = "Guruhsiz"); Arxiv =
+  only archived. Archived people who still owe stay in Qarzdorlar and can still be
+  paid.
+
 ## 4. Settings
 
 `app_settings` (one row, owner-only edit, audited): `trial_limit_per_person` (1). The time zone is `Asia/Tashkent` from server config. Billing and pay rules are per group / per teacher, not settings.
