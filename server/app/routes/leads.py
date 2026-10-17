@@ -16,12 +16,15 @@ from ..schemas import (
     ChangeLeadStageRequest,
     CreateInteractionRequest,
     CreateLeadRequest,
+    CreateTrialSessionRequest,
     EnrollLeadRequest,
     Lead,
     LeadDetail,
     LeadEnrolled,
     LeadInteraction,
     LeadPage,
+    UndoLeadRequest,
+    UndoLeadResult,
     PhoneLookup,
     Student,
     UpdateLeadRequest,
@@ -29,7 +32,8 @@ from ..schemas import (
 from .enrollments import enroll
 from .follow_ups import fetch_tasks
 from .students import PAYMENT_METHODS, heard_from_value, optional_phone, phone_owner, valid_phone
-from .trials import fetch_bookings
+from .groups import upcoming_trial_dates
+from .trials import add_trial_reminder, book, create_session, fetch_bookings
 
 router = APIRouter(prefix="/leads", tags=["leads"], dependencies=[Depends(get_current_user)])
 
@@ -124,11 +128,19 @@ async def list_leads(
     scope: str = "open",
     assigned_to: int | None = None,
     subject_id: int | None = None,
+    group_id: int | None = None,
+    groupless: bool = False,
+    with_trial: bool = False,
+    archive: bool = False,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ):
     """scope: 'open' (default), 'closed' (incl. enrolled) or 'all'; an
-    explicit stage list overrides it. q matches name or phone digits."""
+    explicit stage list overrides it. q matches name or phone digits.
+
+    Qabul's list: group_id / groupless pick the group, with_trial keeps the
+    people with a booked trial, archive shows the archived ones (closed, not
+    enrolled) instead of the open ones."""
     conditions: list[str] = []
     args: list = []
 
@@ -136,7 +148,9 @@ async def list_leads(
         args.append(value)
         return f"${len(args)}"
 
-    if stage:
+    if archive:
+        conditions.append(f"l.stage = any({arg(list(admissions.CLOSED_STAGES))}::text[])")
+    elif stage:
         unknown = set(stage) - set(admissions.ALL_STAGES)
         if unknown:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Bosqich noto'g'ri.")
@@ -159,6 +173,14 @@ async def list_leads(
         conditions.append(f"l.assigned_to = {arg(assigned_to)}")
     if subject_id is not None:
         conditions.append(f"l.subject_id = {arg(subject_id)}")
+    if groupless:
+        conditions.append("l.group_id is null")
+    elif group_id is not None:
+        conditions.append(f"l.group_id = {arg(group_id)}")
+    if with_trial:
+        conditions.append(
+            "exists (select 1 from trial_bookings b where b.lead_id = l.id and b.status = 'scheduled')"
+        )
 
     where = f"where {' and '.join(conditions)}" if conditions else ""
     async with db.pool().acquire() as conn:
@@ -198,7 +220,18 @@ async def create_lead(conn, payload: CreateLeadRequest, user: CurrentUser) -> Le
     note = (payload.note or "").strip() or None
     if payload.on_duplicate not in ("reject", "merge"):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "on_duplicate noto'g'ri.")
-    await _require_subject(conn, payload.subject_id)
+    group = None
+    subject_id = payload.subject_id
+    if payload.group_id is not None:
+        group = await conn.fetchrow("select id, subject_id, is_active from groups where id = $1", payload.group_id)
+        if group is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
+        if not group["is_active"]:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Bu guruh faol emas.")
+        subject_id = subject_id or group["subject_id"]
+    if payload.trial_starts_at is not None and group is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sinov darsi uchun guruhni tanlang.")
+    await _require_subject(conn, subject_id)
     assigned_to = payload.assigned_to if payload.assigned_to is not None else user.id
     await _require_user(conn, assigned_to)
     weekdays, time_of_day, level = _desired(payload.desired_weekdays, payload.desired_time_of_day, payload.level)
@@ -209,7 +242,7 @@ async def create_lead(conn, payload: CreateLeadRequest, user: CurrentUser) -> Le
             return await fetch_lead(conn, existing_id)
 
     await lock_phone(conn, phone)
-    existing = await open_lead_for(conn, phone, payload.subject_id)
+    existing = await open_lead_for(conn, phone, subject_id)
     if existing is not None:
         if payload.on_duplicate == "reject":
             raise duplicate_lead_error(existing)
@@ -217,6 +250,13 @@ async def create_lead(conn, payload: CreateLeadRequest, user: CurrentUser) -> Le
         if note:
             body += f": {note}"
         await admissions.log(conn, existing["id"], body, user_id=user.id, kind="call_in")
+        if group is not None:
+            await conn.execute(
+                "update leads set group_id = $2, version = version + 1, updated_at = now() where id = $1",
+                existing["id"],
+                group["id"],
+            )
+        await _book_group_trial(conn, existing["id"], payload, user)
         return await fetch_lead(conn, existing["id"], merged=True)
 
     # The contact: an existing student with this phone is linked, not copied.
@@ -227,15 +267,16 @@ async def create_lead(conn, payload: CreateLeadRequest, user: CurrentUser) -> Le
                 """
                 insert into leads
                     (client_id, full_name, phone, parent_phone, subject_id, source, note, assigned_to,
-                     preferred_trial_date, student_id, created_by, desired_weekdays, desired_time_of_day, level)
-                values (coalesce($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                     preferred_trial_date, student_id, created_by, desired_weekdays, desired_time_of_day, level,
+                     group_id)
+                values (coalesce($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                 returning id
                 """,
                 payload.client_id,
                 full_name,
                 phone,
                 parent_phone,
-                payload.subject_id,
+                subject_id,
                 source,
                 note,
                 assigned_to,
@@ -245,13 +286,47 @@ async def create_lead(conn, payload: CreateLeadRequest, user: CurrentUser) -> Le
                 weekdays,
                 time_of_day,
                 level,
+                group["id"] if group else None,
             )
     except asyncpg.UniqueViolationError:
         # The phone lock above should make this unreachable; the index is
         # the backstop.
         raise HTTPException(status.HTTP_409_CONFLICT, "Bu raqam bilan ochiq so'rov bor. Ro'yxatni yangilang.")
     await admissions.log(conn, lead_id, "So'rov yaratildi", user_id=user.id, new_stage="new")
+    await _book_group_trial(conn, lead_id, payload, user)
     return await fetch_lead(conn, lead_id)
+
+
+async def _book_group_trial(conn, lead_id: int, payload: CreateLeadRequest, user: CurrentUser) -> None:
+    """The optional free trial of the fast form: a guest seat at one of the
+    group's next lessons. Done in the same transaction as the lead, so a
+    refused trial (full, second trial) saves nothing and the form can say so."""
+    if payload.trial_starts_at is None:
+        return
+    dates = await upcoming_trial_dates(conn, payload.group_id, 10)
+    lesson = next((d for d in dates if d.starts_at == payload.trial_starts_at), None)
+    if lesson is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Bu dars endi mavjud emas. Boshqa sanani tanlang.")
+    session_id = await conn.fetchval(
+        "select id from trial_sessions where group_id = $1 and starts_at = $2 and status = 'scheduled'",
+        payload.group_id,
+        lesson.starts_at,
+    )
+    if session_id is None:
+        session_id = await create_session(
+            conn,
+            CreateTrialSessionRequest(
+                kind="group_lesson",
+                group_id=payload.group_id,
+                starts_at=lesson.starts_at,
+                ends_at=lesson.ends_at,
+                capacity=lesson.suggested_capacity,
+            ),
+            user.id,
+        )
+    await book(conn, lead_id=lead_id, session_id=session_id, user_id=user.id, is_owner=user.role == "owner")
+    if payload.remind:
+        await add_trial_reminder(conn, lead_id, session_id, user.id)
 
 
 @router.post("", response_model=Lead, status_code=status.HTTP_201_CREATED)
@@ -266,6 +341,24 @@ async def create_lead_route(
         return await create_lead(conn, payload, user)
 
     return await idempotency.run(key=idempotency_key, user=user, endpoint="POST /leads", payload=payload, work=work)
+
+
+@router.post("/undo", response_model=UndoLeadResult)
+async def undo_lead(payload: UndoLeadRequest, user: CurrentUser = Depends(get_current_user)):
+    """"Qaytarish" right after a save: archives the lead that save created
+    (found by its client_id), cancelling its trial. Nothing is deleted. A save
+    that was folded into an existing lead created nothing, so there is nothing
+    to undo and that lead is left alone."""
+    async with db.pool().acquire() as conn:
+        async with conn.transaction():
+            lead_id = await conn.fetchval("select id from leads where client_id = $1", payload.client_id)
+            if lead_id is None:
+                return UndoLeadResult(undone=False)
+            lead = await admissions.lock_lead(conn, lead_id)
+            if lead["stage"] not in admissions.OPEN_STAGES:
+                return UndoLeadResult(undone=False, lead=await fetch_lead(conn, lead_id))
+            await move_to_stage(conn, lead, "not_interested", user=user, reason="Qaytarildi")
+            return UndoLeadResult(undone=True, lead=await fetch_lead(conn, lead_id))
 
 
 @router.get("/{lead_id}", response_model=LeadDetail)

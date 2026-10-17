@@ -332,6 +332,18 @@ async def book(
     return booking_id
 
 
+async def add_trial_reminder(conn, lead_id: int, session_id: int, user_id: int) -> None:
+    """A task for the evening before the lesson (or right away if that has passed)."""
+    starts_at = await conn.fetchval("select starts_at from trial_sessions where id = $1", session_id)
+    tz = ZoneInfo(settings.center_timezone)
+    evening_before = datetime.combine(
+        (starts_at.astimezone(tz) - timedelta(days=1)).date(), datetime.min.time().replace(hour=18), tz
+    )
+    due_at = max(evening_before, datetime.now(tz))
+    lead = await conn.fetchrow("select * from leads where id = $1", lead_id)
+    await admissions.add_task(conn, lead, "Sinov darsi haqida eslatish", due_at, user_id=user_id)
+
+
 async def _lock_booking(conn, booking_id: int) -> dict:
     booking = await conn.fetchrow("select * from trial_bookings where id = $1 for update", booking_id)
     if booking is None:
@@ -482,17 +494,7 @@ async def create_trial_booking(
             conn, lead_id=payload.lead_id, session_id=session_id, user_id=user.id, is_owner=user.role == "owner"
         )
         if payload.remind:
-            # A task for the evening before the lesson (or right away if that has passed).
-            starts_at = await conn.fetchval("select starts_at from trial_sessions where id = $1", session_id)
-            evening_before = (
-                datetime.combine((starts_at.astimezone(ZoneInfo(settings.center_timezone)) - timedelta(days=1)).date(),
-                                 datetime.min.time().replace(hour=18), ZoneInfo(settings.center_timezone))
-            )
-            due_at = max(evening_before, datetime.now(ZoneInfo(settings.center_timezone)))
-            lead = await conn.fetchrow("select * from leads where id = $1", payload.lead_id)
-            await admissions.add_task(
-                conn, lead, "Sinov darsi haqida eslatish", due_at, user_id=user.id,
-            )
+            await add_trial_reminder(conn, payload.lead_id, session_id, user.id)
         return await fetch_booking(conn, booking_id)
 
     return await idempotency.run(

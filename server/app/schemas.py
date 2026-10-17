@@ -440,6 +440,12 @@ class CreateLeadRequest(BaseModel):
     desired_weekdays: list[int] | None = None
     desired_time_of_day: str | None = None
     level: str | None = None
+    # The group offered (Qabul's fast form); null = guruhsiz. Not an enrollment.
+    group_id: int | None = None
+    # A free trial at one of that group's next lessons (its start time, as
+    # listed by GET /groups/{id}/trial-dates); needs group_id.
+    trial_starts_at: datetime | None = None
+    remind: bool = False
     # 'reject': 409 if this phone already has an open lead for the course.
     # 'merge': add this inquiry to that lead's timeline instead and return
     # it -- what the offline outbox sends, since nobody is there to decide.
@@ -492,6 +498,8 @@ class Lead(BaseModel):
     desired_weekdays: list[int] | None = None
     desired_time_of_day: str | None = None
     level: str | None = None
+    group_id: int | None = None
+    group_name: str | None = None
     next_trial_at: datetime | None = None
     next_trial_booking_id: int | None = None
     next_task_due_at: datetime | None = None
@@ -501,6 +509,15 @@ class Lead(BaseModel):
     updated_at: datetime
     # True when a create was folded into an existing open lead.
     merged: bool = False
+
+
+class UndoLeadRequest(BaseModel):
+    client_id: UUID
+
+
+class UndoLeadResult(BaseModel):
+    undone: bool
+    lead: Lead | None = None
 
 
 class LeadPage(BaseModel):

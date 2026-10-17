@@ -187,6 +187,8 @@ create table if not exists leads (
     check (desired_weekdays is null or desired_weekdays <@ array[1, 2, 3, 4, 5, 6, 7]::smallint[]),
   desired_time_of_day text check (desired_time_of_day in ('morning', 'afternoon', 'evening')),
   level text,
+  -- The group offered at the front desk (0017); null = "guruhsiz". Not an enrollment.
+  group_id bigint references groups(id),
   constraint leads_stage_check check (stage in (
     'new','contacted','trial_scheduled','trial_completed','decision_pending','follow_up_later',
     'enrolled','not_interested','unreachable'
@@ -203,6 +205,7 @@ create index if not exists idx_leads_stage on leads (stage);
 create index if not exists idx_leads_phone on leads (phone);
 create index if not exists idx_leads_created_at on leads (created_at);
 create index if not exists idx_leads_student on leads (student_id) where student_id is not null;
+create index if not exists idx_leads_group on leads (group_id) where group_id is not null;
 
 -- A trial lesson slot: a dedicated trial lesson, or guest seats at one of
 -- a regular group's lessons. Guests are trial_bookings, never enrollments.

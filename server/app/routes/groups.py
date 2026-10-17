@@ -214,52 +214,56 @@ async def trial_dates(group_id: int, count: int = 3):
     if not 1 <= count <= 10:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Soni 1 dan 10 gacha bo'lsin.")
     async with db.pool().acquire() as conn:
-        group = await conn.fetchrow("select * from groups where id = $1", group_id)
-        if group is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
-        slots = await schedule.load_slots(conn, group_ids=[group_id])
-        now = datetime.now(schedule.center_tz())
-        cancelled = {
-            row["starts_at"]
-            for row in await conn.fetch(
-                "select starts_at from lessons where group_id = $1 and status = 'cancelled' and starts_at > now()",
-                group_id,
-            )
-        }
-        upcoming = [
-            o
-            for o in schedule.occurrences(slots, now.date(), now.date() + timedelta(days=60))
-            if o.starts_at > now and o.starts_at not in cancelled
-        ][:count]
-        enrolled = await conn.fetchval(
-            "select count(*) from enrollments where group_id = $1 and status = 'active'", group_id
+        return await upcoming_trial_dates(conn, group_id, count)
+
+
+async def upcoming_trial_dates(conn, group_id: int, count: int) -> list[TrialDate]:
+    group = await conn.fetchrow("select * from groups where id = $1", group_id)
+    if group is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
+    slots = await schedule.load_slots(conn, group_ids=[group_id])
+    now = datetime.now(schedule.center_tz())
+    cancelled = {
+        row["starts_at"]
+        for row in await conn.fetch(
+            "select starts_at from lessons where group_id = $1 and status = 'cancelled' and starts_at > now()",
+            group_id,
         )
-        free = None if group["capacity"] is None else max(group["capacity"] - enrolled, 0)
-        result = []
-        for o in upcoming:
-            session = await conn.fetchrow(
-                """
-                select ts.id, ts.capacity,
-                       (select count(*) from trial_bookings b where b.session_id = ts.id
-                          and b.status in ('scheduled', 'attended', 'absent')) as booked
-                from trial_sessions ts
-                where ts.group_id = $1 and ts.starts_at = $2 and ts.status = 'scheduled'
-                """,
-                group_id,
-                o.starts_at,
+    }
+    upcoming = [
+        o
+        for o in schedule.occurrences(slots, now.date(), now.date() + timedelta(days=60))
+        if o.starts_at > now and o.starts_at not in cancelled
+    ][:count]
+    enrolled = await conn.fetchval(
+        "select count(*) from enrollments where group_id = $1 and status = 'active'", group_id
+    )
+    free = None if group["capacity"] is None else max(group["capacity"] - enrolled, 0)
+    result = []
+    for o in upcoming:
+        session = await conn.fetchrow(
+            """
+            select ts.id, ts.capacity,
+                   (select count(*) from trial_bookings b where b.session_id = ts.id
+                      and b.status in ('scheduled', 'attended', 'absent')) as booked
+            from trial_sessions ts
+            where ts.group_id = $1 and ts.starts_at = $2 and ts.status = 'scheduled'
+            """,
+            group_id,
+            o.starts_at,
+        )
+        result.append(
+            TrialDate(
+                starts_at=o.starts_at,
+                ends_at=o.ends_at,
+                room=o.slot.room,
+                trial_session_id=session["id"] if session and session["booked"] < session["capacity"] else None,
+                guests_booked=session["booked"] if session else 0,
+                session_full=bool(session and session["booked"] >= session["capacity"]),
+                free_seats=free,
+                suggested_capacity=max(1, free if free is not None else 3),
             )
-            result.append(
-                TrialDate(
-                    starts_at=o.starts_at,
-                    ends_at=o.ends_at,
-                    room=o.slot.room,
-                    trial_session_id=session["id"] if session and session["booked"] < session["capacity"] else None,
-                    guests_booked=session["booked"] if session else 0,
-                    session_full=bool(session and session["booked"] >= session["capacity"]),
-                    free_seats=free,
-                    suggested_capacity=max(1, free if free is not None else 3),
-                )
-            )
+        )
     return result
 
 

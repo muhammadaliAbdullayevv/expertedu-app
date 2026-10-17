@@ -53,12 +53,13 @@ SOURCES = ("instagram", "telegram", "referral", "walk_in", "other")
 INTERACTION_KINDS = ("call_in", "call_out", "sms", "telegram", "visit", "note")
 
 LEAD_SELECT = """
-select l.*, s.name as subject_name, u.full_name as assigned_to_name,
+select l.*, s.name as subject_name, u.full_name as assigned_to_name, gr.name as group_name,
        nt.starts_at as next_trial_at, nt.booking_id as next_trial_booking_id,
        ft.due_at as next_task_due_at, lc.last_at as last_contact_at
 from leads l
 left join subjects s on s.id = l.subject_id
 left join users u on u.id = l.assigned_to
+left join groups gr on gr.id = l.group_id
 left join lateral (
   select b.id as booking_id, ts.starts_at
   from trial_bookings b join trial_sessions ts on ts.id = b.session_id

@@ -432,3 +432,156 @@ async def test_groups_store_a_level_and_start_date(api):
     assert (created.json()["level"], created.json()["start_date"]) == ("Beginner", "2026-09-01")
     changed = await api.client.patch(f"/groups/{created.json()['id']}", json={"level": "Elementary"})
     assert changed.json()["level"] == "Elementary"
+
+
+# --- the fast form: one save, with or without a group and a free trial -------------------------------
+
+
+async def quick(courses, name="Nodira", phone="998901112233", client=None, **extra):
+    import uuid
+
+    body = {"full_name": name, "phone": phone, "client_id": str(uuid.uuid4()), "on_duplicate": "merge", **extra}
+    return await (client or courses.api.client).post("/leads", json=body, headers={"Idempotency-Key": str(uuid.uuid4())})
+
+
+async def test_a_saved_person_with_a_group_and_a_trial_is_a_lead_with_no_seat_and_no_charge(courses):
+    lesson = (await courses.api.client.get(f"/groups/{courses.a}/trial-dates", params={"count": 1})).json()[0]
+    response = await quick(courses, group_id=courses.a, trial_starts_at=lesson["starts_at"], remind=True)
+    assert response.status_code == 201, response.text
+    lead = response.json()
+    assert (lead["group_id"], lead["group_name"], lead["subject_id"]) == (courses.a, "Beginner A", courses.english)
+    assert lead["next_trial_at"] is not None
+    pool = courses.pool
+    # Not a student: no student row, no enrollment, no charge, no seat taken.
+    assert await pool.fetchval("select count(*) from students where phone = '998901112233'") == 0
+    assert await pool.fetchval("select count(*) from charges") == 0
+    assert await pool.fetchval("select count(*) from enrollments where group_id = $1", courses.a) == 14
+    assert await pool.fetchval("select count(*) from trial_bookings where lead_id = $1", lead["id"]) == 1
+    assert await pool.fetchval("select count(*) from follow_up_tasks where lead_id = $1", lead["id"]) == 1
+    # The free seats the picker shows did not change.
+    found = (await courses.api.client.get("/groups/search", params={"subject_id": courses.english})).json()
+    seats = {g["group_id"]: g["free_seats"] for g in found["exact"] + found["near"]}
+    assert seats[courses.a] == 2
+
+
+async def test_a_person_saved_without_a_group_has_no_group_and_no_trial(courses):
+    response = await quick(courses, note="kechqurun qulay")
+    assert response.status_code == 201, response.text
+    lead = response.json()
+    assert (lead["group_id"], lead["group_name"], lead["next_trial_at"]) == (None, None, None)
+    # A trial needs a group.
+    refused = await quick(courses, phone="998901112244", trial_starts_at="2030-01-01T09:00:00+05:00")
+    assert refused.status_code == 400
+
+
+async def test_a_retried_save_is_one_person_and_one_trial(courses):
+    import uuid
+
+    lesson = (await courses.api.client.get(f"/groups/{courses.a}/trial-dates", params={"count": 1})).json()[0]
+    body = {
+        "full_name": "Nodira", "phone": "998901112233", "client_id": str(uuid.uuid4()), "on_duplicate": "merge",
+        "group_id": courses.a, "trial_starts_at": lesson["starts_at"],
+    }
+    # The same request twice (same key) and once more with a new key but the same client_id: all one save.
+    key = str(uuid.uuid4())
+    first = await courses.api.client.post("/leads", json=body, headers={"Idempotency-Key": key})
+    again = await courses.api.client.post("/leads", json=body, headers={"Idempotency-Key": key})
+    other = await courses.api.client.post("/leads", json=body, headers={"Idempotency-Key": str(uuid.uuid4())})
+    assert [r.status_code for r in (first, again, other)] == [201, 201, 201]
+    assert first.json()["id"] == again.json()["id"] == other.json()["id"]
+    assert await courses.pool.fetchval("select count(*) from leads") == 1
+    assert await courses.pool.fetchval("select count(*) from trial_bookings") == 1
+
+
+async def test_a_refused_trial_saves_nothing_so_nothing_is_half_done(courses):
+    lesson = (await courses.api.client.get(f"/groups/{courses.a}/trial-dates", params={"count": 1})).json()[0]
+    ok = await quick(courses, group_id=courses.a, trial_starts_at=lesson["starts_at"])
+    assert ok.status_code == 201
+    # The same person may not take a second trial in another group (a limit of one) -- only the owner may.
+    second_lesson = (await courses.api.client.get(f"/groups/{courses.fr}/trial-dates", params={"count": 1})).json()[0]
+    async with courses.api.as_admin() as admin:
+        refused = await quick(courses, client=admin, group_id=courses.fr, trial_starts_at=second_lesson["starts_at"])
+    assert refused.status_code == 403, refused.text
+    # The refused save created no lead of its own -- the person still has the one open lead.
+    assert await courses.pool.fetchval("select count(*) from leads where phone = '998901112233'") == 1
+    # A lesson that isn't one of the group's next lessons is refused too.
+    odd = await quick(courses, phone="998901112255", group_id=courses.a, trial_starts_at="2030-01-01T03:00:00+05:00")
+    assert odd.status_code == 409
+    assert await courses.pool.fetchval("select count(*) from leads where phone = '998901112255'") == 0
+
+
+async def test_saving_a_known_person_again_adds_to_their_lead_and_does_not_open_a_second(courses):
+    first = await quick(courses, group_id=courses.a)
+    again = await quick(courses, group_id=courses.b, name="Nodira I.")
+    assert again.status_code == 201
+    # Same phone, same subject: one lead; the new group is the one offered now.
+    assert again.json()["id"] == first.json()["id"] and again.json()["merged"] is True
+    assert again.json()["group_id"] == courses.b
+    assert await courses.pool.fetchval("select count(*) from leads") == 1
+
+
+async def test_undo_archives_what_the_save_made_and_cancels_the_trial_and_deletes_nothing(courses):
+    import uuid
+
+    lesson = (await courses.api.client.get(f"/groups/{courses.a}/trial-dates", params={"count": 1})).json()[0]
+    client_id = str(uuid.uuid4())
+    saved = await courses.api.client.post(
+        "/leads",
+        json={"full_name": "Nodira", "phone": "998901112233", "client_id": client_id, "group_id": courses.a,
+              "trial_starts_at": lesson["starts_at"]},
+        headers={"Idempotency-Key": str(uuid.uuid4())},
+    )
+    assert saved.status_code == 201, saved.text
+    undone = (await courses.api.client.post("/leads/undo", json={"client_id": client_id})).json()
+    assert undone["undone"] is True and undone["lead"]["stage"] == "not_interested"
+    assert undone["lead"]["lost_reason"] == "Qaytarildi"
+    pool = courses.pool
+    assert await pool.fetchval("select count(*) from leads") == 1  # archived, not deleted
+    assert await pool.fetchval("select status from trial_bookings") == "cancelled"
+    # Undoing twice, or an unknown save, does nothing.
+    assert (await courses.api.client.post("/leads/undo", json={"client_id": client_id})).json()["undone"] is False
+    assert (await courses.api.client.post("/leads/undo", json={"client_id": str(uuid.uuid4())})).json() == {
+        "undone": False, "lead": None,
+    }
+    # The phone can be saved again right away.
+    assert (await quick(courses, group_id=courses.a)).status_code == 201
+
+
+async def test_undoing_a_save_that_was_folded_into_an_older_lead_leaves_that_lead_alone(courses):
+    older = await quick(courses, group_id=courses.a)
+    import uuid
+
+    client_id = str(uuid.uuid4())
+    merged = await courses.api.client.post(
+        "/leads",
+        json={"full_name": "Nodira", "phone": "998901112233", "client_id": client_id, "group_id": courses.a,
+              "on_duplicate": "merge"},
+        headers={"Idempotency-Key": str(uuid.uuid4())},
+    )
+    assert merged.json()["merged"] is True and merged.json()["id"] == older.json()["id"]
+    result = (await courses.api.client.post("/leads/undo", json={"client_id": client_id})).json()
+    assert result["undone"] is False
+    assert (await courses.api.client.get(f"/leads/{older.json()['id']}")).json()["lead"]["stage"] == "new"
+
+
+async def test_the_list_filters_by_group_groupless_trial_and_archive(courses):
+    lesson = (await courses.api.client.get(f"/groups/{courses.a}/trial-dates", params={"count": 1})).json()[0]
+    await quick(courses, name="Aziza", phone="998901110001", group_id=courses.a)
+    await quick(courses, name="Bobur", phone="998901110002", group_id=courses.a, trial_starts_at=lesson["starts_at"])
+    await quick(courses, name="Sevara", phone="998901110003", group_id=courses.b)
+    await quick(courses, name="Dilnoza", phone="998901110004")
+    gone = (await quick(courses, name="Eldor", phone="998901110005", group_id=courses.b)).json()
+    await courses.api.client.post(f"/leads/{gone['id']}/stage", json={"stage": "not_interested", "version": gone["version"], "reason": "Qiziqmadi"})
+
+    async def names(**params):
+        page = (await courses.api.client.get("/leads", params=params)).json()
+        return sorted(item["full_name"] for item in page["items"])
+
+    assert await names() == ["Aziza", "Bobur", "Dilnoza", "Sevara"]
+    assert await names(group_id=courses.a) == ["Aziza", "Bobur"]
+    assert await names(group_id=courses.b) == ["Sevara"]
+    assert await names(groupless="true") == ["Dilnoza"]
+    assert await names(with_trial="true") == ["Bobur"]
+    assert await names(archive="true") == ["Eldor"]
+    assert await names(q="9011100") == ["Aziza", "Bobur", "Dilnoza", "Sevara"]
+    assert await names(q="Sev") == ["Sevara"]
