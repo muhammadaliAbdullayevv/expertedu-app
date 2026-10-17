@@ -2,27 +2,36 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/extensions/build_context_x.dart';
-import '../../auth/application/session_controller.dart';
+import '../../../core/layout/breakpoints.dart';
 import '../../groups/data/groups_repository.dart';
 import '../../inquiries/data/inquiries_repository.dart';
 import '../../inquiries/presentation/add_inquiry_sheet.dart';
+import '../../inquiries/presentation/inquiry_card.dart';
 import '../../students/data/students_repository.dart';
+import 'desktop_dashboard.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
-  const DashboardScreen({super.key});
+  const DashboardScreen({super.key, required this.onOpenDebtors});
+
+  /// Switches HomeShell to the (desktop-only) Qarzdorlar tab.
+  final VoidCallback onOpenDebtors;
 
   @override
   ConsumerState<DashboardScreen> createState() => DashboardScreenState();
 }
 
 class DashboardScreenState extends ConsumerState<DashboardScreen> {
-  late Future<_Counts> _countsFuture;
+  final _desktopKey = GlobalKey<DesktopDashboardState>();
+
+  // Only the phone layout shows these two counts -- loaded the first time
+  // it's actually built, so the desktop never fetches the full group and
+  // student lists just to count them.
+  Future<_Counts>? _countsFuture;
   late Future<List<Inquiry>> _inquiriesFuture;
 
   @override
   void initState() {
     super.initState();
-    _countsFuture = _loadCounts();
     _inquiriesFuture = ref.read(inquiriesRepositoryProvider).list();
   }
 
@@ -32,10 +41,23 @@ class DashboardScreenState extends ConsumerState<DashboardScreen> {
     return _Counts(groups: groups.length, students: students.length);
   }
 
+  /// Also refreshes the desktop summary -- its lead counts and today's
+  /// trial lessons change with every logged call or status change.
   void _reloadInquiries() {
     setState(
       () => _inquiriesFuture = ref.read(inquiriesRepositoryProvider).list(),
     );
+    _desktopKey.currentState?.reload();
+  }
+
+  /// HomeShell's refresh button on wide layouts, where pull-to-refresh
+  /// doesn't exist (a mouse can't drag a list past its top).
+  void reload() {
+    setState(() {
+      if (_countsFuture != null) _countsFuture = _loadCounts();
+      _inquiriesFuture = ref.read(inquiriesRepositoryProvider).list();
+    });
+    _desktopKey.currentState?.reload();
   }
 
   /// No search on this tab -- see HomeShell's back-button handling.
@@ -49,22 +71,23 @@ class DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final session = ref.watch(sessionControllerProvider);
+    if (isWideLayout(context)) {
+      return DesktopDashboard(
+        key: _desktopKey,
+        inquiries: _inquiriesFuture,
+        onInquiriesChanged: _reloadInquiries,
+        onOpenDebtors: widget.onOpenDebtors,
+      );
+    }
+
+    _countsFuture ??= _loadCounts();
     return RefreshIndicator(
       onRefresh: () async {
-        setState(() {
-          _countsFuture = _loadCounts();
-          _inquiriesFuture = ref.read(inquiriesRepositoryProvider).list();
-        });
+        reload();
       },
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
         children: <Widget>[
-          Text(
-            'Salom, ${session.user?.fullName ?? ''}',
-            style: context.textTheme.titleMedium,
-          ),
-          const SizedBox(height: 16),
           FutureBuilder<_Counts>(
             future: _countsFuture,
             builder: (context, snapshot) {
@@ -129,7 +152,7 @@ class DashboardScreenState extends ConsumerState<DashboardScreen> {
               return Column(
                 children: inquiries
                     .map(
-                      (inquiry) => _InquiryCard(
+                      (inquiry) => InquiryCard(
                         inquiry: inquiry,
                         onChanged: _reloadInquiries,
                       ),
@@ -181,107 +204,6 @@ class _StatCard extends StatelessWidget {
             Text(value, style: context.textTheme.headlineSmall),
             Text(label, style: context.textTheme.bodySmall),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _InquiryCard extends ConsumerWidget {
-  const _InquiryCard({required this.inquiry, required this.onChanged});
-
-  final Inquiry inquiry;
-  final VoidCallback onChanged;
-
-  Color _statusColor(BuildContext context) => switch (inquiry.status) {
-    'new' => context.colors.primary,
-    'contacted' => Colors.orange,
-    'scheduled' => Colors.purple,
-    'converted' => Colors.green,
-    _ => context.colors.outline,
-  };
-
-  String _statusLabel() => switch (inquiry.status) {
-    'new' => 'Yangi',
-    'contacted' => 'Bog\'lanildi',
-    'scheduled' => 'Sinovga yozildi',
-    'converted' => 'Talaba bo\'ldi',
-    _ => 'Yo\'qotildi',
-  };
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final subtitleParts = <String>[
-      inquiry.phone,
-      if (inquiry.subjectName != null) inquiry.subjectName!,
-      if (inquiry.trialDate != null)
-        'Sinov: ${inquiry.trialDate!.day}.${inquiry.trialDate!.month}.${inquiry.trialDate!.year}',
-    ];
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Card(
-        margin: EdgeInsets.zero,
-        elevation: 0,
-        color: context.colors.surface,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-          side: BorderSide(color: context.colors.outlineVariant),
-        ),
-        child: ListTile(
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 6,
-          ),
-          leading: CircleAvatar(
-            backgroundColor: _statusColor(context).withValues(alpha: 0.15),
-            child: Icon(Icons.phone_in_talk, color: _statusColor(context)),
-          ),
-          title: Text(inquiry.fullName),
-          subtitle: Text(subtitleParts.join(' • ')),
-          trailing: inquiry.status == 'converted'
-              ? Chip(
-                  label: Text(_statusLabel()),
-                  backgroundColor: _statusColor(
-                    context,
-                  ).withValues(alpha: 0.15),
-                )
-              : PopupMenuButton<String>(
-                  initialValue: inquiry.status,
-                  child: Chip(
-                    label: Text(_statusLabel()),
-                    backgroundColor: _statusColor(
-                      context,
-                    ).withValues(alpha: 0.15),
-                  ),
-                  onSelected: (action) async {
-                    final repo = ref.read(inquiriesRepositoryProvider);
-                    if (action == 'convert') {
-                      await repo.convert(inquiry.id);
-                    } else {
-                      await repo.updateStatus(inquiry.id, action);
-                    }
-                    onChanged();
-                  },
-                  itemBuilder: (context) => <PopupMenuEntry<String>>[
-                    const PopupMenuItem(
-                      value: 'contacted',
-                      child: Text('Bog\'landim'),
-                    ),
-                    const PopupMenuItem(
-                      value: 'scheduled',
-                      child: Text('Sinovga yozildi'),
-                    ),
-                    const PopupMenuItem(
-                      value: 'convert',
-                      child: Text('Talabaga aylantirish'),
-                    ),
-                    const PopupMenuItem(
-                      value: 'lost',
-                      child: Text('Yo\'qotildi'),
-                    ),
-                  ],
-                ),
         ),
       ),
     );

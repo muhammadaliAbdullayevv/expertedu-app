@@ -4,22 +4,27 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../students/data/students_repository.dart';
 import '../data/enrollments_repository.dart';
 
-/// Returns true if a student was enrolled.
+/// Returns true if a student was enrolled. [initialStudent] starts with
+/// that student already picked -- the add dialog's "Boshqa guruhga
+/// qo'shish" for a phone number that already belongs to someone.
 Future<bool?> showEnrollStudentSheet(
   BuildContext context, {
   required int groupId,
+  Student? initialStudent,
 }) {
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
-    builder: (context) => _EnrollStudentSheet(groupId: groupId),
+    builder: (context) =>
+        _EnrollStudentSheet(groupId: groupId, initialStudent: initialStudent),
   );
 }
 
 class _EnrollStudentSheet extends ConsumerStatefulWidget {
-  const _EnrollStudentSheet({required this.groupId});
+  const _EnrollStudentSheet({required this.groupId, this.initialStudent});
 
   final int groupId;
+  final Student? initialStudent;
 
   @override
   ConsumerState<_EnrollStudentSheet> createState() =>
@@ -36,7 +41,12 @@ class _EnrollStudentSheetState extends ConsumerState<_EnrollStudentSheet> {
   @override
   void initState() {
     super.initState();
-    _future = ref.read(studentsRepositoryProvider).list();
+    final initial = widget.initialStudent;
+    if (initial != null) {
+      _selected = initial;
+      _searchController.text = initial.phone;
+    }
+    _future = ref.read(studentsRepositoryProvider).list(query: initial?.phone);
   }
 
   @override

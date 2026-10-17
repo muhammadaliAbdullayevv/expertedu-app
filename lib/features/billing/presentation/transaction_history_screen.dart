@@ -5,6 +5,7 @@ import '../../../core/formatters/currency_formatter.dart';
 import '../../../core/formatters/date_formatters.dart';
 import '../../../core/utils/enrollment_ledger_calculator.dart';
 import '../data/transactions_repository.dart';
+import '../payment_methods.dart';
 import 'record_payment_sheet.dart';
 
 class TransactionHistoryScreen extends ConsumerStatefulWidget {
@@ -147,6 +148,7 @@ class _TransactionHistoryScreenState
                         subtitle: Text(
                           [
                             DateFormatters.date(payment.occurredAt),
+                            paymentMethodLabel(payment.method),
                             if (payment.note != null) payment.note!,
                           ].join(' • '),
                         ),

@@ -11,36 +11,52 @@ class Group {
     required this.id,
     this.subjectId,
     required this.name,
+    this.teacherId,
     this.teacherName,
     required this.feeAmount,
     required this.dueDay,
+    this.capacity,
     required this.isActive,
     this.note,
     this.studentCount,
+    this.subjectName,
   });
 
   final int id;
   final int? subjectId;
   final String name;
+  final int? teacherId;
+
+  /// The linked teacher's name, joined in by the server.
   final String? teacherName;
   final int feeAmount;
   final int dueDay;
+
+  /// Seat limit; null = no limit (never shown as full).
+  final int? capacity;
   final bool isActive;
   final String? note;
 
-  /// Only populated when fetched via [GroupsRepository.listBySubject].
+  /// Only populated when fetched via [GroupsRepository.listBySubject] or
+  /// [GroupsRepository.list].
   final int? studentCount;
+
+  /// Only populated by [GroupsRepository.list].
+  final String? subjectName;
 
   factory Group.fromJson(Map<String, dynamic> json) => Group(
     id: json['id'] as int,
     subjectId: json['subject_id'] as int?,
     name: json['name'] as String,
+    teacherId: json['teacher_id'] as int?,
     teacherName: json['teacher_name'] as String?,
     feeAmount: json['fee_amount'] as int,
     dueDay: json['due_day'] as int,
+    capacity: json['capacity'] as int?,
     isActive: json['is_active'] as bool,
     note: json['note'] as String?,
     studentCount: json['student_count'] as int?,
+    subjectName: json['subject_name'] as String?,
   );
 }
 
@@ -97,12 +113,16 @@ class GroupsRepository {
     return json.map((e) => Group.fromJson(e as Map<String, dynamic>)).toList();
   }
 
+  /// Pass [teacherId] to pick an existing teacher; [teacherName] (the phone
+  /// app's typed name) is matched to, or creates, a teacher server-side.
   Future<Group> create({
     required int subjectId,
     required String name,
+    int? teacherId,
     String? teacherName,
     required int feeAmount,
     required int dueDay,
+    int? capacity,
     String? note,
   }) async {
     final json =
@@ -111,9 +131,40 @@ class GroupsRepository {
               body: <String, dynamic>{
                 'subject_id': subjectId,
                 'name': name,
+                'teacher_id': teacherId,
                 'teacher_name': teacherName,
                 'fee_amount': feeAmount,
                 'due_day': dueDay,
+                'capacity': capacity,
+                'note': note,
+              },
+            )
+            as Map<String, dynamic>;
+    return Group.fromJson(json);
+  }
+
+  /// Sends every editable field -- a null [teacherId] unassigns the teacher,
+  /// a null [capacity] removes the seat limit.
+  Future<Group> update(
+    int id, {
+    required int subjectId,
+    required String name,
+    int? teacherId,
+    required int feeAmount,
+    required int dueDay,
+    int? capacity,
+    String? note,
+  }) async {
+    final json =
+        await _api.patch(
+              '/groups/$id',
+              body: <String, dynamic>{
+                'subject_id': subjectId,
+                'name': name,
+                'teacher_id': teacherId,
+                'fee_amount': feeAmount,
+                'due_day': dueDay,
+                'capacity': capacity,
                 'note': note,
               },
             )

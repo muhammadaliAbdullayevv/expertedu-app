@@ -2,13 +2,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/extensions/build_context_x.dart';
+import '../../../core/layout/breakpoints.dart';
 import '../../../core/widgets/settings_tile.dart';
 import '../../../services/updates/app_update_controller.dart';
 import '../../auth/application/session_controller.dart';
 import '../../auth/data/auth_repository.dart';
+import 'desktop_settings.dart';
 
-class SettingsScreen extends ConsumerWidget {
+class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    if (isWideLayout(context)) {
+      return const DesktopSettings(account: _AccountSettings());
+    }
+    return const _AccountSettings();
+  }
+}
+
+/// The phone's whole Settings screen, and the desktop's "Hisob" tab.
+class _AccountSettings extends ConsumerWidget {
+  const _AccountSettings();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

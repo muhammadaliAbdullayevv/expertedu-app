@@ -35,6 +35,12 @@ class DateFormatters {
     return '${name[0].toUpperCase()}${name.substring(1)} ${local.year}';
   }
 
+  /// "Oktyabr" -- a month on its own, for chart axes.
+  static String monthName(DateTime value) {
+    final name = _monthNames[value.toLocal().month - 1];
+    return '${name[0].toUpperCase()}${name.substring(1)}';
+  }
+
   static String dateTime(DateTime value) =>
       '${date(value)} ${_time.format(value.toLocal())}';
 
