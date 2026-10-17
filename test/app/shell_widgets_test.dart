@@ -98,6 +98,31 @@ void main() {
       expect(find.text('Egasi'), findsOneWidget);
     });
 
+    testWidgets(
+      'on local test data the sidebar says so; on the real server it does not',
+      (tester) async {
+        await tester.pumpWidget(sidebar());
+        expect(find.text('Mahalliy rejim'), findsNothing);
+        await tester.pumpWidget(
+          host(
+            Row(
+              children: [
+                AppSidebar(
+                  role: AppRole.owner,
+                  selected: Destination.today,
+                  onSelect: (_) {},
+                  userName: 'Madina Karimova',
+                  onUserTap: () {},
+                  localMode: true,
+                ),
+              ],
+            ),
+          ),
+        );
+        expect(find.text('Mahalliy rejim'), findsOneWidget);
+      },
+    );
+
     testWidgets('an admin gets Moliya and Hisobotlar', (tester) async {
       await tester.pumpWidget(sidebar(role: AppRole.admin));
       expect(find.text('Moliya'), findsOneWidget);

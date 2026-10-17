@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../l10n/app_strings.dart';
 import '../navigation/destinations.dart';
+import '../../core/widgets/status_chip.dart';
 import '../theme/app_theme.dart';
 
 /// The wide layout's navigation (V2): the logo, the "Ish stoli" and
@@ -18,6 +19,7 @@ class AppSidebar extends StatelessWidget {
     required this.onUserTap,
     this.counts = const {},
     this.compact = false,
+    this.localMode = false,
   });
 
   static const double width = 244;
@@ -33,6 +35,9 @@ class AppSidebar extends StatelessWidget {
   final String userName;
   final VoidCallback onUserTap;
   final bool compact;
+
+  /// The app is on this computer's own test data, not the real server.
+  final bool localMode;
 
   @override
   Widget build(BuildContext context) {
@@ -88,6 +93,18 @@ class AppSidebar extends StatelessWidget {
                 selected: selected == Destination.settings,
                 compact: compact,
                 onTap: () => onSelect(Destination.settings),
+              ),
+            if (localMode)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                child: Tooltip(
+                  message:
+                      'Ma\'lumotlar shu kompyuterda: haqiqiy serverga ulanmagan.',
+                  child: StatusChip(
+                    compact ? 'Lokal' : 'Mahalliy rejim',
+                    tone: StatusTone.warning,
+                  ),
+                ),
               ),
             const SizedBox(height: 8),
             const Divider(height: 1, color: AppColors.divider),

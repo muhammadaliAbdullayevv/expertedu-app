@@ -535,15 +535,15 @@ class _TableHeader extends StatelessWidget {
       padding: EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       child: Row(
         children: <Widget>[
-          Expanded(flex: 34, child: Text('O\'quvchi', style: _head)),
-          Expanded(flex: 28, child: Text('Guruh va o\'qituvchi', style: _head)),
-          Expanded(flex: 22, child: Text('Davomat (10 dars)', style: _head)),
+          Expanded(flex: 32, child: Text('O\'quvchi', style: _head)),
+          Expanded(flex: 27, child: Text('Guruh va o\'qituvchi', style: _head)),
+          Expanded(flex: 21, child: Text('Davomat (10 dars)', style: _head)),
           Expanded(
-            flex: 14,
+            flex: 12,
             child: Text('Balans', textAlign: TextAlign.right, style: _head),
           ),
           Expanded(
-            flex: 14,
+            flex: 18,
             child: Padding(
               padding: EdgeInsets.only(left: 14),
               child: Text('Holat', style: _head),
@@ -584,7 +584,7 @@ class _StudentRowView extends StatelessWidget {
         child: Row(
           children: <Widget>[
             Expanded(
-              flex: 34,
+              flex: 32,
               child: Row(
                 children: <Widget>[
                   CircleAvatar(
@@ -636,7 +636,7 @@ class _StudentRowView extends StatelessWidget {
               ),
             ),
             Expanded(
-              flex: 28,
+              flex: 27,
               child: first == null
                   ? const Text(
                       'Guruhsiz',
@@ -667,7 +667,7 @@ class _StudentRowView extends StatelessWidget {
                     ),
             ),
             Expanded(
-              flex: 22,
+              flex: 21,
               child: Row(
                 children: <Widget>[
                   AttendanceBars(row.attendanceRecent),
@@ -683,7 +683,7 @@ class _StudentRowView extends StatelessWidget {
               ),
             ),
             Expanded(
-              flex: 14,
+              flex: 12,
               child: Text(
                 signedBalance(row.balance),
                 textAlign: TextAlign.right,
@@ -695,7 +695,7 @@ class _StudentRowView extends StatelessWidget {
               ),
             ),
             Expanded(
-              flex: 14,
+              flex: 18,
               child: Padding(
                 padding: const EdgeInsets.only(left: 14),
                 child: Align(

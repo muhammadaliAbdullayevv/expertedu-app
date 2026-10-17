@@ -11,6 +11,7 @@ import '../../../app/shell/shell_counts.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../core/layout/breakpoints.dart';
 import '../../../l10n/app_strings.dart';
+import '../../../services/api/api_config.dart';
 import '../../../services/sync/sync_engine.dart';
 import '../../admissions/presentation/admissions_screen.dart';
 import '../../admissions/presentation/admissions_ui.dart'
@@ -284,6 +285,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                   onSelect: _go,
                   counts: counts,
                   compact: width < _fullSidebarBreakpoint,
+                  localMode: ApiConfig.isLocal(),
                   userName: _session.user?.fullName ?? '',
                   onUserTap: () => _go(Destination.settings),
                 ),
