@@ -19,14 +19,17 @@ enum StudentTab {
   final String label;
 }
 
-/// Who is in a tab. "Hammasi" is the active students (at least one group);
-/// "Arxiv" is everyone who has none. The flags come from the server.
+/// Who is in a tab. "Hammasi" is everyone not archived (a student between
+/// groups is still here, as "Guruhsiz"); "Arxiv" is only the ones someone
+/// archived. "Qarzdorlar" keeps archived people who still owe: they were
+/// kept on purpose, so the debt can still be collected. The flags come from
+/// the server.
 bool inTab(StudentRow s, StudentTab tab) => switch (tab) {
-  StudentTab.all => s.isActive,
+  StudentTab.all => !s.isArchived,
   StudentTab.debtors => s.isDebtor,
-  StudentTab.atRisk => s.isAtRisk,
-  StudentTab.fresh => s.isNew,
-  StudentTab.archive => !s.isActive,
+  StudentTab.atRisk => s.isAtRisk && !s.isArchived,
+  StudentTab.fresh => s.isNew && !s.isArchived,
+  StudentTab.archive => s.isArchived,
 };
 
 Map<StudentTab, int> tabCounts(List<StudentRow> rows) => {
@@ -60,11 +63,20 @@ String signedBalance(int owed) {
 /// The status chip of a table row, and what it means (shown on hover).
 /// "Davomat past" is about lessons missed, never about money.
 ({String text, StatusTone tone, String hint}) statusOf(StudentRow s) {
+  if (s.isArchived) {
+    return (
+      text: s.isDebtor ? 'Arxiv · qarzi bor' : 'Arxiv',
+      tone: s.isDebtor ? StatusTone.danger : StatusTone.neutral,
+      hint: s.isDebtor
+          ? 'Arxivga o\'tkazilgan, lekin to\'lanmagan hisobi bor'
+          : 'Arxivga o\'tkazilgan: guruhlardan chiqarilgan, ma\'lumotlari saqlangan',
+    );
+  }
   if (!s.isActive) {
     return (
-      text: 'Arxiv',
-      tone: StatusTone.neutral,
-      hint: 'Hech qaysi guruhda emas',
+      text: s.isDebtor ? 'Guruhsiz · qarzi bor' : 'Guruhsiz',
+      tone: s.isDebtor ? StatusTone.danger : StatusTone.neutral,
+      hint: 'Hozir hech qaysi guruhda emas',
     );
   }
   if (s.isDebtor) {

@@ -242,14 +242,31 @@ def payments_and_rest(ids: dict) -> None:
                 )
                 cancelled_one = True
 
-    print("Arxiv: bir nechta o'quvchi guruhdan chiqadi...")
+    print("Arxiv: bir nechta o'quvchi arxivga o'tadi (ma'lumotlari saqlanadi)...")
     gone = 0
     for s in ids["students"][5::13]:
         profile = api.get(f"/students/{s['id']}/profile")
         if len(profile["groups"]) == 1:
-            api.post(f"/enrollments/{profile['groups'][0]['enrollment_id']}/withdraw")
+            api.post(f"/students/{s['id']}/archive", json={"note": "Boshqa shaharga ko'chib ketdi"})
             gone += 1
         if gone >= 4:
+            break
+
+    print("Amallar: bittasi guruhdan chiqariladi, bittasi guruhini almashtiradi...")
+    removed = moved = False
+    for s in ids["students"][2::9]:
+        profile = api.get(f"/students/{s['id']}/profile")
+        mine = [g for g in profile["groups"] if g["status"] == "active"]
+        if not removed and len(mine) >= 2:
+            api.post(f"/students/{s['id']}/remove-from-group",
+                     json={"group_id": mine[0]["group_id"], "note": "Dars vaqti to'g'ri kelmadi"})
+            removed = True
+        elif not moved and len(mine) == 1:
+            other = next(g for g in ids["groups"] if g != mine[0]["group_id"])
+            api.post(f"/students/{s['id']}/transfer",
+                     json={"from_group_id": mine[0]["group_id"], "to_group_id": other, "note": "Darajasi oshdi"})
+            moved = True
+        if removed and moved:
             break
 
     print("Qabul: guruhli, sinovli, guruhsiz va arxivdagi odamlar...")

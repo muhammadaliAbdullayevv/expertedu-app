@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
-import '../../../core/widgets/back_gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -11,6 +10,7 @@ import '../../../app/shell/phone_bottom_bar.dart';
 import '../../../app/shell/shell_counts.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../core/layout/breakpoints.dart';
+import '../../../core/widgets/back_gestures.dart';
 import '../../../l10n/app_strings.dart';
 import '../../../services/api/api_config.dart';
 import '../../../services/sync/sync_engine.dart';
@@ -20,12 +20,12 @@ import '../../admissions/presentation/admissions_ui.dart'
 import '../../auth/application/session_controller.dart';
 import '../../debtors/presentation/debtors_screen.dart';
 import '../../finance/presentation/finance_screen.dart';
-import '../../settings/presentation/desktop_settings.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../../stats/presentation/stats_screen.dart';
 import '../../students/presentation/open_student.dart';
 import '../../students/presentation/students_list_screen.dart';
 import '../../subjects/presentation/subjects_list_screen.dart';
+import '../../teachers/presentation/teachers_screen.dart';
 import '../../timetable/presentation/timetable_screen.dart';
 import 'dashboard_screen.dart';
 
@@ -105,6 +105,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   /// page -- the sidebar never goes away.
   final _groupsNav = GlobalKey<NavigatorState>();
   final _studentsKey = GlobalKey<StudentsListScreenState>();
+  final _teachersKey = GlobalKey<TeachersScreenState>();
   final _debtorsKey = GlobalKey<DebtorsScreenState>();
   final _admissionsKey = GlobalKey<AdmissionsScreenState>();
   final _timetableKey = GlobalKey<TimetableScreenState>();
@@ -131,7 +132,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         builder: (_) => SubjectsListScreen(key: _subjectsKey),
       ),
     ),
-    Destination.teachers: const TeachersTab(),
+    Destination.teachers: TeachersScreen(key: _teachersKey),
     Destination.finance: FinanceScreen(key: _financeKey),
     Destination.reports: const StatsScreen(),
     Destination.settings: const SettingsScreen(),
@@ -161,6 +162,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         _financeKey.currentState?.reload();
       case Destination.debtors:
         _debtorsKey.currentState?.reload();
+      case Destination.teachers:
+        _teachersKey.currentState?.reload();
       default:
         break;
     }
@@ -370,6 +373,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         _subjectsKey.currentState?.clearSearchIfActive() ?? false,
       Destination.students =>
         _studentsKey.currentState?.clearSearchIfActive() ?? false,
+      Destination.teachers =>
+        _teachersKey.currentState?.clearSearchIfActive() ?? false,
       _ => false,
     };
   }

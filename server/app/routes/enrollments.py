@@ -2,7 +2,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from .. import clock, db
+from .. import clock, db, student_events
 from ..money import rules, service as money
 from ..deps import CurrentUser, get_current_user
 from ..schemas import CreateEnrollmentRequest, Enrollment, FirstChargePreview, StudentEnrollment
@@ -41,6 +41,7 @@ async def enroll(
     first_month: str | None = None,
     discount_kind: str | None = None,
     discount_value: int | None = None,
+    log_event: bool = True,
 ) -> tuple[dict, int]:
     """Creates an enrollment and its first charge on `conn`, inside the
     caller's transaction; returns (enrollment row, first charge amount).
@@ -77,6 +78,20 @@ async def enroll(
         created_by,
     )
     amount = await money.issue_first_charge(conn, dict(row), dict(group), created_by, first_month)
+    # Joining a group takes him out of the archive; coming back to a group he
+    # had left is "activated", any other is "added".
+    if await conn.fetchval(
+        "update students set archived_at = null where id = $1 and archived_at is not null returning 1", student_id
+    ):
+        await student_events.log(conn, student_id, "unarchived", created_by, note="Guruhga qaytdi")
+    if log_event:
+        came_back = await conn.fetchval(
+            "select 1 from enrollments where student_id = $1 and group_id = $2 and id <> $3", student_id, group_id, row["id"]
+        )
+        await student_events.log(
+            conn, student_id, "activated" if came_back else "added", created_by,
+            group_id=group_id, enrollment_id=row["id"],
+        )
     return row, amount
 
 
@@ -131,29 +146,38 @@ async def first_charge_preview(
     )
 
 
+async def withdraw(conn, enrollment: dict, user_id: int | None, reason: str) -> int:
+    """Ends an enrollment (inside the caller's transaction) and returns what
+    he still owes on it. Nothing is deleted: the lessons, charges and payments
+    stay, and months after the one he left in are cancelled with a reason."""
+    ended_at = clock.today()
+    await conn.execute(
+        "update enrollments set status = 'withdrawn', ended_at = $2 where id = $1", enrollment["id"], ended_at
+    )
+    # Months after the one they left in aren't owed -- cancelled with
+    # a reason (never deleted), so the history still explains itself.
+    await money.cancel_charges_after(conn, enrollment["id"], ended_at, reason, user_id)
+    return await conn.fetchval("select owed from enrollment_balances where enrollment_id = $1", enrollment["id"])
+
+
 @router.post("/{enrollment_id}/withdraw", response_model=Enrollment)
 async def withdraw_enrollment(enrollment_id: int, user: CurrentUser = Depends(get_current_user)):
+    """Plain withdrawal. The app uses the student's own "remove from group" /
+    "archive" (which ask for a comment); this stays for anything else."""
     existing = await db.pool().fetchrow("select * from enrollments where id = $1", enrollment_id)
     if existing is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Yozilish topilmadi.")
     if existing["status"] == "withdrawn":
         return Enrollment(**existing)
 
-    ended_at = clock.today()
     async with db.pool().acquire() as conn:
         async with conn.transaction():
-            row = await conn.fetchrow(
-                """
-                update enrollments set status = 'withdrawn', ended_at = $2
-                where id = $1
-                returning *
-                """,
-                enrollment_id,
-                ended_at,
+            debt = await withdraw(conn, dict(existing), user.id, "O'quvchi guruhdan chiqdi")
+            await student_events.log(
+                conn, existing["student_id"], "removed", user.id,
+                group_id=existing["group_id"], enrollment_id=enrollment_id, debt=debt,
             )
-            # Months after the one they left in aren't owed -- cancelled with
-            # a reason (never deleted), so the history still explains itself.
-            await money.cancel_charges_after(conn, enrollment_id, ended_at, "O'quvchi guruhdan chiqdi", user.id)
+            row = await conn.fetchrow("select * from enrollments where id = $1", enrollment_id)
     return Enrollment(**row)
 
 

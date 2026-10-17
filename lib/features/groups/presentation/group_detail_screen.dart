@@ -4,13 +4,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../core/formatters/currency_formatter.dart';
 import '../../../core/formatters/phone_formatter.dart';
+import '../../../core/widgets/person_avatar.dart';
 import '../../../core/widgets/status_chip.dart';
 import '../../admissions/data/admissions_models.dart';
 import '../../admissions/presentation/admissions_ui.dart';
 import '../../admissions/presentation/qabul_text.dart';
 import '../../admissions/presentation/qabul_widgets.dart';
 import '../../admissions/presentation/student_dialog.dart';
-import '../../enrollments/data/enrollments_repository.dart';
 import '../../enrollments/presentation/enroll_student_sheet.dart';
 import '../../students/presentation/student_panel.dart';
 import '../../students/presentation/student_text.dart';
@@ -112,29 +112,6 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
       showSnack(context, message);
       _reload();
     }
-  }
-
-  Future<void> _confirmWithdraw(RosterEntry entry) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('O\'quvchini chiqarish'),
-        content: Text('${entry.studentFullName} shu guruhdan chiqarilsinmi?'),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Yo\'q'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Ha'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    await ref.read(enrollmentsRepositoryProvider).withdraw(entry.enrollmentId);
-    _reload();
   }
 
   @override
@@ -299,7 +276,6 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
                 _showOver(entry.studentId);
               }
             },
-            onWithdraw: () => _confirmWithdraw(entry),
           ),
       ],
     );
@@ -509,22 +485,32 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
             children: <Widget>[
               fact(
                 'Mas\'ul o\'qituvchi',
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                Row(
                   children: <Widget>[
-                    Text(
-                      t?.fullName ?? 'Biriktirilmagan',
-                      key: const ValueKey('group-teacher'),
-                      style: strong,
-                    ),
-                    if (t?.phone != null)
-                      Text(
-                        PhoneFormatter.display(t!.phone!),
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.inkMuted,
-                        ),
+                    if (t != null) ...<Widget>[
+                      PersonAvatar(name: t.fullName, photo: t.photo),
+                      const SizedBox(width: 10),
+                    ],
+                    Flexible(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            t?.fullName ?? 'Biriktirilmagan',
+                            key: const ValueKey('group-teacher'),
+                            style: strong,
+                          ),
+                          if (t?.phone != null)
+                            Text(
+                              PhoneFormatter.display(t!.phone!),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.inkMuted,
+                              ),
+                            ),
+                        ],
                       ),
+                    ),
                   ],
                 ),
               ),
@@ -731,13 +717,11 @@ class _RosterRow extends StatelessWidget {
     required this.entry,
     required this.selected,
     required this.onTap,
-    required this.onWithdraw,
   });
 
   final RosterEntry entry;
   final bool selected;
   final VoidCallback onTap;
-  final VoidCallback onWithdraw;
 
   @override
   Widget build(BuildContext context) {
@@ -748,7 +732,7 @@ class _RosterRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.card),
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
           decoration: BoxDecoration(
             color: selected ? AppColors.accentSoft : AppColors.surface,
             borderRadius: BorderRadius.circular(AppRadius.card),
@@ -759,12 +743,10 @@ class _RosterRow extends StatelessWidget {
           ),
           child: Row(
             children: <Widget>[
-              CircleAvatar(
-                backgroundColor: owes ? AppColors.dangerBg : AppColors.okBg,
-                child: Icon(
-                  Icons.school,
-                  color: owes ? AppColors.dangerText : AppColors.okText,
-                ),
+              PersonAvatar(
+                name: entry.studentFullName,
+                photo: entry.studentPhoto,
+                radius: 20,
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -801,11 +783,6 @@ class _RosterRow extends StatelessWidget {
                     ),
                   ],
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.person_remove_outlined),
-                tooltip: 'Chiqarish',
-                onPressed: onWithdraw,
               ),
             ],
           ),

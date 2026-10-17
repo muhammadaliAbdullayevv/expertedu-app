@@ -252,6 +252,20 @@ void main() {
       return;
     }
 
+    if (_only == 'teachers') {
+      await tester.tap(find.text('O\'qituvchilar').first);
+      await shot(tester, 'teachers-page');
+      await tester.tap(find.byKey(const ValueKey('teacher-menu')));
+      await settle(tester);
+      await shot(tester, 'teachers-menu');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('teacher-month-prev')));
+      await settle(tester);
+      await shot(tester, 'teachers-previous-month');
+      return;
+    }
+
     if (_only == 'qabul') {
       await qabulScenes(tester, shot, settle);
       return;

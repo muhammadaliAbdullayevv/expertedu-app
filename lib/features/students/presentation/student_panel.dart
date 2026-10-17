@@ -4,14 +4,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../core/formatters/currency_formatter.dart';
 import '../../../core/formatters/phone_formatter.dart';
+import '../../../core/widgets/person_avatar.dart';
 import '../../../core/widgets/status_chip.dart';
 import '../../admissions/presentation/admissions_ui.dart';
 import '../../admissions/presentation/qabul_text.dart';
+import '../../photos/photo_actions.dart';
+import '../../photos/photos_repository.dart';
 import '../data/student_models.dart';
 import '../data/students_repository.dart';
 import 'add_to_group_dialog.dart';
+import 'student_actions_dialogs.dart';
 import 'student_dialogs.dart';
 import 'student_text.dart';
+import 'transfer_dialog.dart';
 
 /// The last lessons as small bars: a full bar for a lesson they came to, a
 /// faint one for a lesson they missed -- the table's and the panel's
@@ -79,7 +84,13 @@ class StudentPanel extends ConsumerStatefulWidget {
 }
 
 class StudentPanelState extends ConsumerState<StudentPanel> {
-  static const _tabs = <String>['Umumiy', 'To\'lovlar', 'Davomat', 'Izohlar'];
+  static const _tabs = <String>[
+    'Umumiy',
+    'To\'lovlar',
+    'Davomat',
+    'Izohlar',
+    'Amallar',
+  ];
 
   late Future<StudentProfileData> _profile = _load();
 
@@ -136,6 +147,84 @@ class StudentPanelState extends ConsumerState<StudentPanel> {
     }
   }
 
+  Future<void> _photo(StudentProfileData p, {required bool remove}) async {
+    final id = p.student.id;
+    final changed = remove
+        ? await removePhoto(context, ref, PhotoOwner.student, id)
+        : await changePhoto(context, ref, PhotoOwner.student, id);
+    if (changed && mounted) _reload();
+  }
+
+  /// Each action ends with a line saying what was done; the profile reloads.
+  Future<void> _removeFromGroup(StudentProfileData full, ProfileGroup g) async {
+    final debt = await showRemoveFromGroupDialog(
+      context,
+      profile: full,
+      group: g,
+    );
+    if (debt != null && mounted) {
+      showSnack(
+        context,
+        '${full.student.fullName} ${g.groupName} guruhidan chiqarildi · '
+        '${debtSentence('', debt).trim()}',
+      );
+      _reload();
+    }
+  }
+
+  Future<void> _archive(StudentProfileData full) async {
+    final debt = await showArchiveDialog(context, profile: full);
+    if (debt != null && mounted) {
+      showSnack(
+        context,
+        '${full.student.fullName} arxivga o\'tkazildi · '
+        '${debtSentence('Jami', debt).trim()}',
+      );
+      _reload();
+    }
+  }
+
+  Future<void> _unarchive(StudentProfileData full) async {
+    final done = await showUnarchiveDialog(context, profile: full);
+    if (done != null && mounted) {
+      showSnack(context, '${full.student.fullName} arxivdan chiqarildi.');
+      _reload();
+    }
+  }
+
+  Future<void> _transfer(StudentProfileData full) async {
+    final done = await showTransferDialog(
+      context,
+      profile: full,
+      fromGroupId: widget.groupId,
+    );
+    if (done != null && mounted) {
+      showSnack(
+        context,
+        '${full.student.fullName} ${done.groupName} guruhiga o\'tkazildi · '
+        'birinchi hisob ${CurrencyFormatter.format(done.firstCharge)}'
+        '${done.oldDebt > 0 ? ' · eski guruhdan qarz ${CurrencyFormatter.format(done.oldDebt)}' : ''}',
+      );
+      _reload();
+    }
+  }
+
+  Future<void> _activate(StudentProfileData full, ProfileGroup g) async {
+    final added = await showAddToGroupDialog(
+      context,
+      profile: full,
+      activateGroupId: g.groupId,
+    );
+    if (added != null && mounted) {
+      showSnack(
+        context,
+        '${full.student.fullName} ${added.groupName} guruhida qayta faollashtirildi · '
+        'birinchi hisob ${CurrencyFormatter.format(added.firstCharge)}',
+      );
+      _reload();
+    }
+  }
+
   Future<void> _addToGroup(StudentProfileData p) async {
     final added = await showAddToGroupDialog(context, profile: p);
     if (added != null && mounted) {
@@ -183,6 +272,8 @@ class StudentPanelState extends ConsumerState<StudentPanel> {
                   const SizedBox(height: 14),
                   _balanceCard(p),
                 ],
+                for (final n in p.transferNotices)
+                  _TransferNoticeCard(notice: n),
                 const SizedBox(height: 18),
                 _tabBar(),
                 const SizedBox(height: 16),
@@ -190,6 +281,7 @@ class StudentPanelState extends ConsumerState<StudentPanel> {
                   0 => _Overview(
                     profile: p,
                     onPay: (e) => _takePayment(p, enrollmentId: e),
+                    onActivate: (g) => _activate(_full ?? p, g),
                   ),
                   1 => _Payments(
                     profile: p,
@@ -197,7 +289,8 @@ class StudentPanelState extends ConsumerState<StudentPanel> {
                     onPay: () => _takePayment(p),
                   ),
                   2 => _AttendanceTab(profile: p),
-                  _ => _Notes(profile: p, onEdit: () => _edit(p)),
+                  3 => _Notes(profile: p, onEdit: () => _edit(p)),
+                  _ => _ActionsTab(profile: p),
                 },
               ],
             ),
@@ -213,18 +306,7 @@ class StudentPanelState extends ConsumerState<StudentPanel> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        CircleAvatar(
-          radius: 28,
-          backgroundColor: AppColors.accentSoft,
-          child: Text(
-            initials(s.fullName),
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: AppColors.accentText,
-            ),
-          ),
-        ),
+        PersonAvatar(name: s.fullName, photo: s.photo, radius: 28),
         const SizedBox(width: 14),
         Expanded(
           child: Column(
@@ -264,6 +346,18 @@ class StudentPanelState extends ConsumerState<StudentPanel> {
                   padding: EdgeInsets.only(top: 6),
                   child: StatusChip('Yangi', tone: StatusTone.info),
                 ),
+              if (p.isArchived)
+                const Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Tooltip(
+                    message:
+                        'Guruhlardan chiqarilgan; davomat, to\'lov va boshqa ma\'lumotlari saqlangan.',
+                    child: StatusChip(
+                      'Arxivda',
+                      key: ValueKey('panel-archived'),
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -290,15 +384,87 @@ class StudentPanelState extends ConsumerState<StudentPanel> {
         PopupMenuButton<String>(
           key: const ValueKey('panel-menu'),
           tooltip: 'Sozlamalar',
-          // Editing has its own pencil; this menu is for adding another group.
-          onSelected: (_) => _addToGroup(_full ?? p),
-          itemBuilder: (_) => const <PopupMenuEntry<String>>[
-            PopupMenuItem(
-              key: ValueKey('menu-add-group'),
-              value: 'group',
-              child: Text('Boshqa guruhga qo\'shish'),
-            ),
-          ],
+          // Editing has its own pencil; this menu is for adding another
+          // group and for the photo.
+          onSelected: (value) {
+            final full = _full ?? p;
+            final scoped = widget.groupId == null
+                ? null
+                : full.groups
+                      .where((g) => g.groupId == widget.groupId)
+                      .firstOrNull;
+            switch (value) {
+              case 'photo':
+                _photo(p, remove: false);
+              case 'photo-remove':
+                _photo(p, remove: true);
+              case 'transfer':
+                _transfer(full);
+              case 'remove':
+                if (scoped != null) _removeFromGroup(full, scoped);
+              case 'archive':
+                _archive(full);
+              case 'unarchive':
+                _unarchive(full);
+              default:
+                _addToGroup(full);
+            }
+          },
+          itemBuilder: (_) {
+            final full = _full ?? p;
+            final inGroup = widget.groupId != null;
+            final scopedActive = full.groups.any(
+              (g) => g.groupId == widget.groupId && g.isActive,
+            );
+            return <PopupMenuEntry<String>>[
+              const PopupMenuItem(
+                key: ValueKey('menu-add-group'),
+                value: 'group',
+                child: Text('Boshqa guruhga qo\'shish'),
+              ),
+              if (full.activeGroups.isNotEmpty)
+                const PopupMenuItem(
+                  key: ValueKey('menu-transfer'),
+                  value: 'transfer',
+                  child: Text('Guruhni almashtirish'),
+                ),
+              const PopupMenuDivider(),
+              // From a group's page: leave THIS group. From O'quvchilar:
+              // the whole archive.
+              if (inGroup && scopedActive)
+                const PopupMenuItem(
+                  key: ValueKey('menu-remove-group'),
+                  value: 'remove',
+                  child: Text('Guruhdan chiqarish'),
+                ),
+              if (!inGroup && !full.isArchived)
+                const PopupMenuItem(
+                  key: ValueKey('menu-archive'),
+                  value: 'archive',
+                  child: Text('Arxivga o\'tkazish'),
+                ),
+              if (!inGroup && full.isArchived)
+                const PopupMenuItem(
+                  key: ValueKey('menu-unarchive'),
+                  value: 'unarchive',
+                  child: Text('Arxivdan chiqarish'),
+                ),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                key: const ValueKey('menu-photo'),
+                value: 'photo',
+                child: Text(
+                  s.photo == null ? 'Rasm yuklash' : 'Rasmni almashtirish',
+                ),
+              ),
+              if (s.photo != null)
+                const PopupMenuItem(
+                  key: ValueKey('menu-photo-remove'),
+                  value: 'photo-remove',
+                  child: Text('Rasmni o\'chirish'),
+                ),
+            ];
+          },
           child: Container(
             width: 40,
             height: 40,
@@ -319,7 +485,7 @@ class StudentPanelState extends ConsumerState<StudentPanel> {
       width: double.infinity,
       child: FilledButton(
         key: const ValueKey('panel-pay'),
-        onPressed: p.activeGroups.isEmpty ? null : () => _takePayment(p),
+        onPressed: p.payableGroups.isEmpty ? null : () => _takePayment(p),
         child: const Text('To\'lov qabul qilish'),
       ),
     );
@@ -436,15 +602,22 @@ const _caption = TextStyle(
 
 /// Umumiy: every group the student is in, and what happened lately.
 class _Overview extends StatelessWidget {
-  const _Overview({required this.profile, required this.onPay});
+  const _Overview({
+    required this.profile,
+    required this.onPay,
+    required this.onActivate,
+  });
 
   final StudentProfileData profile;
   final ValueChanged<int> onPay;
 
+  /// "Guruhni faollashtirish" on a group he left.
+  final ValueChanged<ProfileGroup> onActivate;
+
   @override
   Widget build(BuildContext context) {
     final active = profile.activeGroups;
-    final ended = profile.groups.where((g) => !g.isActive).toList();
+    final frozen = profile.frozenGroups;
     final now = DateTime.now();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -458,14 +631,10 @@ class _Overview extends StatelessWidget {
             ),
           ),
         for (final g in active) _GroupCard(group: g),
-        if (ended.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 4, bottom: 8),
-            child: Text(
-              'Chiqib ketgan: ${ended.map((g) => g.groupName).join(', ')}',
-              style: const TextStyle(fontSize: 13, color: AppColors.inkMuted),
-            ),
-          ),
+        // The groups he left stay on his profile, faded, each with a button to
+        // put him back.
+        for (final g in frozen)
+          _GroupCard(group: g, frozen: true, onActivate: () => onActivate(g)),
         const SizedBox(height: 10),
         const Text('So\'nggi faollik', style: _caption),
         const SizedBox(height: 4),
@@ -485,9 +654,13 @@ class _Overview extends StatelessWidget {
 }
 
 class _GroupCard extends StatelessWidget {
-  const _GroupCard({required this.group});
+  const _GroupCard({required this.group, this.frozen = false, this.onActivate});
 
   final ProfileGroup group;
+
+  /// A group he left: drawn faded, with "Faollashtirish".
+  final bool frozen;
+  final VoidCallback? onActivate;
 
   @override
   Widget build(BuildContext context) {
@@ -505,11 +678,13 @@ class _GroupCard extends StatelessWidget {
         ],
       ),
     );
+    final faded = frozen ? 0.5 : 1.0;
     return Container(
       key: ValueKey('group-card-${g.groupId}'),
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
+        color: frozen ? AppColors.neutralBg.withValues(alpha: 0.5) : null,
         borderRadius: BorderRadius.circular(AppRadius.card),
         border: Border.all(color: AppColors.border),
       ),
@@ -519,59 +694,275 @@ class _GroupCard extends StatelessWidget {
           Row(
             children: <Widget>[
               Expanded(
-                child: Text(
-                  g.groupName,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
+                child: Opacity(
+                  opacity: faded,
+                  child: Text(
+                    g.groupName,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
-              g.balance > 0
-                  ? StatusChip(
-                      'Qarz ${CurrencyFormatter.format(g.balance)}',
-                      tone: StatusTone.danger,
-                    )
-                  : const StatusChip('To\'langan', tone: StatusTone.ok),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: <Widget>[
-              fact('O\'qituvchi', g.teacherName ?? '–'),
-              fact(
-                'Dars vaqti',
-                g.schedule.isEmpty
-                    ? 'Jadval kiritilmagan'
-                    : slotsWithEnd(g.schedule),
+              Opacity(
+                opacity: faded,
+                child: g.balance > 0
+                    ? StatusChip(
+                        'Qarz ${CurrencyFormatter.format(g.balance)}',
+                        tone: StatusTone.danger,
+                      )
+                    : const StatusChip('To\'langan', tone: StatusTone.ok),
               ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: <Widget>[
-              fact('Oylik narx', CurrencyFormatter.format(g.feeAmount)),
-              fact('Qo\'shilgan', dayMonth(g.joinedAt)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: <Widget>[
-              AttendanceBars(g.attendance.recent),
-              const SizedBox(width: 10),
-              Text(
-                ratePercent(g.attendance.rate),
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
+              if (frozen && onActivate != null) ...<Widget>[
+                const SizedBox(width: 8),
+                FilledButton.tonal(
+                  key: ValueKey('activate-${g.groupId}'),
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  onPressed: onActivate,
+                  child: const Text('Guruhni faollashtirish'),
                 ),
-              ),
-              const SizedBox(width: 6),
-              const Text('davomat', style: _caption),
+              ],
             ],
+          ),
+          if (frozen)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                g.endedAt == null
+                    ? 'Muzlatilgan'
+                    : 'Muzlatilgan · ${dayMonth(g.endedAt!)}da chiqqan',
+                key: ValueKey('frozen-${g.groupId}'),
+                style: const TextStyle(fontSize: 12, color: AppColors.inkMuted),
+              ),
+            ),
+          const SizedBox(height: 10),
+          Opacity(
+            opacity: faded,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    fact('O\'qituvchi', g.teacherName ?? '–'),
+                    fact(
+                      'Dars vaqti',
+                      g.schedule.isEmpty
+                          ? 'Jadval kiritilmagan'
+                          : slotsWithEnd(g.schedule),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: <Widget>[
+                    fact('Oylik narx', CurrencyFormatter.format(g.feeAmount)),
+                    fact('Qo\'shilgan', dayMonth(g.joinedAt)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: <Widget>[
+                    AttendanceBars(g.attendance.recent),
+                    const SizedBox(width: 10),
+                    Text(
+                      ratePercent(g.attendance.rate),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Text('davomat', style: _caption),
+                  ],
+                ),
+              ],
+            ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// "Eski guruhdan qarz": shown until the first payment on the new group.
+class _TransferNoticeCard extends StatelessWidget {
+  const _TransferNoticeCard({required this.notice});
+
+  final TransferNotice notice;
+
+  @override
+  Widget build(BuildContext context) {
+    final n = notice;
+    return Container(
+      key: ValueKey('transfer-notice-${n.fromGroupId}'),
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.warnBg,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          const Icon(
+            Icons.swap_horiz_rounded,
+            size: 20,
+            color: AppColors.warnText,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Eski guruhdan qarz: ${n.fromGroupName} — '
+              '${CurrencyFormatter.format(n.debt)}. ${n.toGroupName} guruhiga '
+              'o\'tgan; shu guruhda birinchi to\'lov qilinguncha eslatib turiladi.',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.warnText,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Amallar: what was done to his place in the center, newest first, with the
+/// reason that was written and what he owed at the time.
+class _ActionsTab extends StatelessWidget {
+  const _ActionsTab({required this.profile});
+
+  final StudentProfileData profile;
+
+  static ({String title, String detail, Color color}) _words(StudentEvent e) {
+    final group = e.groupName ?? '';
+    return switch (e.kind) {
+      'added' => (
+        title: 'Guruhga qo\'shildi',
+        detail: group,
+        color: AppColors.okText,
+      ),
+      'activated' => (
+        title: 'Guruh faollashtirildi',
+        detail: group,
+        color: AppColors.okText,
+      ),
+      'removed' => (
+        title: 'Guruhdan chiqarildi',
+        detail: group,
+        color: AppColors.dangerText,
+      ),
+      'transferred' => (
+        title: 'Guruh almashtirildi',
+        detail: '$group → ${e.toGroupName ?? ''}',
+        color: AppColors.accentText,
+      ),
+      'archived' => (
+        title: 'Arxivga o\'tkazildi',
+        detail: '',
+        color: AppColors.dangerText,
+      ),
+      _ => (title: 'Arxivdan chiqarildi', detail: '', color: AppColors.okText),
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    if (profile.events.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 16),
+        child: Text(
+          'Hali amallar yo\'q.',
+          key: ValueKey('actions-empty'),
+          style: TextStyle(color: AppColors.inkMuted),
+        ),
+      );
+    }
+    return Column(
+      key: const ValueKey('actions-list'),
+      children: <Widget>[
+        for (final e in profile.events)
+          Container(
+            key: ValueKey('event-${e.id}'),
+            padding: const EdgeInsets.symmetric(vertical: 10),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: AppColors.divider)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                SizedBox(
+                  width: 78,
+                  child: Text(
+                    dayLabel(e.at, now),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppColors.inkMuted,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      Text(
+                        _words(e).title,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: _words(e).color,
+                        ),
+                      ),
+                      if (_words(e).detail.isNotEmpty)
+                        Text(
+                          _words(e).detail,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      if (e.note != null)
+                        Text(
+                          'Izoh: ${e.note}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.inkSecondary,
+                          ),
+                        ),
+                      if (e.debt != null &&
+                          e.kind != 'added' &&
+                          e.kind != 'activated' &&
+                          e.kind != 'unarchived')
+                        Text(
+                          e.debt! > 0
+                              ? 'Qarzi: ${CurrencyFormatter.format(e.debt!)}'
+                              : 'Qarzi yo\'q — hammasi to\'langan',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: e.debt! > 0
+                                ? AppColors.dangerText
+                                : AppColors.okText,
+                          ),
+                        ),
+                      if (e.byName != null)
+                        Text(
+                          e.byName!,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.inkMuted,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }
@@ -666,7 +1057,7 @@ class _Payments extends StatelessWidget {
             ),
             OutlinedButton(
               key: const ValueKey('payments-pay'),
-              onPressed: profile.activeGroups.isEmpty ? null : onPay,
+              onPressed: profile.payableGroups.isEmpty ? null : onPay,
               child: const Text('To\'lov qabul qilish'),
             ),
           ],

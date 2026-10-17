@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 StudentRow row(
   int id, {
   bool active = true,
+  bool archived = false,
   bool debtor = false,
   bool atRisk = false,
   bool isNew = false,
@@ -19,6 +20,7 @@ StudentRow row(
   createdAt: DateTime(2026, 10, 1),
   groups: groups,
   isActive: active,
+  isArchived: archived,
   isDebtor: debtor,
   isAtRisk: atRisk,
   isNew: isNew,
@@ -46,21 +48,31 @@ void main() {
     row(1, debtor: true, balance: 390000, groups: [english], isNew: true),
     row(2, atRisk: true, groups: [english, math]),
     row(3, groups: [math]),
-    row(4, active: false),
+    row(4, active: false, archived: true),
     row(5, debtor: true, balance: 100000, groups: [math]),
+    // Between groups, not archived.
+    row(6, active: false),
+    // Archived, but still owes.
+    row(7, active: false, archived: true, debtor: true, balance: 50000),
   ];
 
-  test('"Hammasi" is the active students and "Arxiv" is everyone else', () {
-    expect(filterStudents(rows).map((s) => s.id), [1, 2, 3, 5]);
-    expect(filterStudents(rows, tab: StudentTab.archive).map((s) => s.id), [4]);
+  test('"Hammasi" is everyone not archived and "Arxiv" only the archived', () {
+    // 6 is between groups: still in "Hammasi", not in the archive.
+    expect(filterStudents(rows).map((s) => s.id), [1, 2, 3, 5, 6]);
+    expect(filterStudents(rows, tab: StudentTab.archive).map((s) => s.id), [
+      4,
+      7,
+    ]);
   });
 
   test(
     'each tab holds what its name says, and the counts agree with the people',
     () {
+      // An archived student who still owes stays where he can be collected from.
       expect(filterStudents(rows, tab: StudentTab.debtors).map((s) => s.id), [
         1,
         5,
+        7,
       ]);
       expect(filterStudents(rows, tab: StudentTab.atRisk).map((s) => s.id), [
         2,
@@ -110,7 +122,17 @@ void main() {
     // It says it is about lessons, and that there is no debt.
     expect(statusOf(row(2, atRisk: true)).hint, contains('Qarzi yo\'q'));
     expect(statusOf(row(3)).text, 'To\'langan');
-    expect(statusOf(row(4, active: false)).text, 'Arxiv');
+    expect(statusOf(row(4, active: false, archived: true)).text, 'Arxiv');
+    expect(statusOf(row(6, active: false)).text, 'Guruhsiz');
+    // Debt is never hidden, even for someone archived or between groups.
+    expect(
+      statusOf(row(7, active: false, archived: true, debtor: true)).text,
+      'Arxiv · qarzi bor',
+    );
+    expect(
+      statusOf(row(8, active: false, debtor: true)).text,
+      'Guruhsiz · qarzi bor',
+    );
     // A debt outweighs the risk.
     expect(statusOf(row(5, debtor: true, atRisk: true)).text, 'Qarzdor');
   });

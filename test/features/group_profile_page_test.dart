@@ -427,6 +427,25 @@ void main() {
     expect(find.textContaining('Guruh: '), findsOneWidget);
   });
 
+  testWidgets('the student list has no "remove" button any more', (
+    tester,
+  ) async {
+    await pump(tester, app(FakeGroups(data()), rig()));
+    expect(find.byIcon(Icons.person_remove_outlined), findsNothing);
+    expect(find.byTooltip('Chiqarish'), findsNothing);
+  });
+
+  testWidgets(
+    'removing is in the profile\'s three dots: this group, not archive',
+    (tester) async {
+      await pump(tester, app(FakeGroups(data()), rig()));
+      await tester.tap(find.byKey(const ValueKey('panel-menu')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('menu-remove-group')), findsOneWidget);
+      expect(find.byKey(const ValueKey('menu-archive')), findsNothing);
+    },
+  );
+
   testWidgets('a payment taken on the profile reloads the group page', (
     tester,
   ) async {

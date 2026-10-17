@@ -3,7 +3,7 @@ from datetime import datetime, time
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from .. import clock, db, funnel, schedule
+from .. import clock, db, funnel, schedule, student_events
 from ..deps import CurrentUser, get_current_user
 from ..phone import is_valid_uzbek_phone, normalize
 from ..schemas import (
@@ -13,7 +13,15 @@ from ..schemas import (
     PhoneOwner,
     ActivityItem,
     AddedToGroup,
+    ActionResult,
     AddToGroupRequest,
+    ArchiveRequest,
+    RemoveFromGroupRequest,
+    StudentEvent,
+    TransferNotice,
+    TransferRequest,
+    TransferResult,
+    UnarchiveRequest,
     ProfileAttendance,
     ProfileGroup,
     ProfileMark,
@@ -28,7 +36,7 @@ from ..schemas import (
     UpdateStudentRequest,
 )
 from ..money import service as money
-from .enrollments import enroll
+from .enrollments import enroll, withdraw
 
 router = APIRouter(prefix="/students", tags=["students"], dependencies=[Depends(get_current_user)])
 
@@ -145,6 +153,7 @@ async def list_students(q: str | None = None):
             attendance_rate=attendance.rate,
             is_debtor=row["balance"] > 0,
             is_active=bool(mine),
+            is_archived=row["archived_at"] is not None,
             is_at_risk=bool(mine) and attendance.rate is not None and attendance.total >= 3 and attendance.rate < AT_RISK_BELOW,
         )
         items.append(StudentListItem(**data))
@@ -332,7 +341,7 @@ async def student_profile(student_id: int):
         enrollments = await conn.fetch(
             """
             select e.id as enrollment_id, e.group_id, g.name as group_name, sub.name as subject_name,
-                   t.full_name as teacher_name, g.fee_amount, e.joined_at, e.status,
+                   t.full_name as teacher_name, g.fee_amount, e.joined_at, e.status, e.ended_at,
                    eb.owed as balance
             from enrollments e
             join groups g on g.id = e.group_id
@@ -405,6 +414,34 @@ async def student_profile(student_id: int):
             """,
             student_id,
         )
+        events = await conn.fetch(
+            """
+            select ev.id, ev.kind, ev.group_id, ev.group_name, ev.to_group_id, ev.to_group_name, ev.note, ev.debt,
+                   u.full_name as by_name, ev.created_at as at
+            from student_events ev left join users u on u.id = ev.created_by
+            where ev.student_id = $1
+            order by ev.created_at desc, ev.id desc
+            limit 100
+            """,
+            student_id,
+        )
+        # A move whose old group is still owed and whose new group has not
+        # had a payment yet: reminded until the first payment on the new one.
+        notices = await conn.fetch(
+            """
+            select ev.group_id as from_group_id, ev.group_name as from_group_name,
+                   ev.to_group_id, ev.to_group_name, eb.owed as debt, ev.created_at as at
+            from student_events ev
+            join enrollment_balances eb on eb.enrollment_id = ev.enrollment_id
+            where ev.student_id = $1 and ev.kind = 'transferred' and eb.owed > 0
+              and not exists (
+                select 1 from payments p
+                where p.enrollment_id = ev.to_enrollment_id and p.kind = 'payment' and p.status = 'valid'
+              )
+            order by ev.created_at desc
+            """,
+            student_id,
+        )
     activity = _activity(enrollments, charges, missed, payments)
     today = clock.today()
     student = Student(**{k: v for k, v in row.items() if k not in ("is_new", "owed")})
@@ -434,6 +471,8 @@ async def student_profile(student_id: int):
         overdue_days=max((today - debt_since).days, 0) if debt_since else 0,
         activity=activity,
         marks=[ProfileMark(at=m["at"], group_id=m["group_id"], group_name=m["group_name"], status=m["status"]) for m in reversed(marks)][:30],
+        events=[StudentEvent(**e) for e in events],
+        transfer_notices=[TransferNotice(**n) for n in notices],
     )
 
 
@@ -481,6 +520,131 @@ def _activity(enrollments, charges, missed, payments) -> list[ActivityItem]:
         )
     items.sort(key=lambda i: i.at, reverse=True)
     return items[:12]
+
+
+def _need_note(note: str, what: str) -> str:
+    note = (note or "").strip()
+    if not note:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{what} sababini (izoh) yozing.")
+    return note
+
+
+async def _student_for_update(conn, student_id: int):
+    row = await conn.fetchrow("select * from students where id = $1 for update", student_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "O'quvchi topilmadi.")
+    return row
+
+
+@router.post("/{student_id}/archive", response_model=ActionResult)
+async def archive_student(student_id: int, payload: ArchiveRequest, user: CurrentUser = Depends(get_current_user)):
+    """"Arxivga o'tkazish": he leaves every group he is in -- with a comment --
+    and is marked archived. His lessons, attendance, charges and payments all
+    stay; what he still owes is reported back."""
+    note = _need_note(payload.note, "Arxivga o'tkazish")
+    async with db.pool().acquire() as conn:
+        async with conn.transaction():
+            student = await _student_for_update(conn, student_id)
+            if student["archived_at"] is not None:
+                raise HTTPException(status.HTTP_409_CONFLICT, "O'quvchi allaqachon arxivda.")
+            active = await conn.fetch(
+                "select * from enrollments where student_id = $1 and status = 'active' order by id", student_id
+            )
+            for e in active:
+                debt = await withdraw(conn, dict(e), user.id, "O'quvchi arxivga o'tkazildi")
+                await student_events.log(
+                    conn, student_id, "removed", user.id,
+                    group_id=e["group_id"], enrollment_id=e["id"], note=note, debt=debt,
+                )
+            total = await conn.fetchval("select coalesce(sum(owed), 0)::bigint from enrollment_balances eb "
+                                        "join enrollments e on e.id = eb.enrollment_id where e.student_id = $1", student_id)
+            await conn.execute("update students set archived_at = now() where id = $1", student_id)
+            await student_events.log(conn, student_id, "archived", user.id, note=note, debt=total)
+            await money.audit(conn, user.id, "student", student_id, "archive", reason=note, after={"owed": total})
+    return ActionResult(debt=total)
+
+
+@router.post("/{student_id}/unarchive", response_model=ActionResult)
+async def unarchive_student(
+    student_id: int, payload: UnarchiveRequest, user: CurrentUser = Depends(get_current_user)
+):
+    """Takes him out of the archive. He is in no group yet: the groups he had
+    are on his profile, faded, each with a button to put him back."""
+    async with db.pool().acquire() as conn:
+        async with conn.transaction():
+            student = await _student_for_update(conn, student_id)
+            if student["archived_at"] is None:
+                raise HTTPException(status.HTTP_409_CONFLICT, "O'quvchi arxivda emas.")
+            await conn.execute("update students set archived_at = null where id = $1", student_id)
+            await student_events.log(conn, student_id, "unarchived", user.id, note=payload.note)
+            await money.audit(conn, user.id, "student", student_id, "unarchive", reason=payload.note)
+            owed = -await conn.fetchval("select balance from student_balances where student_id = $1", student_id)
+    return ActionResult(debt=max(owed or 0, 0))
+
+
+@router.post("/{student_id}/remove-from-group", response_model=ActionResult)
+async def remove_from_group(
+    student_id: int, payload: RemoveFromGroupRequest, user: CurrentUser = Depends(get_current_user)
+):
+    """He leaves this one group (with a comment); everything he did there stays.
+    Returns what he still owes on it, so the app can say whether he paid up."""
+    note = _need_note(payload.note, "Guruhdan chiqarish")
+    async with db.pool().acquire() as conn:
+        async with conn.transaction():
+            await _student_for_update(conn, student_id)
+            e = await conn.fetchrow(
+                "select * from enrollments where student_id = $1 and group_id = $2 and status = 'active'",
+                student_id, payload.group_id,
+            )
+            if e is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "O'quvchi bu guruhda emas.")
+            debt = await withdraw(conn, dict(e), user.id, "O'quvchi guruhdan chiqarildi")
+            await student_events.log(
+                conn, student_id, "removed", user.id,
+                group_id=payload.group_id, enrollment_id=e["id"], note=note, debt=debt,
+            )
+            await money.audit(
+                conn, user.id, "student", student_id, "remove_from_group", reason=note,
+                after={"group_id": payload.group_id, "owed": debt},
+            )
+    return ActionResult(debt=debt)
+
+
+@router.post("/{student_id}/transfer", response_model=TransferResult)
+async def transfer_student(
+    student_id: int, payload: TransferRequest, user: CurrentUser = Depends(get_current_user)
+):
+    """"Guruhni almashtirish": he leaves one group and joins another in one
+    step. The new group bills him by its own price and rule from today; what he
+    owed on the old one stays owed (and is shown on his profile until he makes
+    his first payment on the new group)."""
+    if payload.from_group_id == payload.to_group_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Boshqa guruhni tanlang.")
+    async with db.pool().acquire() as conn:
+        async with conn.transaction():
+            await _student_for_update(conn, student_id)
+            old = await conn.fetchrow(
+                "select * from enrollments where student_id = $1 and group_id = $2 and status = 'active'",
+                student_id, payload.from_group_id,
+            )
+            if old is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "O'quvchi eski guruhda emas.")
+            new, first_charge = await enroll(
+                conn, student_id=student_id, group_id=payload.to_group_id, joined_at=clock.today(),
+                created_by=user.id, log_event=False,
+            )
+            debt = await withdraw(conn, dict(old), user.id, "O'quvchi boshqa guruhga o'tdi")
+            await student_events.log(
+                conn, student_id, "transferred", user.id,
+                group_id=payload.from_group_id, to_group_id=payload.to_group_id,
+                enrollment_id=old["id"], to_enrollment_id=new["id"], note=payload.note, debt=debt,
+            )
+            await money.audit(
+                conn, user.id, "student", student_id, "transfer", reason=(payload.note or None),
+                after={"from_group_id": payload.from_group_id, "to_group_id": payload.to_group_id, "owed": debt},
+            )
+            group_name = await conn.fetchval("select name from groups where id = $1", payload.to_group_id)
+    return TransferResult(enrollment_id=new["id"], group_name=group_name, first_charge=first_charge, old_debt=debt)
 
 
 @router.post("/{student_id}/add-to-group", response_model=AddedToGroup, status_code=status.HTTP_201_CREATED)

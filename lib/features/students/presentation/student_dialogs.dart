@@ -48,7 +48,7 @@ class PaymentDialog extends ConsumerStatefulWidget {
 }
 
 class _PaymentDialogState extends ConsumerState<PaymentDialog> {
-  late final List<ProfileGroup> _groups = widget.profile.activeGroups;
+  late final List<ProfileGroup> _groups = widget.profile.payableGroups;
   late ProfileGroup? _group = _initialGroup();
   late final _amount = TextEditingController();
   final _note = TextEditingController();

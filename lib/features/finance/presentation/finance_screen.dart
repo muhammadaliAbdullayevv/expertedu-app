@@ -1205,6 +1205,16 @@ Future<bool?> showExpenseDialog(
   );
 }
 
+/// Opens the dialog that sets how a teacher is paid (owner only). True when
+/// it was saved.
+Future<bool?> showSalaryRuleDialog(
+  BuildContext context,
+  TeacherSalary teacher,
+) => showDialog<bool>(
+  context: context,
+  builder: (_) => _SalaryRuleDialog(teacher: teacher),
+);
+
 /// How a teacher is paid -- a percent of payments, a fixed amount a month,
 /// or no rule. Owner only; a group can override it (set from the group).
 class _SalaryRuleDialog extends ConsumerStatefulWidget {

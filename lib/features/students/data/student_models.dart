@@ -48,6 +48,7 @@ class StudentRow {
     required this.phone,
     required this.balance,
     required this.createdAt,
+    this.photo,
     this.groups = const [],
     this.attendanceRecent = const [],
     this.attendanceRate,
@@ -55,6 +56,7 @@ class StudentRow {
     this.isDebtor = false,
     this.isAtRisk = false,
     this.isActive = false,
+    this.isArchived = false,
   });
 
   final int id;
@@ -64,6 +66,9 @@ class StudentRow {
   /// > 0: owes this much; < 0: has paid ahead.
   final int balance;
   final DateTime createdAt;
+
+  /// Stored name of the profile photo; null = none.
+  final String? photo;
   final List<StudentGroupRef> groups;
 
   /// 'present' | 'late' | 'absent' | 'excused', oldest first, at most ten.
@@ -74,12 +79,16 @@ class StudentRow {
   final bool isAtRisk;
   final bool isActive;
 
+  /// In the archive: out of every group, everything kept.
+  final bool isArchived;
+
   factory StudentRow.fromJson(Map<String, dynamic> json) => StudentRow(
     id: json['id'] as int,
     fullName: json['full_name'] as String,
     phone: json['phone'] as String,
     balance: json['balance'] as int,
     createdAt: _dt(json['created_at']),
+    photo: json['photo'] as String?,
     groups: [
       for (final g in json['groups'] as List<dynamic>? ?? const [])
         StudentGroupRef.fromJson(g as Map<String, dynamic>),
@@ -91,6 +100,7 @@ class StudentRow {
     isDebtor: json['is_debtor'] as bool? ?? false,
     isAtRisk: json['is_at_risk'] as bool? ?? false,
     isActive: json['is_active'] as bool? ?? false,
+    isArchived: json['is_archived'] as bool? ?? false,
   );
 }
 
@@ -137,6 +147,7 @@ class ProfileGroup {
     required this.feeAmount,
     required this.joinedAt,
     required this.status,
+    this.endedAt,
     required this.balance,
     this.nextDueDate,
     this.debtSince,
@@ -152,6 +163,9 @@ class ProfileGroup {
   final int feeAmount;
   final DateTime joinedAt;
   final String status;
+
+  /// When he left it (a withdrawn group).
+  final DateTime? endedAt;
 
   /// > 0: owes this much on this group.
   final int balance;
@@ -173,6 +187,7 @@ class ProfileGroup {
     feeAmount: json['fee_amount'] as int,
     joinedAt: DateTime.parse(json['joined_at'] as String),
     status: json['status'] as String,
+    endedAt: _dtOrNull(json['ended_at']),
     balance: json['balance'] as int,
     nextDueDate: json['next_due_date'] == null
         ? null
@@ -305,6 +320,8 @@ class StudentProfileData {
     this.overdueDays = 0,
     this.activity = const [],
     this.marks = const [],
+    this.events = const [],
+    this.transferNotices = const [],
     this.scope,
   });
 
@@ -324,6 +341,32 @@ class StudentProfileData {
   final int overdueDays;
   final List<ActivityItem> activity;
   final List<ProfileMark> marks;
+
+  /// What was done to his place in the center, newest first (Amallar).
+  final List<StudentEvent> events;
+
+  /// Moves whose old group is still owed and whose new group has had no
+  /// payment yet.
+  final List<TransferNotice> transferNotices;
+
+  bool get isArchived => student.archivedAt != null;
+
+  /// The groups to show: every group he is in, then the ones he left (one
+  /// entry per group, the latest) -- those are shown faded.
+  List<ProfileGroup> get frozenGroups {
+    final active = {for (final g in groups.where((g) => g.isActive)) g.groupId};
+    final seen = <int>{};
+    return [
+      for (final g in groups)
+        if (!g.isActive && !active.contains(g.groupId) && seen.add(g.groupId))
+          g,
+    ];
+  }
+
+  /// Where a payment can be taken: the groups he is in, and any he left that
+  /// he still owes for (an archived student can still pay his debt).
+  List<ProfileGroup> get payableGroups =>
+      groups.where((g) => g.isActive || g.balance > 0).toList();
 
   List<ProfileGroup> get activeGroups =>
       groups.where((g) => g.isActive).toList();
@@ -363,6 +406,12 @@ class StudentProfileData {
       overdueDays: owed > 0 ? overdue : 0,
       activity: activity.where((a) => a.groupId == groupId).toList(),
       marks: marks.where((m) => m.groupId == groupId).toList(),
+      events: events
+          .where((e) => e.groupId == groupId || e.toGroupId == groupId)
+          .toList(),
+      transferNotices: transferNotices
+          .where((n) => n.fromGroupId == groupId || n.toGroupId == groupId)
+          .toList(),
       scope: mine.isEmpty ? null : mine.first,
     );
   }
@@ -394,7 +443,89 @@ class StudentProfileData {
           for (final m in json['marks'] as List<dynamic>? ?? const [])
             ProfileMark.fromJson(m as Map<String, dynamic>),
         ],
+        events: [
+          for (final e in json['events'] as List<dynamic>? ?? const [])
+            StudentEvent.fromJson(e as Map<String, dynamic>),
+        ],
+        transferNotices: [
+          for (final n
+              in json['transfer_notices'] as List<dynamic>? ?? const [])
+            TransferNotice.fromJson(n as Map<String, dynamic>),
+        ],
       );
+}
+
+/// One entry of the Amallar tab.
+class StudentEvent {
+  const StudentEvent({
+    required this.id,
+    required this.kind,
+    this.groupId,
+    this.groupName,
+    this.toGroupId,
+    this.toGroupName,
+    this.note,
+    this.debt,
+    this.byName,
+    required this.at,
+  });
+
+  final int id;
+
+  /// 'added' | 'removed' | 'transferred' | 'archived' | 'unarchived' | 'activated'.
+  final String kind;
+  final int? groupId;
+  final String? groupName;
+  final int? toGroupId;
+  final String? toGroupName;
+  final String? note;
+
+  /// What he still owed then (on that group; in all for 'archived').
+  final int? debt;
+  final String? byName;
+  final DateTime at;
+
+  factory StudentEvent.fromJson(Map<String, dynamic> json) => StudentEvent(
+    id: json['id'] as int,
+    kind: json['kind'] as String,
+    groupId: json['group_id'] as int?,
+    groupName: json['group_name'] as String?,
+    toGroupId: json['to_group_id'] as int?,
+    toGroupName: json['to_group_name'] as String?,
+    note: json['note'] as String?,
+    debt: json['debt'] as int?,
+    byName: json['by_name'] as String?,
+    at: _dt(json['at']),
+  );
+}
+
+/// "Eski guruhdan qarz": he moved, the old group is still owed, and nothing
+/// was paid on the new one yet.
+class TransferNotice {
+  const TransferNotice({
+    required this.fromGroupId,
+    required this.fromGroupName,
+    required this.toGroupId,
+    required this.toGroupName,
+    required this.debt,
+    required this.at,
+  });
+
+  final int fromGroupId;
+  final String fromGroupName;
+  final int toGroupId;
+  final String toGroupName;
+  final int debt;
+  final DateTime at;
+
+  factory TransferNotice.fromJson(Map<String, dynamic> json) => TransferNotice(
+    fromGroupId: json['from_group_id'] as int,
+    fromGroupName: json['from_group_name'] as String,
+    toGroupId: json['to_group_id'] as int,
+    toGroupName: json['to_group_name'] as String,
+    debt: json['debt'] as int,
+    at: _dt(json['at']),
+  );
 }
 
 /// What "Boshqa guruhga qo'shish" made.
@@ -416,5 +547,27 @@ class AddedToGroup {
     groupName: json['group_name'] as String,
     firstCharge: json['first_charge'] as int,
     firstPayment: json['first_payment'] as int,
+  );
+}
+
+/// What a transfer made.
+class TransferResult {
+  const TransferResult({
+    required this.enrollmentId,
+    required this.groupName,
+    required this.firstCharge,
+    required this.oldDebt,
+  });
+
+  final int enrollmentId;
+  final String groupName;
+  final int firstCharge;
+  final int oldDebt;
+
+  factory TransferResult.fromJson(Map<String, dynamic> json) => TransferResult(
+    enrollmentId: json['enrollment_id'] as int,
+    groupName: json['group_name'] as String,
+    firstCharge: json['first_charge'] as int,
+    oldDebt: json['old_debt'] as int,
   );
 }

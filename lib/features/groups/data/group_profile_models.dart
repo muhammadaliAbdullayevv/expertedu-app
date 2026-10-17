@@ -5,16 +5,23 @@ import 'groups_repository.dart';
 DateTime _dt(Object? v) => DateTime.parse(v as String).toLocal();
 
 class GroupTeacher {
-  const GroupTeacher({required this.id, required this.fullName, this.phone});
+  const GroupTeacher({
+    required this.id,
+    required this.fullName,
+    this.phone,
+    this.photo,
+  });
 
   final int id;
   final String fullName;
   final String? phone;
+  final String? photo;
 
   factory GroupTeacher.fromJson(Map<String, dynamic> json) => GroupTeacher(
     id: json['id'] as int,
     fullName: json['full_name'] as String,
     phone: json['phone'] as String?,
+    photo: json['photo'] as String?,
   );
 }
 

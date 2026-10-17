@@ -1,8 +1,12 @@
+import 'dart:typed_data';
+
 import 'package:expert_edu_center/app/theme/app_theme.dart';
 import 'package:expert_edu_center/features/admissions/data/qabul_models.dart';
 import 'package:expert_edu_center/features/admissions/data/qabul_repository.dart';
 import 'package:expert_edu_center/features/billing/data/transactions_repository.dart';
 import 'package:expert_edu_center/features/enrollments/data/enrollments_repository.dart';
+import 'package:expert_edu_center/features/photos/photo_picker.dart';
+import 'package:expert_edu_center/features/photos/photos_repository.dart';
 import 'package:expert_edu_center/features/students/data/student_models.dart';
 import 'package:expert_edu_center/features/students/data/students_repository.dart';
 import 'package:expert_edu_center/features/students/presentation/open_student.dart';
@@ -53,6 +57,7 @@ StudentRow row(
   bool atRisk = false,
   bool isNew = false,
   bool active = true,
+  bool archived = false,
   List<StudentGroupRef>? groups,
   List<String> marks = const [],
   double? rate,
@@ -69,6 +74,7 @@ StudentRow row(
   isDebtor: debtor,
   isAtRisk: atRisk,
   isActive: active,
+  isArchived: archived,
 );
 
 ProfileGroup pgroup(
@@ -109,6 +115,9 @@ StudentProfileData profile(
   String? note,
   bool isNew = false,
   int overdueDays = 3,
+  DateTime? archivedAt,
+  List<StudentEvent> events = const [],
+  List<TransferNotice> notices = const [],
 }) => StudentProfileData(
   student: Student(
     id: id,
@@ -117,7 +126,10 @@ StudentProfileData profile(
     parentPhone: '998900000011',
     address: 'Chilonzor, 7-kvartal',
     note: note,
+    archivedAt: archivedAt,
   ),
+  events: events,
+  transferNotices: notices,
   isNew: isNew,
   balance: balance,
   paidTotal: payments
@@ -222,6 +234,11 @@ class FakeStudents implements StudentsRepository {
   final profileCalls = <int>[];
   final updates = <({int id, Map<String, dynamic> changes})>[];
   final added = <({int id, int groupId, int? amount, String? method})>[];
+  final archives = <({int id, String note})>[];
+  final unarchives = <({int id, String? note})>[];
+  final removals = <({int id, int groupId, String note})>[];
+  final transfers = <({int id, int from, int to, String? note})>[];
+  int debtToReport = 0;
   ApiException? updateError;
   int rowCalls = 0;
 
@@ -264,6 +281,43 @@ class FakeStudents implements StudentsRepository {
       marks: old.marks,
     );
     return profiles[id]!.student;
+  }
+
+  @override
+  Future<int> archive(int id, {required String note}) async {
+    archives.add((id: id, note: note));
+    return debtToReport;
+  }
+
+  @override
+  Future<void> unarchive(int id, {String? note}) async {
+    unarchives.add((id: id, note: note));
+  }
+
+  @override
+  Future<int> removeFromGroup(
+    int id, {
+    required int groupId,
+    required String note,
+  }) async {
+    removals.add((id: id, groupId: groupId, note: note));
+    return debtToReport;
+  }
+
+  @override
+  Future<TransferResult> transfer(
+    int id, {
+    required int fromGroupId,
+    required int toGroupId,
+    String? note,
+  }) async {
+    transfers.add((id: id, from: fromGroupId, to: toGroupId, note: note));
+    return TransferResult(
+      enrollmentId: 77,
+      groupName: 'Ingliz tili, Beginner A',
+      firstCharge: 150000,
+      oldDebt: debtToReport,
+    );
   }
 
   @override
@@ -380,6 +434,28 @@ class FakeQabul implements QabulRepository {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+class FakePhotos implements PhotosRepository {
+  final sets = <({PhotoOwner owner, int id})>[];
+  final removes = <({PhotoOwner owner, int id})>[];
+
+  @override
+  Future<String> set(PhotoOwner owner, int id, Uint8List png) async {
+    sets.add((owner: owner, id: id));
+    return 'student-$id-new.png';
+  }
+
+  @override
+  Future<void> remove(PhotoOwner owner, int id) async {
+    removes.add((owner: owner, id: id));
+  }
+
+  @override
+  Future<Uint8List> bytes(String name) => throw StateError('no picture');
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
 class Rig {
   Rig({
     List<StudentRow>? rows,
@@ -405,7 +481,7 @@ class Rig {
                  rate: 0.7,
                ),
                row(3, 'Madina Qodirova', balance: -120000, rate: 1.0),
-               row(4, 'Ketgan Odam', active: false),
+               row(4, 'Ketgan Odam', active: false, archived: true),
              ],
          profiles ??
              {
@@ -457,6 +533,8 @@ class Rig {
   final transactions = FakeTransactions();
   final enrollments = FakeEnrollments();
   final FakeQabul qabul;
+  final photos = FakePhotos();
+  Future<Uint8List?> Function() picker = () async => Uint8List.fromList([1]);
 }
 
 Future<void> pump(
@@ -474,6 +552,8 @@ Future<void> pump(
         transactionsRepositoryProvider.overrideWithValue(rig.transactions),
         enrollmentsRepositoryProvider.overrideWithValue(rig.enrollments),
         qabulRepositoryProvider.overrideWithValue(rig.qabul),
+        photosRepositoryProvider.overrideWithValue(rig.photos),
+        photoPickerProvider.overrideWithValue(() => rig.picker()),
       ],
       child: MaterialApp(
         theme: AppTheme.light(),
@@ -1573,5 +1653,57 @@ void main() {
         expect(colorOf(3), AppColors.divider);
       },
     );
+  });
+
+  group('profile photo', () {
+    Future<void> menu(WidgetTester tester) async {
+      await tester.tap(find.byKey(const ValueKey('panel-menu')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('the three dots can upload a photo for this student', (
+      tester,
+    ) async {
+      final rig = Rig();
+      await pump(tester, rig);
+      await menu(tester);
+      expect(find.byKey(const ValueKey('menu-photo-remove')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('menu-photo')));
+      await tester.pumpAndSettle();
+      expect(rig.photos.sets, [(owner: PhotoOwner.student, id: 1)]);
+    });
+
+    testWidgets('a student with a photo can have it removed', (tester) async {
+      final rig = Rig();
+      final old = rig.students.profiles[1]!;
+      rig.students.profiles[1] = StudentProfileData(
+        student: Student(
+          id: 1,
+          fullName: 'Botir Aliyev',
+          phone: '998900000001',
+          photo: 'student-1-abc.png',
+        ),
+        isNew: old.isNew,
+        balance: old.balance,
+        paidTotal: old.paidTotal,
+        groups: old.groups,
+        attendance: old.attendance,
+        payments: old.payments,
+      );
+      await pump(tester, rig);
+      await menu(tester);
+      await tester.tap(find.byKey(const ValueKey('menu-photo-remove')));
+      await tester.pumpAndSettle();
+      expect(rig.photos.removes, [(owner: PhotoOwner.student, id: 1)]);
+    });
+
+    testWidgets('adding to another group is still in the same menu', (
+      tester,
+    ) async {
+      await pump(tester, Rig());
+      await menu(tester);
+      expect(find.byKey(const ValueKey('menu-add-group')), findsOneWidget);
+      expect(find.byKey(const ValueKey('menu-photo')), findsOneWidget);
+    });
   });
 }

@@ -6,9 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/shell/shell_counts.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../core/formatters/phone_formatter.dart';
+import '../../../core/widgets/person_avatar.dart';
 import '../../../core/widgets/status_chip.dart';
 import '../../admissions/presentation/admissions_ui.dart';
-import '../../admissions/presentation/qabul_text.dart';
 import '../data/student_models.dart';
 import '../data/students_repository.dart';
 import 'add_student_dialog.dart';
@@ -122,7 +122,7 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       _selected = id;
       _search.clear();
       _subjectId = _groupId = _teacherId = null;
-      _tab = student != null && !student.isActive
+      _tab = student != null && student.isArchived
           ? StudentTab.archive
           : StudentTab.all;
       final list = filterStudents(rows, tab: _tab);
@@ -545,18 +545,7 @@ class _StudentRowView extends StatelessWidget {
               flex: 32,
               child: Row(
                 children: <Widget>[
-                  CircleAvatar(
-                    radius: 18,
-                    backgroundColor: AppColors.accentSoft,
-                    child: Text(
-                      initials(row.fullName),
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.accentText,
-                      ),
-                    ),
-                  ),
+                  PersonAvatar(name: row.fullName, photo: row.photo),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(

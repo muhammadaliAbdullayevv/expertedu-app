@@ -142,6 +142,8 @@ class Teacher(BaseModel):
 
 class TeacherListItem(Teacher):
     group_count: int
+    # Active students in their active groups.
+    student_count: int = 0
 
 
 class CreateStudentRequest(BaseModel):
@@ -173,6 +175,8 @@ class Student(BaseModel):
     address: str | None = None
     created_at: datetime
     photo: str | None = None
+    # Set while he is in the archive: out of every group, everything kept.
+    archived_at: datetime | None = None
 
 
 class StudentListItem(BaseModel):
@@ -202,6 +206,7 @@ class StudentListItem(BaseModel):
     is_debtor: bool = False
     is_at_risk: bool = False
     is_active: bool = False
+    is_archived: bool = False
 
 
 class CreateEnrollmentRequest(BaseModel):
@@ -1183,6 +1188,8 @@ class ProfileGroup(BaseModel):
     fee_amount: int
     joined_at: date
     status: str
+    # When he left it (a withdrawn group is shown faded on his profile).
+    ended_at: date | None = None
     # > 0: the student owes this much on this group (money.enrollment_balances).
     balance: int
     next_due_date: date | None = None
@@ -1224,6 +1231,11 @@ class StudentProfile(BaseModel):
     activity: list["ActivityItem"] = []
     # The last thirty marked lessons, newest first -- the Davomat tab.
     marks: list["ProfileMark"] = []
+    # What was done to his place in the center, newest first -- the Amallar tab.
+    events: list["StudentEvent"] = []
+    # Moves where the old group is still owed and nothing was paid on the new
+    # one yet -- shown until the first payment on the new group.
+    transfer_notices: list["TransferNotice"] = []
 
 
 class StudentGroupRef(BaseModel):
@@ -1256,6 +1268,63 @@ class AddToGroupRequest(BaseModel):
     joined_at: date
     first_payment_amount: int | None = None
     first_payment_method: str | None = None
+
+
+class StudentEvent(BaseModel):
+    """One entry of the Amallar tab: added, removed, moved, archived..."""
+
+    id: int
+    kind: str
+    group_id: int | None = None
+    group_name: str | None = None
+    to_group_id: int | None = None
+    to_group_name: str | None = None
+    note: str | None = None
+    # What he still owed then: on that group, or in all for 'archived'.
+    debt: int | None = None
+    by_name: str | None = None
+    at: datetime
+
+
+class TransferNotice(BaseModel):
+    from_group_id: int
+    from_group_name: str
+    to_group_id: int
+    to_group_name: str
+    # What the old group is still owed right now.
+    debt: int
+    at: datetime
+
+
+class ArchiveRequest(BaseModel):
+    note: str
+
+
+class UnarchiveRequest(BaseModel):
+    note: str | None = None
+
+
+class RemoveFromGroupRequest(BaseModel):
+    group_id: int
+    note: str
+
+
+class TransferRequest(BaseModel):
+    from_group_id: int
+    to_group_id: int
+    note: str | None = None
+
+
+class ActionResult(BaseModel):
+    # What he still owed (on the group, or in all) when it was done.
+    debt: int
+
+
+class TransferResult(BaseModel):
+    enrollment_id: int
+    group_name: str
+    first_charge: int
+    old_debt: int
 
 
 class AddedToGroup(BaseModel):
@@ -1321,8 +1390,8 @@ class GroupProfile(BaseModel):
 
 
 class TeacherGroupCard(BaseModel):
-    """One of a teacher's groups on their page: how big it is, when it meets,
-    and what it brought in this month."""
+    """One of a teacher's groups on their page: only what identifies it --
+    name, students, days and times. Its numbers live on the group's own page."""
 
     group_id: int
     name: str
@@ -1331,26 +1400,6 @@ class TeacherGroupCard(BaseModel):
     student_count: int
     capacity: int | None = None
     schedule: list[ScheduleSlot] = []
-    # The rule this group is paid by: its own, else the teacher's.
-    salary_method: str | None = None
-    salary_percent: float | None = None
-    salary_fixed: int | None = None
-    own_rule: bool = False
-    # This month: what the group's students paid, and the teacher's share of it.
-    collected: int = 0
-    share: int = 0
-    # Over the last 30 days; null until a lesson was marked.
-    attendance_rate: float | None = None
-
-
-class TeacherWeek(BaseModel):
-    """This week's lessons: planned, marked, cancelled, and the ones that
-    already took place but nobody marked."""
-
-    planned: int = 0
-    marked: int = 0
-    cancelled: int = 0
-    unmarked_past: int = 0
 
 
 class TeacherMonthPoint(BaseModel):
@@ -1379,8 +1428,6 @@ class TeacherProfile(BaseModel):
     earned: int = 0
     paid: int = 0
     remaining: int = 0
-    attendance: ProfileAttendance
-    week: TeacherWeek
     # Today's and tomorrow's lessons.
     lessons: list[TimetableLesson] = []
     # The six months up to the one shown, oldest first.

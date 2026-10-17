@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -93,6 +94,35 @@ class ApiClient {
             body: body == null ? null : jsonEncode(body),
           )
           .timeout(timeout ?? _timeout);
+      return _decode(response);
+    });
+  }
+
+  /// A file the server serves behind login (a profile photo): its bytes.
+  Future<Uint8List> getBytes(String path) {
+    return _guarded(() async {
+      final headers = await _headers();
+      headers.remove('Content-Type');
+      final response = await _http
+          .get(_uri(path), headers: headers)
+          .timeout(const Duration(seconds: 30));
+      _decode(response, expectJson: false);
+      return response.bodyBytes;
+    });
+  }
+
+  /// Sends [bytes] as the request body itself (a profile photo).
+  Future<dynamic> putBytes(
+    String path, {
+    required List<int> bytes,
+    String contentType = 'image/png',
+  }) {
+    return _guarded(() async {
+      final headers = await _headers();
+      headers['Content-Type'] = contentType;
+      final response = await _http
+          .put(_uri(path), headers: headers, body: bytes)
+          .timeout(const Duration(seconds: 30));
       return _decode(response);
     });
   }
@@ -207,7 +237,7 @@ class ApiClient {
     return headers;
   }
 
-  dynamic _decode(http.Response response) {
+  dynamic _decode(http.Response response, {bool expectJson = true}) {
     if (response.statusCode == 401) {
       _blockedUntilReauth = true;
       onUnauthorized?.call();
@@ -227,7 +257,7 @@ class ApiClient {
       throw ApiException(response.statusCode, message);
     }
 
-    if (response.bodyBytes.isEmpty) {
+    if (!expectJson || response.bodyBytes.isEmpty) {
       return null;
     }
     return jsonDecode(utf8.decode(response.bodyBytes));

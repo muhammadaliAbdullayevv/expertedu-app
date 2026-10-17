@@ -18,6 +18,8 @@ class Student {
     this.parentPhone,
     this.heardFrom,
     this.address,
+    this.photo,
+    this.archivedAt,
     this.balance = 0,
   });
 
@@ -30,6 +32,12 @@ class Student {
 
   /// Where they live, typed by hand.
   final String? address;
+
+  /// Stored name of the profile photo; null = none.
+  final String? photo;
+
+  /// Set while he is in the archive.
+  final DateTime? archivedAt;
 
   /// 'instagram' | 'telegram' | 'referral' | 'walk_in' | 'other'.
   final String? heardFrom;
@@ -47,6 +55,10 @@ class Student {
     parentPhone: json['parent_phone'] as String?,
     heardFrom: json['heard_from'] as String?,
     address: json['address'] as String?,
+    photo: json['photo'] as String?,
+    archivedAt: json['archived_at'] == null
+        ? null
+        : DateTime.parse(json['archived_at'] as String),
     balance: json['balance'] as int? ?? 0,
   );
 }
@@ -143,6 +155,55 @@ class StudentsRepository {
             )
             as Map<String, dynamic>;
     return AddedToGroup.fromJson(json);
+  }
+
+  /// "Arxivga o'tkazish": out of every group, everything kept. [note] is the
+  /// reason (required). Returns what he still owes.
+  Future<int> archive(int id, {required String note}) async {
+    final json =
+        await _api.post('/students/$id/archive', body: {'note': note})
+            as Map<String, dynamic>;
+    return json['debt'] as int;
+  }
+
+  Future<void> unarchive(int id, {String? note}) =>
+      _api.post('/students/$id/unarchive', body: {'note': note});
+
+  /// Out of one group, with a comment; everything he did there stays.
+  /// Returns what he still owes on it.
+  Future<int> removeFromGroup(
+    int id, {
+    required int groupId,
+    required String note,
+  }) async {
+    final json =
+        await _api.post(
+              '/students/$id/remove-from-group',
+              body: {'group_id': groupId, 'note': note},
+            )
+            as Map<String, dynamic>;
+    return json['debt'] as int;
+  }
+
+  /// "Guruhni almashtirish": leaves [fromGroupId], joins [toGroupId] (billed
+  /// by the new group's price from today).
+  Future<TransferResult> transfer(
+    int id, {
+    required int fromGroupId,
+    required int toGroupId,
+    String? note,
+  }) async {
+    final json =
+        await _api.post(
+              '/students/$id/transfer',
+              body: {
+                'from_group_id': fromGroupId,
+                'to_group_id': toGroupId,
+                'note': note,
+              },
+            )
+            as Map<String, dynamic>;
+    return TransferResult.fromJson(json);
   }
 
   Future<Student> get(int id) async {

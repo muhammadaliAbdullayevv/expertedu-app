@@ -117,12 +117,16 @@ class RosterEntry {
     required this.status,
     required this.balance,
     this.isNew = false,
+    this.studentPhoto,
   });
 
   final int enrollmentId;
   final int studentId;
   final String studentFullName;
   final String studentPhone;
+
+  /// Stored name of the student's photo; null = none.
+  final String? studentPhoto;
   final DateTime joinedAt;
   final String status;
 
@@ -138,6 +142,7 @@ class RosterEntry {
     studentId: json['student_id'] as int,
     studentFullName: json['student_full_name'] as String,
     studentPhone: json['student_phone'] as String,
+    studentPhoto: json['student_photo'] as String?,
     joinedAt: DateTime.parse(json['joined_at'] as String),
     status: json['status'] as String,
     balance: json['balance'] as int,

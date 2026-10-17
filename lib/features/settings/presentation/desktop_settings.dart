@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../core/extensions/build_context_x.dart';
 import '../../../core/formatters/currency_formatter.dart';
-import '../../../core/formatters/phone_formatter.dart';
 import '../../../core/widgets/table_card.dart';
 import '../../auth/application/session_controller.dart';
 import '../../groups/data/groups_repository.dart';
@@ -14,8 +13,6 @@ import '../../staff/presentation/staff_tab.dart';
 import '../../timetable/data/timetable_models.dart';
 import '../../timetable/presentation/group_schedule_dialog.dart';
 import '../../groups/presentation/group_form_dialog.dart';
-import '../../teachers/data/teachers_repository.dart';
-import '../../teachers/presentation/teacher_form_dialog.dart';
 
 /// Settings on the wide layout: the center's groups and teachers are
 /// managed here (desktop only -- the phone app adds groups from inside a
@@ -42,7 +39,7 @@ class DesktopSettings extends ConsumerWidget {
     return DefaultTabController(
       // Rebuilt from scratch if the tab count changes (another account).
       key: ValueKey<bool>(isOwner),
-      length: isOwner ? 4 : 3,
+      length: isOwner ? 3 : 2,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -65,7 +62,6 @@ class DesktopSettings extends ConsumerWidget {
               labelStyle: context.textTheme.labelLarge,
               tabs: <Tab>[
                 const Tab(text: 'Guruhlar'),
-                const Tab(text: 'O\'qituvchilar'),
                 if (isOwner) const Tab(text: 'Xodimlar'),
                 const Tab(text: 'Hisob'),
               ],
@@ -75,7 +71,6 @@ class DesktopSettings extends ConsumerWidget {
             child: TabBarView(
               children: <Widget>[
                 const _GroupsTab(),
-                const TeachersTab(),
                 if (isOwner) const StaffTab(),
                 Align(
                   alignment: Alignment.topCenter,
@@ -299,93 +294,6 @@ class _GroupsTabState extends ConsumerState<_GroupsTab> {
                       icon: const Icon(Icons.edit_outlined, size: 20),
                     ),
                   ],
-                ),
-              };
-            },
-          ),
-        );
-      },
-    );
-  }
-}
-
-/// The teachers table; the sidebar's "O'qituvchilar" shows it too.
-class TeachersTab extends ConsumerStatefulWidget {
-  const TeachersTab({super.key});
-
-  @override
-  ConsumerState<TeachersTab> createState() => _TeachersTabState();
-}
-
-class _TeachersTabState extends ConsumerState<TeachersTab> {
-  late Future<List<Teacher>> _future = ref
-      .read(teachersRepositoryProvider)
-      .list();
-
-  void _reload() {
-    setState(() => _future = ref.read(teachersRepositoryProvider).list());
-  }
-
-  Future<void> _openForm([Teacher? teacher]) async {
-    final saved = await showTeacherFormDialog(context, teacher: teacher);
-    if (saved == true) _reload();
-  }
-
-  static const _columns = <TableColumn>[
-    TableColumn('O\'qituvchi', flex: 3),
-    TableColumn('Telefon', flex: 2),
-    TableColumn('Guruhlar', flex: 1, alignEnd: true),
-    TableColumn('Izoh', flex: 3),
-    TableColumn('', width: 56),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<List<Teacher>>(
-      future: _future,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (snapshot.hasError) {
-          return _LoadFailed(error: snapshot.error!, onRetry: _reload);
-        }
-        final teachers = snapshot.data!;
-        return _AdminPage(
-          toolbar: <Widget>[
-            _muted(context, '${teachers.length} ta o\'qituvchi'),
-            const Spacer(),
-            FilledButton.icon(
-              onPressed: _openForm,
-              icon: const Icon(Icons.add),
-              label: const Text('Yangi o\'qituvchi'),
-            ),
-          ],
-          table: TableCard(
-            columns: _columns,
-            rowCount: teachers.length,
-            emptyText: 'Hali o\'qituvchilar yo\'q',
-            onRowTap: (row) => _openForm(teachers[row]),
-            cell: (context, row, column) {
-              final teacher = teachers[row];
-              return switch (column) {
-                0 => Text(
-                  teacher.fullName,
-                  overflow: TextOverflow.ellipsis,
-                  style: context.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                1 =>
-                  teacher.phone == null
-                      ? _muted(context, '—')
-                      : Text(PhoneFormatter.display(teacher.phone!)),
-                2 => Text('${teacher.groupCount ?? 0}'),
-                3 => _muted(context, teacher.note ?? ''),
-                _ => IconButton(
-                  tooltip: 'Tahrirlash',
-                  onPressed: () => _openForm(teacher),
-                  icon: const Icon(Icons.edit_outlined, size: 20),
                 ),
               };
             },

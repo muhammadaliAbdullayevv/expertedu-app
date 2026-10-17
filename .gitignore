@@ -49,3 +49,6 @@ server/.venv/
 server/__pycache__/
 server/**/__pycache__/
 server/.env
+
+# Profile photos are user data, never committed (PHOTOS_DIR)
+/server/photos/

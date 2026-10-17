@@ -95,7 +95,9 @@ create table if not exists students (
   -- Where they live, typed by hand (0019).
   address text,
   -- Stored file name of the profile photo; null = none (0020).
-  photo text
+  photo text,
+  -- Set while he is in the archive (0021).
+  archived_at timestamptz
 );
 
 -- A student can be enrolled in multiple groups at once, each its own
@@ -119,6 +121,25 @@ create table if not exists enrollments (
 create index if not exists idx_enrollments_group_active on enrollments(group_id) where status = 'active';
 create unique index if not exists uq_students_phone on students (phone);
 create index if not exists idx_enrollments_student on enrollments(student_id);
+
+-- Everything that happened to a student's place in the center, for the
+-- "Amallar" tab (0021). Never edited.
+create table if not exists student_events (
+  id bigserial primary key,
+  student_id bigint not null references students(id),
+  kind text not null check (kind in ('added', 'removed', 'transferred', 'archived', 'unarchived', 'activated')),
+  group_id bigint references groups(id),
+  group_name text,
+  to_group_id bigint references groups(id),
+  to_group_name text,
+  enrollment_id bigint references enrollments(id),
+  to_enrollment_id bigint references enrollments(id),
+  note text,
+  debt bigint,
+  created_by bigint references users(id),
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_student_events_student on student_events (student_id, created_at desc, id desc);
 
 -- LEGACY (kept as history since 0013): money now lives in charges, payments
 -- and payment_allocations. Nothing writes here any more.

@@ -159,6 +159,39 @@ Checked end to end (a new person at every step, same numbers on every screen): s
 
 **Groups' lists** show students who joined in the last two weeks first, marked "Yangi".
 
+## 3c. O'qituvchilar and profile photos
+
+The page is laid out like O'quvchilar: tabs **Faol / Guruhsiz / Arxiv** (counts
+for the first two), search by name or phone, the table (groups, students, what
+their groups collected this month, the teacher's pay) and the chosen teacher's
+page on the right. It replaces the old Settings tab.
+
+- **Pay shown = pay Finance shows.** `GET /teachers/{id}/profile` and the list use
+  `money.salary_month` -- the same calculation as Finance -- so the figures can
+  never differ. "Expected salary" means *the teacher's share of what is collected
+  so far this month* (percent of payments, or the fixed amount); it grows as
+  payments come in and is frozen when the owner closes the month. A month can be
+  browsed back with the arrows.
+- **Per group:** each active group shows days and times, students (with capacity),
+  what it collected, the teacher's share, and the rule it is paid by -- the
+  group's own percent wins over the teacher's.
+- **Only the owner** changes the agreement (percent / fixed): the same dialog and
+  endpoint as Finance (`PUT /finance/teachers/{id}/salary`).
+- **Extras:** this week's lessons (planned / marked / cancelled / over but never
+  marked), the groups' attendance over 30 days, today's and tomorrow's lessons,
+  and six months of earned/paid.
+- Clicking a group opens it inside Guruhlar (course -> group); Esc or the
+  breadcrumb comes back.
+- Archiving a teacher keeps their groups -- the confirmation says so.
+
+**Photos** (teachers and students): `PUT/DELETE /photos/{teachers|students}/{id}`
+(the picture is the request body: PNG, JPEG or WebP, up to 2 MB; the app crops the
+middle square and sends 400 px). The file is named
+`<kind>-<id>-<random>` in `PHOTOS_DIR` (never under the public `uploads/`),
+served only to logged-in users from `/photos/file/{name}`, one file per person
+(a new photo deletes the old one). Without a photo the first letters of the name
+are drawn on a colour taken from the name.
+
 ## 4. Settings
 
 `app_settings` (one row, owner-only edit, audited): `trial_limit_per_person` (1). The time zone is `Asia/Tashkent` from server config. Billing and pay rules are per group / per teacher, not settings.

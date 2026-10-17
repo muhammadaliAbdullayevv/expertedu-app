@@ -29,18 +29,27 @@ const _methods = <(String, String)>[
 Future<AddedToGroup?> showAddToGroupDialog(
   BuildContext context, {
   required StudentProfileData profile,
+  int? activateGroupId,
 }) {
   return showAdaptiveFormDialog<AddedToGroup>(
     context,
     maxWidth: 680,
-    child: AddToGroupDialog(profile: profile),
+    child: AddToGroupDialog(profile: profile, activateGroupId: activateGroupId),
   );
 }
 
 class AddToGroupDialog extends ConsumerStatefulWidget {
-  const AddToGroupDialog({super.key, required this.profile});
+  const AddToGroupDialog({
+    super.key,
+    required this.profile,
+    this.activateGroupId,
+  });
 
   final StudentProfileData profile;
+
+  /// "Guruhni faollashtirish": a group he left, already chosen when the list
+  /// loads -- only the start day and the first bill are left to confirm.
+  final int? activateGroupId;
 
   @override
   ConsumerState<AddToGroupDialog> createState() => _AddToGroupDialogState();
@@ -59,6 +68,8 @@ class _AddToGroupDialogState extends ConsumerState<AddToGroupDialog> {
   String _method = 'cash';
   bool _saving = false;
   String? _error;
+
+  bool _autoPicked = false;
 
   late final Set<int> _already = {
     for (final g in widget.profile.activeGroups) g.groupId,
@@ -141,6 +152,16 @@ class _AddToGroupDialogState extends ConsumerState<AddToGroupDialog> {
     final matches = searchGroups(all, _search.text);
     final shown = matches.take(_shown).toList();
     final g = _group;
+    final wanted = widget.activateGroupId;
+    if (!_autoPicked && wanted != null && groups.hasValue) {
+      _autoPicked = true;
+      final match = all.where((m) => m.groupId == wanted).firstOrNull;
+      if (match != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _pick(match);
+        });
+      }
+    }
     return SingleChildScrollView(
       padding: const EdgeInsets.only(bottom: 22),
       child: Column(
@@ -148,7 +169,9 @@ class _AddToGroupDialogState extends ConsumerState<AddToGroupDialog> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           DialogHeader(
-            title: 'Boshqa guruhga qo\'shish',
+            title: widget.activateGroupId == null
+                ? 'Boshqa guruhga qo\'shish'
+                : 'Guruhni faollashtirish',
             subtitle: widget.profile.student.fullName,
           ),
           Padding(
