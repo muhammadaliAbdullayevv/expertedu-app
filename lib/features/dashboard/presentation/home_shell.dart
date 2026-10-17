@@ -99,6 +99,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   final _dashboardKey = GlobalKey<DashboardScreenState>();
   final _subjectsKey = GlobalKey<SubjectsListScreenState>();
+
+  /// Guruhlar has its own navigator, so a course and a group open inside the
+  /// page -- the sidebar never goes away.
+  final _groupsNav = GlobalKey<NavigatorState>();
   final _studentsKey = GlobalKey<StudentsListScreenState>();
   final _debtorsKey = GlobalKey<DebtorsScreenState>();
   final _admissionsKey = GlobalKey<AdmissionsScreenState>();
@@ -120,7 +124,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     Destination.admissions: AdmissionsScreen(key: _admissionsKey),
     Destination.students: StudentsListScreen(key: _studentsKey),
     Destination.timetable: TimetableScreen(key: _timetableKey),
-    Destination.groups: SubjectsListScreen(key: _subjectsKey),
+    Destination.groups: Navigator(
+      key: _groupsNav,
+      onGenerateRoute: (_) => MaterialPageRoute<void>(
+        builder: (_) => SubjectsListScreen(key: _subjectsKey),
+      ),
+    ),
     Destination.teachers: const TeachersTab(),
     Destination.finance: FinanceScreen(key: _financeKey),
     Destination.reports: const StatsScreen(),
@@ -175,6 +184,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   void _go(Destination destination) {
     if (!destination.allowedFor(_role)) return;
+    // Clicking Guruhlar again, from inside a course or a group, goes back to its start.
+    if (destination == Destination.groups && _current == Destination.groups) {
+      _groupsNav.currentState?.popUntil((r) => r.isFirst);
+    }
     if (destination != _current) HapticFeedback.selectionClick();
     setState(() => _current = destination);
     // Keep the sidebar numbers fresh without asking on every click.
@@ -336,6 +349,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   }
 
   void _handleBackPressed(Destination current) {
+    if (current == Destination.groups &&
+        (_groupsNav.currentState?.canPop() ?? false)) {
+      _groupsNav.currentState!.pop();
+      return;
+    }
     final cleared = switch (current) {
       Destination.today =>
         _dashboardKey.currentState?.clearSearchIfActive() ?? false,

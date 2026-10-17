@@ -206,6 +206,17 @@ void main() {
     await mount(Size(_w.toDouble(), _h.toDouble()));
     await shot(tester, 'desktop-bugun');
 
+    if (_only == 'groups') {
+      await tester.tap(find.text('Guruhlar').first);
+      await shot(tester, 'groups-courses');
+      await tester.tap(find.text('Ingliz tili').first);
+      await shot(tester, 'groups-course');
+      await tester.tap(find.text('Beginner A').first);
+      await settle(tester);
+      await shot(tester, 'groups-group');
+      return;
+    }
+
     if (_only == 'students') {
       await tester.tap(find.text('O\'quvchilar').first);
       await shot(tester, 'students-table');

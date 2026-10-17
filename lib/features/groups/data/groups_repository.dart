@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../services/api/api_client.dart';
+import 'group_profile_models.dart';
 import '../../timetable/data/timetable_models.dart';
 
 final groupsRepositoryProvider = Provider<GroupsRepository>((ref) {
@@ -32,6 +33,8 @@ class Group {
     this.studentCount,
     this.subjectName,
     this.schedule = const <ScheduleSlot>[],
+    this.level,
+    this.startDate,
   });
 
   final int id;
@@ -75,6 +78,10 @@ class Group {
   /// The weekly lesson slots -- only populated by [GroupsRepository.list].
   final List<ScheduleSlot> schedule;
 
+  /// "Beginner", "IELTS"... and the day the group started.
+  final String? level;
+  final DateTime? startDate;
+
   factory Group.fromJson(Map<String, dynamic> json) => Group(
     id: json['id'] as int,
     subjectId: json['subject_id'] as int?,
@@ -93,6 +100,10 @@ class Group {
     schedule: (json['schedule'] as List<dynamic>? ?? const <dynamic>[])
         .map((e) => ScheduleSlot.fromJson(e as Map<String, dynamic>))
         .toList(),
+    level: json['level'] as String?,
+    startDate: json['start_date'] == null
+        ? null
+        : DateTime.parse(json['start_date'] as String),
   );
 }
 
@@ -219,6 +230,13 @@ class GroupsRepository {
             )
             as Map<String, dynamic>;
     return Group.fromJson(json);
+  }
+
+  /// The group's profile page in one request.
+  Future<GroupProfileData> profile(int groupId) async {
+    final json =
+        await _api.get('/groups/$groupId/profile') as Map<String, dynamic>;
+    return GroupProfileData.fromJson(json);
   }
 
   Future<List<RosterEntry>> roster(int groupId) async {

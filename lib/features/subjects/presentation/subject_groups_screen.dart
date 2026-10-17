@@ -6,6 +6,7 @@ import '../../../core/formatters/thousands_input_formatter.dart';
 import '../../../core/widgets/bordered_list_tile.dart';
 import '../../groups/data/groups_repository.dart';
 import '../../groups/presentation/group_detail_screen.dart';
+import '../../groups/presentation/groups_breadcrumb.dart';
 import '../data/subjects_repository.dart';
 
 class SubjectGroupsScreen extends ConsumerStatefulWidget {
@@ -49,27 +50,33 @@ class _SubjectGroupsScreenState extends ConsumerState<SubjectGroupsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.subject.name),
-        actions: <Widget>[
-          IconButton(
-            icon: Icon(_searchVisible ? Icons.close : Icons.search),
-            onPressed: () => setState(() {
-              _searchVisible = !_searchVisible;
-              if (!_searchVisible) {
-                _searchController.clear();
-                _query = '';
-              }
-            }),
-          ),
-        ],
-      ),
+      backgroundColor: Colors.transparent,
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showCreateGroupSheet(context),
         child: const Icon(Icons.add),
       ),
       body: Column(
         children: <Widget>[
+          // Where you are inside Guruhlar -- the course is shown, the sidebar stays.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(32, 0, 24, 8),
+            child: Row(
+              children: <Widget>[
+                Expanded(child: GroupsBreadcrumb(course: widget.subject.name)),
+                IconButton(
+                  tooltip: 'Qidirish',
+                  icon: Icon(_searchVisible ? Icons.close : Icons.search),
+                  onPressed: () => setState(() {
+                    _searchVisible = !_searchVisible;
+                    if (!_searchVisible) {
+                      _searchController.clear();
+                      _query = '';
+                    }
+                  }),
+                ),
+              ],
+            ),
+          ),
           if (_searchVisible)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
@@ -129,8 +136,10 @@ class _SubjectGroupsScreenState extends ConsumerState<SubjectGroupsScreen> {
                       onTap: () async {
                         await Navigator.of(context).push<void>(
                           MaterialPageRoute(
-                            builder: (context) =>
-                                GroupDetailScreen(group: group),
+                            builder: (context) => GroupDetailScreen(
+                              group: group,
+                              courseName: widget.subject.name,
+                            ),
                           ),
                         );
                         _reload();
