@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -265,10 +266,12 @@ class Debtor(BaseModel):
 
 
 class TrialToday(BaseModel):
+    # The lead's id (named for older app builds).
     inquiry_id: int
     full_name: str
     phone: str
     subject_name: str | None
+    starts_at: datetime | None = None
 
 
 class MonthlyRevenue(BaseModel):
@@ -365,3 +368,316 @@ class FirstChargePreview(BaseModel):
     full_amount: int
     # False when joining on the due day itself: prorated == full, no choice.
     is_mid_cycle: bool
+
+
+# Admissions -----------------------------------------------------------------
+
+
+class UserBrief(BaseModel):
+    id: int
+    full_name: str
+    role: str
+
+
+class CreateLeadRequest(BaseModel):
+    full_name: str
+    phone: str
+    # Set by the offline outbox, so a lead made offline keeps one identity
+    # however many times it's sent.
+    client_id: UUID | None = None
+    parent_phone: str | None = None
+    subject_id: int | None = None
+    source: str | None = None
+    note: str | None = None
+    # Defaults to whoever creates the lead.
+    assigned_to: int | None = None
+    preferred_trial_date: date | None = None
+    # 'reject': 409 if this phone already has an open lead for the course.
+    # 'merge': add this inquiry to that lead's timeline instead and return
+    # it -- what the offline outbox sends, since nobody is there to decide.
+    on_duplicate: str = "reject"
+
+
+class UpdateLeadRequest(BaseModel):
+    # The version the operator was looking at; a stale one gets a 409.
+    version: int
+    full_name: str | None = None
+    phone: str | None = None
+    parent_phone: str | None = None
+    subject_id: int | None = None
+    source: str | None = None
+    note: str | None = None
+    assigned_to: int | None = None
+    preferred_trial_date: date | None = None
+
+
+class ChangeLeadStageRequest(BaseModel):
+    version: int
+    stage: str
+    reason: str | None = None
+    # With 'follow_up_later': when to call back (creates the task).
+    follow_up_at: datetime | None = None
+
+
+class Lead(BaseModel):
+    id: int
+    client_id: UUID
+    full_name: str
+    phone: str
+    parent_phone: str | None
+    note: str | None
+    subject_id: int | None
+    subject_name: str | None = None
+    source: str | None
+    stage: str
+    lost_reason: str | None
+    assigned_to: int | None
+    assigned_to_name: str | None = None
+    student_id: int | None
+    enrollment_id: int | None
+    enrolled_at: datetime | None
+    closed_at: datetime | None
+    preferred_trial_date: date | None
+    next_trial_at: datetime | None = None
+    next_trial_booking_id: int | None = None
+    next_task_due_at: datetime | None = None
+    last_contact_at: datetime | None = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+    # True when a create was folded into an existing open lead.
+    merged: bool = False
+
+
+class LeadPage(BaseModel):
+    items: list[Lead]
+    total: int
+
+
+class PhoneLookup(BaseModel):
+    """Everything known about a phone number: the student who has it, if
+    any, and every lead made with it -- the "contact" in one place."""
+
+    phone: str
+    student: PhoneOwner | None
+    leads: list[Lead]
+
+
+class CreateInteractionRequest(BaseModel):
+    kind: str
+    body: str
+
+
+class LeadInteraction(BaseModel):
+    id: int
+    lead_id: int
+    kind: str
+    body: str
+    old_stage: str | None
+    new_stage: str | None
+    booking_id: int | None
+    task_id: int | None
+    created_by: int | None
+    created_by_name: str | None = None
+    created_at: datetime
+
+
+class CreateFollowUpTaskRequest(BaseModel):
+    lead_id: int
+    title: str
+    due_at: datetime
+    assigned_to: int | None = None
+
+
+class UpdateFollowUpTaskRequest(BaseModel):
+    version: int
+    title: str | None = None
+    due_at: datetime | None = None
+    assigned_to: int | None = None
+
+
+class FollowUpTask(BaseModel):
+    id: int
+    lead_id: int
+    lead_full_name: str | None = None
+    lead_phone: str | None = None
+    lead_stage: str | None = None
+    title: str
+    due_at: datetime
+    assigned_to: int | None
+    assigned_to_name: str | None = None
+    status: str
+    completed_at: datetime | None
+    version: int
+    created_at: datetime
+
+
+class CreateTrialSessionRequest(BaseModel):
+    kind: str = "dedicated"
+    subject_id: int | None = None
+    group_id: int | None = None
+    teacher_id: int | None = None
+    room: str | None = None
+    starts_at: datetime
+    ends_at: datetime
+    capacity: int = 1
+    note: str | None = None
+
+
+class UpdateTrialSessionRequest(BaseModel):
+    version: int
+    teacher_id: int | None = None
+    room: str | None = None
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    capacity: int | None = None
+    note: str | None = None
+
+
+class TrialSessionBooking(BaseModel):
+    id: int
+    lead_id: int
+    lead_full_name: str
+    lead_phone: str
+    status: str
+    feedback: str | None
+
+
+class TrialSession(BaseModel):
+    id: int
+    kind: str
+    subject_id: int | None
+    subject_name: str | None = None
+    group_id: int | None
+    group_name: str | None = None
+    teacher_id: int | None
+    teacher_name: str | None = None
+    room: str | None
+    starts_at: datetime
+    ends_at: datetime
+    capacity: int
+    status: str
+    note: str | None
+    version: int
+    # Seats taken: scheduled, attended and absent bookings.
+    booked: int = 0
+    bookings: list[TrialSessionBooking] = []
+
+
+class CreateTrialBookingRequest(BaseModel):
+    lead_id: int
+    # An existing session, or a new one created together with the booking.
+    session_id: int | None = None
+    session: CreateTrialSessionRequest | None = None
+
+
+class RescheduleTrialBookingRequest(BaseModel):
+    session_id: int | None = None
+    session: CreateTrialSessionRequest | None = None
+    reason: str | None = None
+
+
+class TrialAttendanceRequest(BaseModel):
+    status: str  # 'attended' | 'absent'
+
+
+class TrialFeedbackRequest(BaseModel):
+    feedback: str
+    recommended_level: str | None = None
+
+
+class CancelRequest(BaseModel):
+    reason: str | None = None
+
+
+class TrialBooking(BaseModel):
+    id: int
+    lead_id: int
+    session_id: int
+    status: str
+    rescheduled_from_id: int | None
+    cancel_reason: str | None
+    attendance_marked_at: datetime | None
+    feedback: str | None
+    recommended_level: str | None
+    feedback_at: datetime | None
+    version: int
+    created_at: datetime
+    session: TrialSession | None = None
+
+
+class LeadDetail(BaseModel):
+    lead: Lead
+    interactions: list[LeadInteraction]
+    bookings: list[TrialBooking]
+    tasks: list[FollowUpTask]
+    student: PhoneOwner | None
+
+
+class EnrollLeadRequest(BaseModel):
+    """The enrollment wizard's confirmed data. Student fields are used only
+    when the lead isn't a student yet; an existing student is reused as-is."""
+
+    full_name: str
+    phone: str
+    parent_phone: str | None = None
+    heard_from: str | None = None
+    note: str | None = None
+    group_id: int
+    joined_at: date
+    first_month: str = "prorated"
+    discount_kind: str | None = None
+    discount_value: int | None = None
+    first_payment_amount: int | None = None
+    first_payment_method: str | None = None
+
+
+class LeadEnrolled(BaseModel):
+    lead_id: int
+    student: Student
+    reused_student: bool
+    enrollment_id: int
+    first_charge: int
+    first_payment: int
+
+
+class CountByKey(BaseModel):
+    key: str
+    count: int
+    enrolled: int = 0
+
+
+class AdmissionsReport(BaseModel):
+    """Admissions numbers for date_from..date_to, both inclusive, in the
+    center's calendar. Every rate is null when its denominator is 0."""
+
+    date_from: date
+    date_to: date
+    new_inquiries: int
+    # Bookings whose lesson falls in the period. A moved trial counts once,
+    # at its new time.
+    trials_booked: int
+    trials_attended: int
+    trials_absent: int
+    trials_cancelled: int
+    # attended / (attended + absent).
+    show_rate: float | None
+    # Leads enrolled in the period, whenever they first called.
+    enrollments: int
+    # Cohort: leads created in the period, and how many of those are
+    # enrolled by now.
+    cohort_size: int
+    cohort_enrolled: int
+    lead_conversion_rate: float | None
+    # Leads with an attended trial in the period, and how many of those are
+    # enrolled by now.
+    trial_cohort_size: int
+    trial_cohort_enrolled: int
+    trial_conversion_rate: float | None
+    # Right now, not for the period: booked trials in the next 7 days, and
+    # open follow-ups past due / due later today.
+    upcoming_trials: int
+    follow_ups_overdue: int
+    follow_ups_due_today: int
+    open_by_stage: list[CountByKey]
+    cohort_by_source: list[CountByKey]

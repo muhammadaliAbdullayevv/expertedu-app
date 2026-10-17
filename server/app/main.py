@@ -6,19 +6,24 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from . import db
-from .jobs import recurring_charges
+from .jobs import housekeeping, recurring_charges
 from .routes import (
+    admissions_report,
     auth,
     dashboard,
     debtors,
     enrollments,
+    follow_ups,
     groups,
     health,
     inquiries,
+    leads,
     students,
     subjects,
     teachers,
     transactions,
+    trials,
+    users,
 )
 
 _UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
@@ -27,11 +32,16 @@ _UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.connect()
-    billing_job = asyncio.create_task(recurring_charges.run_forever())
+    jobs = [
+        asyncio.create_task(recurring_charges.run_forever()),
+        asyncio.create_task(housekeeping.run_forever()),
+    ]
     yield
-    billing_job.cancel()
-    with suppress(asyncio.CancelledError):
-        await billing_job
+    for job in jobs:
+        job.cancel()
+    for job in jobs:
+        with suppress(asyncio.CancelledError):
+            await job
     await db.disconnect()
 
 
@@ -51,3 +61,8 @@ app.include_router(inquiries.router)
 app.include_router(dashboard.router)
 app.include_router(debtors.router)
 app.include_router(teachers.router)
+app.include_router(leads.router)
+app.include_router(trials.router)
+app.include_router(follow_ups.router)
+app.include_router(admissions_report.router)
+app.include_router(users.router)

@@ -11,8 +11,8 @@ import '../../../app/theme/app_theme.dart';
 import '../../billing/presentation/record_payment_sheet.dart';
 import '../../debtors/data/debtors_repository.dart';
 import '../../debtors/presentation/overdue_label.dart';
-import '../../inquiries/data/inquiries_repository.dart';
-import '../../inquiries/presentation/inquiry_card.dart';
+import '../../admissions/data/admissions_models.dart';
+import '../../admissions/presentation/lead_card.dart';
 import '../data/dashboard_repository.dart';
 
 /// The home screen on wide (desktop) layouts: the center's key numbers up
@@ -21,15 +21,14 @@ import '../data/dashboard_repository.dart';
 class DesktopDashboard extends ConsumerStatefulWidget {
   const DesktopDashboard({
     super.key,
-    required this.inquiries,
-    required this.onInquiriesChanged,
+    required this.leads,
+    required this.onOpenAdmissions,
     required this.onOpenDebtors,
   });
 
-  /// Owned by DashboardScreen. Calls are only logged from the phone app;
-  /// the desktop lists them so staff can follow up or convert them.
-  final Future<List<Inquiry>> inquiries;
-  final VoidCallback onInquiriesChanged;
+  /// Open leads, owned by DashboardScreen; they're worked in "Qabul".
+  final Future<List<Lead>> leads;
+  final VoidCallback onOpenAdmissions;
   final VoidCallback onOpenDebtors;
 
   @override
@@ -109,10 +108,7 @@ class DesktopDashboardState extends ConsumerState<DesktopDashboard> {
     // payments) -- side by side when there's room, stacked otherwise.
     final work = <Widget>[
       _TodayPanel(summary: summary),
-      _InquiriesPanel(
-        inquiries: widget.inquiries,
-        onChanged: widget.onInquiriesChanged,
-      ),
+      _LeadsPanel(leads: widget.leads, onOpenAll: widget.onOpenAdmissions),
     ];
     final money = <Widget>[
       _DebtorsPanel(
@@ -455,18 +451,24 @@ class _TodayRow extends StatelessWidget {
   }
 }
 
-class _InquiriesPanel extends StatelessWidget {
-  const _InquiriesPanel({required this.inquiries, required this.onChanged});
+class _LeadsPanel extends StatelessWidget {
+  const _LeadsPanel({required this.leads, required this.onOpenAll});
 
-  final Future<List<Inquiry>> inquiries;
-  final VoidCallback onChanged;
+  static const int _shown = 6;
+
+  final Future<List<Lead>> leads;
+  final VoidCallback onOpenAll;
 
   @override
   Widget build(BuildContext context) {
     return _Panel(
-      title: 'So\'rovlar',
-      child: FutureBuilder<List<Inquiry>>(
-        future: inquiries,
+      title: 'So\'nggi so\'rovlar',
+      action: TextButton(
+        onPressed: onOpenAll,
+        child: const Text('Qabul bo\'limi'),
+      ),
+      child: FutureBuilder<List<Lead>>(
+        future: leads,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
             return const Padding(
@@ -477,14 +479,13 @@ class _InquiriesPanel extends StatelessWidget {
           if (snapshot.hasError) {
             return Text('Xatolik: ${snapshot.error}');
           }
-          final list = snapshot.data ?? const <Inquiry>[];
+          final list = snapshot.data ?? const <Lead>[];
           if (list.isEmpty) {
-            return const _EmptyNote('Hali so\'rovlar yo\'q');
+            return const _EmptyNote('Ochiq so\'rovlar yo\'q');
           }
           return Column(
             children: <Widget>[
-              for (final inquiry in list)
-                InquiryCard(inquiry: inquiry, onChanged: onChanged),
+              for (final lead in list.take(_shown)) LeadCard(lead: lead),
             ],
           );
         },

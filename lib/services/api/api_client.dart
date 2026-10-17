@@ -65,17 +65,23 @@ class ApiClient {
     });
   }
 
+  /// [headers] are added to the usual ones -- e.g. an `Idempotency-Key`
+  /// for a write that may be resent (see server/app/idempotency.py).
   Future<dynamic> post(
     String path, {
     Object? body,
     bool withAuth = true,
     Duration? timeout,
+    Map<String, String>? headers,
   }) {
     return _guarded(() async {
       final response = await _http
           .post(
             _uri(path),
-            headers: await _headers(withAuth: withAuth),
+            headers: <String, String>{
+              ...await _headers(withAuth: withAuth),
+              ...?headers,
+            },
             body: body == null ? null : jsonEncode(body),
           )
           .timeout(timeout ?? _timeout);

@@ -3,18 +3,28 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/extensions/build_context_x.dart';
 import '../../../core/layout/breakpoints.dart';
+import '../../admissions/data/admissions_models.dart';
+import '../../admissions/data/admissions_repository.dart';
+import '../../admissions/presentation/admissions_ui.dart';
+import '../../admissions/presentation/lead_card.dart';
+import '../../admissions/presentation/lead_details_panel.dart';
+import '../../admissions/presentation/new_inquiry_dialog.dart';
 import '../../groups/data/groups_repository.dart';
-import '../../inquiries/data/inquiries_repository.dart';
-import '../../inquiries/presentation/add_inquiry_sheet.dart';
-import '../../inquiries/presentation/inquiry_card.dart';
 import '../../students/data/students_repository.dart';
 import 'desktop_dashboard.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
-  const DashboardScreen({super.key, required this.onOpenDebtors});
+  const DashboardScreen({
+    super.key,
+    required this.onOpenDebtors,
+    required this.onOpenAdmissions,
+  });
 
   /// Switches HomeShell to the (desktop-only) Qarzdorlar tab.
   final VoidCallback onOpenDebtors;
+
+  /// Switches HomeShell to the (desktop-only) Qabul tab.
+  final VoidCallback onOpenAdmissions;
 
   @override
   ConsumerState<DashboardScreen> createState() => DashboardScreenState();
@@ -27,12 +37,35 @@ class DashboardScreenState extends ConsumerState<DashboardScreen> {
   // it's actually built, so the desktop never fetches the full group and
   // student lists just to count them.
   Future<_Counts>? _countsFuture;
-  late Future<List<Inquiry>> _inquiriesFuture;
+  late Future<List<Lead>> _leadsFuture = _loadLeads();
+  late final ValueNotifier<int> _admissionsRefresh = ref.read(
+    admissionsRefreshProvider,
+  );
 
   @override
   void initState() {
     super.initState();
-    _inquiriesFuture = ref.read(inquiriesRepositoryProvider).list();
+    _admissionsRefresh.addListener(_reloadLeads);
+  }
+
+  @override
+  void dispose() {
+    _admissionsRefresh.removeListener(_reloadLeads);
+    super.dispose();
+  }
+
+  /// Open leads, offline-queued ones first. On the desktop the panel that
+  /// shows them is only built once the summary has loaded, so a failure
+  /// can arrive before anything listens -- marked handled here; the panel
+  /// still gets the error when it does listen.
+  Future<List<Lead>> _loadLeads() {
+    Future<List<Lead>> load() async {
+      final repo = ref.read(admissionsRepositoryProvider);
+      final page = await repo.listLeads();
+      return <Lead>[...await repo.pendingLeads(), ...page.items];
+    }
+
+    return load()..ignore();
   }
 
   Future<_Counts> _loadCounts() async {
@@ -43,10 +76,9 @@ class DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   /// Also refreshes the desktop summary -- its lead counts and today's
   /// trial lessons change with every logged call or status change.
-  void _reloadInquiries() {
-    setState(
-      () => _inquiriesFuture = ref.read(inquiriesRepositoryProvider).list(),
-    );
+  void _reloadLeads() {
+    if (!mounted) return;
+    setState(() => _leadsFuture = _loadLeads());
     _desktopKey.currentState?.reload();
   }
 
@@ -55,7 +87,7 @@ class DashboardScreenState extends ConsumerState<DashboardScreen> {
   void reload() {
     setState(() {
       if (_countsFuture != null) _countsFuture = _loadCounts();
-      _inquiriesFuture = ref.read(inquiriesRepositoryProvider).list();
+      _leadsFuture = _loadLeads();
     });
     _desktopKey.currentState?.reload();
   }
@@ -65,8 +97,21 @@ class DashboardScreenState extends ConsumerState<DashboardScreen> {
 
   /// Called from HomeShell's shared FAB -- see its GlobalKey\<DashboardScreenState\>.
   Future<void> showCreateSheet() async {
-    final logged = await showAddInquirySheet(context);
-    if (logged == true) _reloadInquiries();
+    final result = await showNewInquiryDialog(context);
+    if (result == null || !mounted) return;
+    refreshAdmissions(ref);
+    switch (result) {
+      case InquiryCreated(:final lead):
+        if (lead.isPending) {
+          showSnack(
+            context,
+            'Oflayn saqlandi — internet qaytganda yuboriladi.',
+          );
+        }
+        await showLeadDetails(context, leadId: lead.id, lead: lead);
+      case InquiryOpenExisting(:final leadId):
+        await showLeadDetails(context, leadId: leadId);
+    }
   }
 
   @override
@@ -74,8 +119,8 @@ class DashboardScreenState extends ConsumerState<DashboardScreen> {
     if (isWideLayout(context)) {
       return DesktopDashboard(
         key: _desktopKey,
-        inquiries: _inquiriesFuture,
-        onInquiriesChanged: _reloadInquiries,
+        leads: _leadsFuture,
+        onOpenAdmissions: widget.onOpenAdmissions,
         onOpenDebtors: widget.onOpenDebtors,
       );
     }
@@ -120,18 +165,15 @@ class DashboardScreenState extends ConsumerState<DashboardScreen> {
                 child: Text('So\'rovlar', style: context.textTheme.titleMedium),
               ),
               TextButton.icon(
-                onPressed: () async {
-                  final logged = await showAddInquirySheet(context);
-                  if (logged == true) _reloadInquiries();
-                },
+                onPressed: showCreateSheet,
                 icon: const Icon(Icons.add_call),
                 label: const Text('Qo\'ng\'iroq'),
               ),
             ],
           ),
           const SizedBox(height: 8),
-          FutureBuilder<List<Inquiry>>(
-            future: _inquiriesFuture,
+          FutureBuilder<List<Lead>>(
+            future: _leadsFuture,
             builder: (context, snapshot) {
               if (snapshot.connectionState != ConnectionState.done) {
                 return const Padding(
@@ -142,22 +184,17 @@ class DashboardScreenState extends ConsumerState<DashboardScreen> {
               if (snapshot.hasError) {
                 return Center(child: Text('Xatolik: ${snapshot.error}'));
               }
-              final inquiries = snapshot.data ?? const <Inquiry>[];
-              if (inquiries.isEmpty) {
+              final leads = snapshot.data ?? const <Lead>[];
+              if (leads.isEmpty) {
                 return const Padding(
                   padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Center(child: Text('Hali so\'rovlar yo\'q')),
+                  child: Center(child: Text('Ochiq so\'rovlar yo\'q')),
                 );
               }
               return Column(
-                children: inquiries
-                    .map(
-                      (inquiry) => InquiryCard(
-                        inquiry: inquiry,
-                        onChanged: _reloadInquiries,
-                      ),
-                    )
-                    .toList(),
+                children: <Widget>[
+                  for (final lead in leads) LeadCard(lead: lead),
+                ],
               );
             },
           ),

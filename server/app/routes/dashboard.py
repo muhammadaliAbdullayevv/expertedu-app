@@ -2,7 +2,7 @@ from datetime import date
 
 from fastapi import APIRouter, Depends
 
-from .. import clock, db
+from .. import admissions, clock, db
 from ..config import settings
 from ..deps import get_current_user
 from ..schemas import DashboardSummary, MonthlyRevenue, RecentPayment, TrialToday
@@ -65,11 +65,12 @@ async def get_dashboard():
             """
             select
               count(*) filter (where created_at >= now() - interval '7 days') as new_leads_this_week,
-              count(*) filter (where status in ('new', 'contacted', 'scheduled')) as open_leads,
-              count(*) filter (where status = 'new' and created_at < now() - interval '24 hours')
+              count(*) filter (where stage = any($1::text[])) as open_leads,
+              count(*) filter (where stage = 'new' and created_at < now() - interval '24 hours')
                 as unanswered_leads
-            from inquiries
-            """
+            from leads
+            """,
+            list(admissions.OPEN_STAGES),
         )
 
         # Recurring charges only -- an enrollment created today also has a
@@ -86,12 +87,15 @@ async def get_dashboard():
 
         trials = await conn.fetch(
             """
-            select i.id as inquiry_id, i.full_name, i.phone, s.name as subject_name
-            from inquiries i
-            left join subjects s on s.id = i.subject_id
-            where i.trial_date = $1 and i.status not in ('converted', 'lost')
-            order by i.full_name asc
+            select l.id as inquiry_id, l.full_name, l.phone, s.name as subject_name, ts.starts_at
+            from trial_bookings b
+            join trial_sessions ts on ts.id = b.session_id
+            join leads l on l.id = b.lead_id
+            left join subjects s on s.id = coalesce(ts.subject_id, l.subject_id)
+            where b.status = 'scheduled' and (ts.starts_at at time zone $1)::date = $2
+            order by ts.starts_at, l.full_name
             """,
+            tz,
             today,
         )
 

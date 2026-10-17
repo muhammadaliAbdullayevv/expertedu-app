@@ -1,13 +1,14 @@
 # Expert Edu Center
 
-CRM for a single education center (Expert Learning Center): call inquiries,
-subjects and groups, students and enrollments, monthly billing, payments and
-debts. The UI is in Uzbek.
+CRM for a single education center (Expert Learning Center): admissions
+(leads, trial lessons, follow-ups), subjects and groups, students and
+enrollments, monthly billing, payments and debts. The UI is in Uzbek.
 
-- **App** — Flutter, one codebase for Android, Windows and Linux.
-  Phones get a compact bottom-bar app; windows 840 px and wider get the
-  desktop layout (sidebar, dashboard, Qarzdorlar, groups/teachers in
-  Settings). See `lib/core/layout/breakpoints.dart`.
+- **App** — Flutter, one codebase for Windows, Linux and Android. The
+  desktop is the main target. Windows 840 px and wider get the desktop
+  layout (sidebar, dashboard, Qabul, Qarzdorlar, groups/teachers in
+  Settings); narrower ones and phones get a compact bottom-bar app. See
+  `lib/core/layout/breakpoints.dart`.
 - **Server** — FastAPI + asyncpg on PostgreSQL, in `server/`. Single-tenant:
   one deployment = one center. Only owner/admin accounts log in.
 
@@ -22,6 +23,57 @@ linux/packaging/     Fedora RPM spec, .desktop entry, icons, build script
 branding/            Logo + generate_icons.py (all platform icons)
 .github/workflows/   CI: Windows build
 ```
+
+## Admissions ("Qabul")
+
+Someone who calls or walks in is a **lead**, not a student: no group, no
+charge. A lead moves through
+
+    Yangi → Bog'lanildi → Sinov rejalashtirildi → Sinov o'tdi → Qaror kutilmoqda → O'quvchi bo'ldi
+
+or closes as "Qiziqmadi" / "Bog'lanib bo'lmadi" ("Keyinroq bog'lanish" stays
+open with a call-back task). The trial stages follow from trial bookings and
+attendance; a no-show or cancelled trial sends the lead back to "Bog'lanildi"
+with a follow-up task instead of closing it.
+
+- **Contacts** are identified by phone: the student with that number (one
+  student per phone) plus every lead made with it. At most one *open* lead
+  per phone per course.
+- **Trials** are sessions (time, teacher, room, seats) — dedicated, or guest
+  seats at a regular group's lesson — and bookings with their own
+  attendance and teacher feedback. Never an enrollment, never a charge.
+  Teacher/room/group clashes and full sessions are refused.
+- **Enrollment** happens only through "Guruhga yozish"
+  (`POST /leads/{id}/enroll`): one transaction that reuses or creates the
+  student, enrolls them with the first charge and optional first payment,
+  and links it all to the lead. It requires an `Idempotency-Key`, so a
+  retry returns the first result instead of enrolling twice.
+- **History**: `lead_interactions` is the lead's timeline and audit trail
+  (calls, notes, and a row for every change the server makes). It is
+  append-only, enforced by a trigger; leads are never deleted.
+- **Concurrent edits**: lead, task and session edits carry a `version`; an
+  edit made from a stale copy gets a 409.
+- **Reports** (`GET /admissions/report`): center-calendar dates, both ends
+  inclusive. "So'rovdan o'quvchiga" = of the leads created in the period,
+  how many are enrolled now; "Sinovdan o'quvchiga" = the same for leads with
+  an attended trial in the period; show rate = attended ÷ (attended +
+  absent). A booked trial never counts as an enrollment.
+
+### Offline
+
+Creating a lead, logging a call or note, adding a follow-up and booking a
+trial work without a connection: they go to a local SQLite outbox
+(`lib/services/sync/`) and `SyncEngine` sends them in order when the API is
+back. Each queued write carries its own `Idempotency-Key`, so a resend after
+a lost response is answered, not redone; a lead made offline whose phone
+already has an open lead for that course is merged into it. Writes the
+server refuses (e.g. the trial filled up) stay listed under
+"N ta yuborilmagan" with the reason, to retry or discard. Stage changes,
+attendance and enrollment need the server.
+
+The old `/inquiries` API still works for app builds before 1.7, mapped onto
+leads; its "convert" is refused (410), since only the enrollment step may
+create a student now.
 
 ## Billing in short
 
@@ -56,7 +108,9 @@ DATABASE_URL=postgresql://... JWT_SECRET=... \
 | `JWT_EXPIRES_DAYS` | no | Token lifetime, default 90 |
 | `CENTER_TIMEZONE` | no | Calendar used for due dates, default `Asia/Tashkent` |
 
-Tests: `cd server && .venv/bin/python -m pytest`
+Tests: `cd server && .venv/bin/pip install -r requirements-dev.txt && .venv/bin/python -m pytest`.
+Database tests start a throwaway PostgreSQL (needs `initdb`/`pg_ctl` on
+PATH) or use an empty database in `TEST_DATABASE_URL`.
 
 ### Upgrading an existing database
 
@@ -65,7 +119,7 @@ Migrations aren't tracked or applied automatically. Apply each new file in
 
 ```sh
 pg_dump "$DATABASE_URL" -Fc -f backup.dump
-psql "$DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f migrations/0007_student_intake.sql
+psql "$DATABASE_URL" -1 -v ON_ERROR_STOP=1 -f migrations/0008_admissions.sql
 ```
 
 Rollbacks, where provided, are in `server/migrations/rollback/`.
@@ -82,6 +136,14 @@ flutter run -d linux --dart-define=API_BASE_URL=http://127.0.0.1:8000
 flutter analyze && flutter test
 ```
 
+`test/integration/` runs the app's admissions code against a real API. It
+creates data, so only point it at a throwaway server:
+
+```sh
+flutter test test/integration --dart-define=API_BASE_URL=http://127.0.0.1:8000 \
+  --dart-define=E2E_PHONE=901234567 --dart-define=E2E_PASSWORD=...
+```
+
 | Platform | Build | Output |
 |---|---|---|
 | Android | `flutter build apk --release` | `build/app/outputs/flutter-apk/` |
@@ -95,7 +157,9 @@ ship the whole `build\windows\x64\runner\Release\` folder.
 Linux builds need `gtk3-devel` and `libsecret-devel`. Login tokens are kept in
 the system keyring (GNOME Keyring on Fedora Workstation).
 
-The version comes from `pubspec.yaml` (`version: 1.6.0+7` → RPM 1.6.0-7).
+The version comes from `pubspec.yaml` (`version: 1.7.0+8` → RPM 1.7.0-8).
+SQLite is bundled with the app (the `sqlite3` package's build hook), so
+desktop builds need no system SQLite.
 Android builds update themselves from `uploads/app/version.json` on the
 server; desktop builds don't.
 

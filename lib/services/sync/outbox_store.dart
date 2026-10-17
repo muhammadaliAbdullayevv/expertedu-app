@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sqflite/sqflite.dart' show ConflictAlgorithm;
 
 import '../local_db/local_database.dart';
 
@@ -20,25 +21,39 @@ class OutboxItem {
     required this.attemptCount,
     required this.lastError,
     required this.createdAt,
+    required this.idempotencyKey,
+    required this.description,
   });
 
   final int seq;
+
+  /// The record this write is about: the client-generated id of something
+  /// made offline, or a real server id as text.
   final String localId;
-  final String entity; // 'customer' | 'transaction'
   final String
-  op; // 'create' | 'update' | 'delete' | 'archive' | 'unarchive' | 'clear_debt'
+  entity; // 'lead' | 'lead_interaction' | 'follow_up_task' | 'trial_booking'
+  final String op; // 'create'
+
+  /// What to send -- see `SyncEngine` for the shape.
   final Map<String, dynamic> payload;
   final int? dependsOnSeq;
-  final String
-  status; // 'pending' | 'in_flight' | 'failed' | 'held' | 'discarded' | 'done'
+
+  /// 'pending' | 'in_flight' | 'failed' | 'discarded' | 'done'.
+  final String status;
   final int attemptCount;
   final String? lastError;
 
   /// When this write was first queued -- not when it was last attempted.
-  /// Lets SyncEngine notice a write that's been sitting unsent for an
-  /// abnormally long time (see `held`) and lets the pending-actions sheet
-  /// show staff how long something's actually been waiting.
   final DateTime createdAt;
+
+  /// Sent with every attempt, so the server does it once however many
+  /// times it arrives.
+  final String? idempotencyKey;
+
+  /// What staff see in the pending-changes list.
+  final String? description;
+
+  bool get isFailed => status == 'failed';
 
   factory OutboxItem.fromRow(Map<String, dynamic> row) {
     return OutboxItem(
@@ -52,9 +67,13 @@ class OutboxItem {
       attemptCount: row['attempt_count'] as int,
       lastError: row['last_error'] as String?,
       createdAt: DateTime.parse(row['created_at'] as String),
+      idempotencyKey: row['idempotency_key'] as String?,
+      description: row['description'] as String?,
     );
   }
 }
+
+const _openStatuses = "('pending', 'in_flight', 'failed')";
 
 /// The offline write queue. Every write made while there's no connectivity
 /// lands here first; `SyncEngine` drains it once the API is reachable again.
@@ -68,6 +87,8 @@ class OutboxStore {
     required String op,
     required String localId,
     required Map<String, dynamic> payload,
+    required String idempotencyKey,
+    required String description,
     int? dependsOnSeq,
   }) async {
     final db = await _localDb.outboxDb();
@@ -80,6 +101,8 @@ class OutboxStore {
       'status': 'pending',
       'attempt_count': 0,
       'created_at': DateTime.now().toIso8601String(),
+      'idempotency_key': idempotencyKey,
+      'description': description,
     });
   }
 
@@ -94,7 +117,7 @@ class OutboxStore {
     final rows = await db.query(
       'outbox',
       where:
-          "entity = ? and op = 'create' and local_id = ? and status in ('pending', 'in_flight', 'failed', 'held')",
+          "entity = ? and op = 'create' and local_id = ? and status in $_openStatuses",
       whereArgs: [entity, targetId],
       limit: 1,
     );
@@ -102,12 +125,15 @@ class OutboxStore {
     return rows.first['seq'] as int;
   }
 
-  /// The oldest pending/failed row whose dependency (if any) has finished.
+  /// The oldest pending row whose dependency (if any) has finished. A row
+  /// waiting on a failed one stays put until that's retried or discarded.
+  /// Failed rows aren't retried automatically: the server said no, and
+  /// sending the same thing again would get the same answer.
   Future<OutboxItem?> nextRunnable() async {
     final db = await _localDb.outboxDb();
     final rows = await db.rawQuery('''
       select o.* from outbox o
-      where o.status in ('pending', 'failed')
+      where o.status = 'pending'
         and (
           o.depends_on_seq is null
           or exists (select 1 from outbox d where d.seq = o.depends_on_seq and d.status = 'done')
@@ -119,65 +145,12 @@ class OutboxStore {
     return OutboxItem.fromRow(rows.first);
   }
 
-  /// Parks a risky op (customer archive, transaction delete/clear-debt)
-  /// that's been sitting unsent for an abnormally long time, instead of
-  /// letting it fire the moment connectivity returns -- see SyncEngine's
-  /// staleness check for why. `nextRunnable` excludes `held` rows, so this
-  /// takes it out of the normal auto-retry loop entirely; it only moves
-  /// again via [confirmSend] or [discard], both driven by a human looking
-  /// at the pending-actions sheet.
-  Future<void> markHeld(int seq) async {
-    final db = await _localDb.outboxDb();
-    await db.update(
-      'outbox',
-      {'status': 'held'},
-      where: 'seq = ?',
-      whereArgs: [seq],
-    );
-  }
-
-  /// Staff reviewed a held row and confirmed it should still go out --
-  /// puts it back in the normal queue so the very next sync pass picks it
-  /// up like any other pending write. Resets `created_at` to now: without
-  /// that, SyncEngine's staleness check would see the exact same age that
-  /// got it held in the first place and park it right back again the
-  /// instant it's picked up -- confirming is explicit, fresh intent,
-  /// so it should behave like a write made right now, not a stale one.
-  Future<void> confirmSend(int seq) async {
-    final db = await _localDb.outboxDb();
-    await db.update(
-      'outbox',
-      {'status': 'pending', 'created_at': DateTime.now().toIso8601String()},
-      where: 'seq = ?',
-      whereArgs: [seq],
-    );
-  }
-
-  /// Staff reviewed a row (held or not) and decided it should never be
-  /// sent -- a terminal state, kept (not deleted) so there's still a
-  /// record of what was queued and discarded, same spirit as `failed`.
-  Future<void> discard(int seq) async {
-    final db = await _localDb.outboxDb();
-    await db.update(
-      'outbox',
-      {'status': 'discarded'},
-      where: 'seq = ?',
-      whereArgs: [seq],
-    );
-  }
-
   /// Recovers any row left stuck at `in_flight` by a previous app process
-  /// that got killed mid-write (an OS background kill, a crash, or just
-  /// swiping the app away while a request was in the air) -- `nextRunnable`
-  /// deliberately never revisits `in_flight` rows on its own, since two
-  /// concurrent sync passes both picking up the same row would double-submit
-  /// it. That's correct *within* one process, but across a restart nothing
-  /// else is ever going to finish what that dead process started: the row
-  /// stays `in_flight` forever, `countPending` keeps counting it (so the
-  /// "N o'zgarish kutilmoqda" banner never clears), yet no retry fires
-  /// again no matter how good the connection is. Called once per app
-  /// start, before anything else touches the outbox, so it's the only
-  /// process ever looking at that row at the time.
+  /// that got killed mid-write -- `nextRunnable` never revisits `in_flight`
+  /// rows on its own, so two passes can't both send one. Called once per
+  /// app start, before anything else touches the outbox. Resending is safe:
+  /// the row's idempotency key makes the server answer, not redo, a write
+  /// that did land.
   Future<void> resetStaleInFlight() async {
     final db = await _localDb.outboxDb();
     await db.update('outbox', {
@@ -185,26 +158,11 @@ class OutboxStore {
     }, where: "status = 'in_flight'");
   }
 
-  Future<void> markInFlight(int seq) async {
-    final db = await _localDb.outboxDb();
-    await db.update(
-      'outbox',
-      {'status': 'in_flight'},
-      where: 'seq = ?',
-      whereArgs: [seq],
-    );
-  }
+  Future<void> markInFlight(int seq) => _setStatus(seq, 'in_flight');
 
-  Future<void> markDone(int seq) async {
-    final db = await _localDb.outboxDb();
-    await db.update(
-      'outbox',
-      {'status': 'done'},
-      where: 'seq = ?',
-      whereArgs: [seq],
-    );
-  }
+  Future<void> markDone(int seq) => _setStatus(seq, 'done');
 
+  /// Couldn't reach the server -- try again later, as is.
   Future<void> markPendingRetry(int seq) async {
     final db = await _localDb.outboxDb();
     await db.rawUpdate(
@@ -213,82 +171,93 @@ class OutboxStore {
     );
   }
 
+  /// The server refused it (full trial, duplicate, ...): parked with the
+  /// reason until someone retries or discards it.
   Future<void> markFailed(int seq, String error) async {
     final db = await _localDb.outboxDb();
+    await db.rawUpdate(
+      "update outbox set status = 'failed', last_error = ?, attempt_count = attempt_count + 1 where seq = ?",
+      [error, seq],
+    );
+  }
+
+  /// Staff asked to send a failed row again.
+  Future<void> retry(int seq) => _setStatus(seq, 'pending');
+
+  /// Staff decided a row should never be sent. Everything queued on top of
+  /// it (a trial booked for a lead that'll never exist) goes too. Kept,
+  /// not deleted, as a record of what was dropped.
+  Future<void> discard(int seq) async {
+    final db = await _localDb.outboxDb();
+    await db.rawUpdate(
+      '''
+      with recursive doomed(seq) as (
+        select ?
+        union
+        select o.seq from outbox o join doomed d on o.depends_on_seq = d.seq
+      )
+      update outbox set status = 'discarded'
+      where seq in (select seq from doomed) and status in $_openStatuses
+      ''',
+      [seq],
+    );
+  }
+
+  Future<void> _setStatus(int seq, String status) async {
+    final db = await _localDb.outboxDb();
     await db.update(
       'outbox',
-      {
-        'status': 'failed',
-        'last_error': error,
-        'attempt_count': 1 + await _attemptCount(seq),
-      },
+      {'status': status},
       where: 'seq = ?',
       whereArgs: [seq],
     );
   }
 
-  Future<int> _attemptCount(int seq) async {
-    final db = await _localDb.outboxDb();
-    final rows = await db.query(
-      'outbox',
-      columns: ['attempt_count'],
-      where: 'seq = ?',
-      whereArgs: [seq],
-    );
-    return rows.isEmpty ? 0 : rows.first['attempt_count'] as int;
-  }
-
-  /// After a `create` for [entity] resolves from [oldId] (the client-generated
-  /// id) to [newId] (the real server id), point any other still-open row
-  /// targeting [oldId] at the real id instead.
-  Future<void> rewriteLocalId({
+  Future<void> saveServerId({
     required String entity,
-    required String oldId,
-    required String newId,
+    required String localId,
+    required int serverId,
   }) async {
     final db = await _localDb.outboxDb();
-    await db.update(
-      'outbox',
-      {'local_id': newId},
-      where:
-          "entity = ? and local_id = ? and op != 'create' and status in ('pending', 'failed', 'held')",
-      whereArgs: [entity, oldId],
+    await db.insert('id_map', {
+      'entity': entity,
+      'local_id': localId,
+      'server_id': serverId,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<int?> serverIdFor({
+    required String entity,
+    required String localId,
+  }) async {
+    final db = await _localDb.outboxDb();
+    final rows = await db.query(
+      'id_map',
+      columns: ['server_id'],
+      where: 'entity = ? and local_id = ?',
+      whereArgs: [entity, localId],
     );
+    return rows.isEmpty ? null : rows.first['server_id'] as int;
   }
 
   Future<int> countPending() async {
     final db = await _localDb.outboxDb();
     final rows = await db.rawQuery(
-      "select count(*) as n from outbox where status in ('pending', 'in_flight', 'failed', 'held')",
+      'select count(*) as n from outbox where status in $_openStatuses',
     );
     return rows.first['n'] as int;
   }
 
-  Future<List<OutboxItem>> listPending() async {
+  Future<List<OutboxItem>> listPending({String? entity}) async {
     final db = await _localDb.outboxDb();
     final rows = await db.query(
       'outbox',
-      where: "status in ('pending', 'in_flight', 'failed', 'held')",
+      where: entity == null
+          ? 'status in $_openStatuses'
+          : 'status in $_openStatuses and entity = ?',
+      whereArgs: entity == null ? null : [entity],
       orderBy: 'seq asc',
     );
     return rows.map(OutboxItem.fromRow).toList();
-  }
-
-  /// Whether [entity]/[targetId] has any not-yet-synced write queued against
-  /// it (used to decide whether a write just returned "queued" rather than
-  /// confirmed).
-  Future<bool> hasOpenWriteFor({
-    required String entity,
-    required String targetId,
-  }) async {
-    final db = await _localDb.outboxDb();
-    final rows = await db.query(
-      'outbox',
-      where:
-          "entity = ? and local_id = ? and status in ('pending', 'in_flight', 'failed', 'held')",
-      whereArgs: [entity, targetId],
-      limit: 1,
-    );
-    return rows.isNotEmpty;
   }
 }

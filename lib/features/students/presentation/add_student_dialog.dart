@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../core/extensions/build_context_x.dart';
 import '../../../core/formatters/currency_formatter.dart';
@@ -10,6 +11,9 @@ import '../../../core/formatters/date_formatters.dart';
 import '../../../core/formatters/thousands_input_formatter.dart';
 import '../../../core/formatters/uz_phone_mask_formatter.dart';
 import '../../../core/layout/breakpoints.dart';
+import '../../../services/api/api_client.dart';
+import '../../admissions/data/admissions_models.dart';
+import '../../admissions/data/admissions_repository.dart';
 import '../../billing/payment_methods.dart';
 import '../../enrollments/data/enrollments_repository.dart';
 import '../../enrollments/presentation/enroll_student_sheet.dart';
@@ -24,8 +28,48 @@ import 'student_summary_dialog.dart';
 /// Returns true once something was saved (a new student, or an existing
 /// one added to another group from the duplicate-phone warning).
 Future<bool?> showAddStudentDialog(BuildContext context) {
+  return _show<bool>(context, const _AddStudentForm());
+}
+
+/// The lead the "Guruhga yozish" wizard is enrolling.
+class LeadEnrollment {
+  const LeadEnrollment({
+    required this.leadId,
+    required this.fullName,
+    required this.phone,
+    this.parentPhone,
+    this.source,
+    this.note,
+    this.subjectId,
+  });
+
+  final int leadId;
+  final String fullName;
+  final String phone;
+  final String? parentPhone;
+  final String? source;
+  final String? note;
+
+  /// The course they asked about -- its groups are listed first.
+  final int? subjectId;
+}
+
+/// "Guruhga yozish": the explicit step that turns a lead into an enrolled
+/// student -- the same form as "Yangi o'quvchi", filled in from the lead,
+/// then a confirmation of exactly what will be saved. A student who
+/// already has the phone is reused, never duplicated. Saved in one
+/// transaction on the server, once: resending after a lost response
+/// returns the first result. Returns it, or null if cancelled.
+Future<LeadEnrolled?> showEnrollLeadWizard(
+  BuildContext context,
+  LeadEnrollment lead,
+) {
+  return _show<LeadEnrolled>(context, _AddStudentForm(lead: lead));
+}
+
+Future<T?> _show<T>(BuildContext context, Widget form) {
   final wide = isWideLayout(context);
-  return showDialog<bool>(
+  return showDialog<T>(
     context: context,
     builder: (dialogContext) => wide
         ? Dialog(
@@ -34,15 +78,18 @@ Future<bool?> showAddStudentDialog(BuildContext context) {
                 maxWidth: 620,
                 maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.9,
               ),
-              child: const _AddStudentForm(),
+              child: form,
             ),
           )
-        : const Dialog.fullscreen(child: _AddStudentForm()),
+        : Dialog.fullscreen(child: form),
   );
 }
 
 class _AddStudentForm extends ConsumerStatefulWidget {
-  const _AddStudentForm();
+  const _AddStudentForm({this.lead});
+
+  /// Set in the enrollment wizard; null for a plain "Yangi o'quvchi".
+  final LeadEnrollment? lead;
 
   @override
   ConsumerState<_AddStudentForm> createState() => _AddStudentFormState();
@@ -83,6 +130,36 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
   bool _submitted = false;
   bool _saving = false;
   String? _error;
+
+  // Wizard only: 0 = the form, 1 = confirm what will be saved.
+  int _step = 0;
+
+  // One per wizard: every attempt to save it is the same request, so a
+  // retry after a lost response can't enroll twice (or charge twice).
+  final String _enrollKey = const Uuid().v4();
+
+  /// The exact request sent when the connection dropped. Until it gets an
+  /// answer the form is locked, and "Qayta yuborish" resends this as-is.
+  Map<String, dynamic>? _unanswered;
+
+  bool get _isWizard => widget.lead != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final lead = widget.lead;
+    if (lead != null) {
+      _name.text = lead.fullName;
+      _phone.text = UzPhoneMaskFormatter.format(lead.phone.substring(3));
+      if (lead.parentPhone != null) {
+        _parentPhone.text = UzPhoneMaskFormatter.format(
+          lead.parentPhone!.substring(3),
+        );
+      }
+      _heardFrom = lead.source;
+      _onPhoneChanged(_phone.text);
+    }
+  }
 
   @override
   void dispose() {
@@ -260,9 +337,17 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
     final formOk = _formKey.currentState!.validate();
     final group = _group;
     final preview = _preview;
-    if (!formOk || group == null || _phoneOwner != null) return;
+    if (!formOk || group == null) return;
+    if (_phoneOwner != null && !_isWizard) return;
     if (_discountError != null || preview == null) return;
     if (preview.isMidCycle && _firstMonth == null) return;
+    if (_isWizard) {
+      if (_step == 0) {
+        setState(() => _step = 1);
+        return;
+      }
+      return _enroll();
+    }
 
     final payment = ThousandsInputFormatter.unformat(_payment.text) ?? 0;
     final discount = _validDiscount;
@@ -308,11 +393,74 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
     }
   }
 
+  Map<String, dynamic> _enrollBody() {
+    final payment = ThousandsInputFormatter.unformat(_payment.text) ?? 0;
+    final discount = _validDiscount;
+    final note = _note.text.trim();
+    return <String, dynamic>{
+      'full_name': _name.text.trim(),
+      'phone': UzPhoneMaskFormatter.toApi(_phone.text),
+      'parent_phone': _parentPhone.text.trim().isEmpty
+          ? null
+          : UzPhoneMaskFormatter.toApi(_parentPhone.text),
+      'heard_from': _heardFrom,
+      'note': note.isEmpty ? null : note,
+      'group_id': _group!.id,
+      'joined_at':
+          '${_startDate.year.toString().padLeft(4, '0')}-${_startDate.month.toString().padLeft(2, '0')}-${_startDate.day.toString().padLeft(2, '0')}',
+      'first_month': _preview!.isMidCycle ? _firstMonth! : 'prorated',
+      'discount_kind': discount?.kind,
+      'discount_value': discount?.value,
+      'first_payment_amount': payment > 0 ? payment : null,
+      'first_payment_method': payment > 0 ? _paymentMethod : null,
+    };
+  }
+
+  Future<void> _enroll() async {
+    final body = _unanswered ?? _enrollBody();
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      final result = await ref
+          .read(admissionsRepositoryProvider)
+          .enrollLead(
+            widget.lead!.leadId,
+            idempotencyKey: _enrollKey,
+            body: body,
+          );
+      if (mounted) Navigator.of(context).pop(result);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        if (e.statusCode == 0) {
+          _unanswered = body;
+          _error =
+              'Server javob bermadi — yozilgan bo\'lishi ham mumkin. '
+              '"Qayta yuborish" xavfsiz: ikki marta yozilmaydi.';
+        } else {
+          _unanswered = null;
+          _error = e.message;
+        }
+      });
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   // --- UI -------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
+    // In the wizard an existing student isn't a block: they're the one
+    // who gets enrolled.
     final phoneBlocked =
+        !_isWizard &&
+        _phoneOwner != null &&
+        _checkedPhone == UzPhoneMaskFormatter.toApi(_phone.text);
+    final reusing =
+        _isWizard &&
         _phoneOwner != null &&
         _checkedPhone == UzPhoneMaskFormatter.toApi(_phone.text);
 
@@ -326,7 +474,11 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
             children: <Widget>[
               Expanded(
                 child: Text(
-                  'Yangi o\'quvchi',
+                  !_isWizard
+                      ? 'Yangi o\'quvchi'
+                      : _step == 0
+                      ? 'Guruhga yozish · 1/2'
+                      : 'Guruhga yozish · 2/2: tasdiqlash',
                   style: context.textTheme.titleLarge,
                 ),
               ),
@@ -343,99 +495,111 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
             padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
             child: Form(
               key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  TextFormField(
-                    controller: _name,
-                    autofocus: true,
-                    textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(labelText: 'F.I.Sh.'),
-                    validator: (v) => (v == null || v.trim().isEmpty)
-                        ? 'F.I.Sh. kiritilishi shart'
-                        : null,
-                  ),
-                  const SizedBox(height: 14),
-                  _phoneField(
-                    controller: _phone,
-                    label: 'Telefon',
-                    required: true,
-                    onChanged: _onPhoneChanged,
-                    suffix: _checkingPhone
-                        ? const Padding(
-                            padding: EdgeInsets.all(14),
-                            child: SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          )
-                        : null,
-                  ),
-                  if (phoneBlocked) ...<Widget>[
-                    const SizedBox(height: 8),
-                    _duplicateWarning(_phoneOwner!),
-                  ],
-                  const SizedBox(height: 14),
-                  _groupPicker(),
-                  if (_group != null) ...<Widget>[
-                    const SizedBox(height: 8),
-                    _groupSummary(_group!),
-                  ],
-                  const SizedBox(height: 14),
-                  _startDateField(),
-                  if (_preview != null) ...<Widget>[
-                    const SizedBox(height: 8),
-                    _firstMonthChoice(_preview!),
-                  ],
-                  const SizedBox(height: 14),
-                  _discountField(),
-                  const SizedBox(height: 14),
-                  _phoneField(
-                    controller: _parentPhone,
-                    label: 'Ota-ona telefoni (ixtiyoriy)',
-                    required: false,
-                  ),
-                  const SizedBox(height: 14),
-                  DropdownButtonFormField<String?>(
-                    initialValue: _heardFrom,
-                    decoration: const InputDecoration(
-                      labelText: 'Qayerdan eshitdi',
-                    ),
-                    items: <DropdownMenuItem<String?>>[
-                      const DropdownMenuItem(
-                        value: null,
-                        child: Text('Tanlanmagan'),
-                      ),
-                      for (final entry in heardFromLabels.entries)
-                        DropdownMenuItem(
-                          value: entry.key,
-                          child: Text(entry.value),
+              child: _isWizard && _step == 1
+                  ? _confirmation(reusing)
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: <Widget>[
+                        if (reusing) ...<Widget>[
+                          _reuseNotice(_phoneOwner!),
+                          const SizedBox(height: 14),
+                        ],
+                        TextFormField(
+                          controller: _name,
+                          autofocus: !_isWizard,
+                          readOnly: reusing,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: const InputDecoration(
+                            labelText: 'F.I.Sh.',
+                          ),
+                          validator: (v) => (v == null || v.trim().isEmpty)
+                              ? 'F.I.Sh. kiritilishi shart'
+                              : null,
                         ),
-                    ],
-                    onChanged: (value) => setState(() => _heardFrom = value),
-                  ),
-                  const SizedBox(height: 14),
-                  TextFormField(
-                    controller: _note,
-                    minLines: 2,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      labelText: 'Izoh (ixtiyoriy)',
-                      alignLabelWithHint: true,
+                        const SizedBox(height: 14),
+                        _phoneField(
+                          controller: _phone,
+                          label: 'Telefon',
+                          required: true,
+                          onChanged: _onPhoneChanged,
+                          suffix: _checkingPhone
+                              ? const Padding(
+                                  padding: EdgeInsets.all(14),
+                                  child: SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                )
+                              : null,
+                        ),
+                        if (phoneBlocked) ...<Widget>[
+                          const SizedBox(height: 8),
+                          _duplicateWarning(_phoneOwner!),
+                        ],
+                        const SizedBox(height: 14),
+                        _groupPicker(),
+                        if (_group != null) ...<Widget>[
+                          const SizedBox(height: 8),
+                          _groupSummary(_group!),
+                        ],
+                        const SizedBox(height: 14),
+                        _startDateField(),
+                        if (_preview != null) ...<Widget>[
+                          const SizedBox(height: 8),
+                          _firstMonthChoice(_preview!),
+                        ],
+                        const SizedBox(height: 14),
+                        _discountField(),
+                        const SizedBox(height: 14),
+                        _phoneField(
+                          controller: _parentPhone,
+                          label: 'Ota-ona telefoni (ixtiyoriy)',
+                          required: false,
+                        ),
+                        const SizedBox(height: 14),
+                        DropdownButtonFormField<String?>(
+                          initialValue: _heardFrom,
+                          decoration: const InputDecoration(
+                            labelText: 'Qayerdan eshitdi',
+                          ),
+                          items: <DropdownMenuItem<String?>>[
+                            const DropdownMenuItem(
+                              value: null,
+                              child: Text('Tanlanmagan'),
+                            ),
+                            for (final entry in heardFromLabels.entries)
+                              DropdownMenuItem(
+                                value: entry.key,
+                                child: Text(entry.value),
+                              ),
+                          ],
+                          onChanged: (value) =>
+                              setState(() => _heardFrom = value),
+                        ),
+                        const SizedBox(height: 14),
+                        TextFormField(
+                          controller: _note,
+                          minLines: 2,
+                          maxLines: 4,
+                          decoration: const InputDecoration(
+                            labelText: 'Izoh (ixtiyoriy)',
+                            alignLabelWithHint: true,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        _firstPaymentFields(),
+                        if (_error != null) ...<Widget>[
+                          const SizedBox(height: 14),
+                          Text(
+                            _error!,
+                            style: TextStyle(color: context.colors.error),
+                          ),
+                        ],
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  _firstPaymentFields(),
-                  if (_error != null) ...<Widget>[
-                    const SizedBox(height: 14),
-                    Text(
-                      _error!,
-                      style: TextStyle(color: context.colors.error),
-                    ),
-                  ],
-                ],
-              ),
             ),
           ),
         ),
@@ -445,10 +609,21 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: <Widget>[
-              TextButton(
-                onPressed: _saving ? null : () => Navigator.of(context).pop(),
-                child: const Text('Bekor qilish'),
-              ),
+              if (_isWizard && _step == 1)
+                TextButton(
+                  onPressed: _saving || _unanswered != null
+                      ? null
+                      : () => setState(() {
+                          _step = 0;
+                          _error = null;
+                        }),
+                  child: const Text('Orqaga'),
+                )
+              else
+                TextButton(
+                  onPressed: _saving ? null : () => Navigator.of(context).pop(),
+                  child: const Text('Bekor qilish'),
+                ),
               const SizedBox(width: 8),
               FilledButton(
                 // A phone that already belongs to a student blocks saving
@@ -463,11 +638,130 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
                           color: Colors.white,
                         ),
                       )
-                    : const Text('Saqlash'),
+                    : Text(
+                        !_isWizard
+                            ? 'Saqlash'
+                            : _step == 0
+                            ? 'Davom etish'
+                            : _unanswered != null
+                            ? 'Qayta yuborish'
+                            : 'Tasdiqlash va yozish',
+                      ),
               ),
             ],
           ),
         ),
+      ],
+    );
+  }
+
+  Widget _reuseNotice(PhoneOwner owner) {
+    final groups = owner.groupNames.isEmpty
+        ? 'hozir guruhsiz'
+        : owner.groupNames.join(', ');
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: context.colors.secondaryContainer,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        'Bu raqam o\'quvchiga tegishli: ${owner.fullName} ($groups). '
+        'Yangi o\'quvchi ochilmaydi — shu o\'quvchi tanlangan guruhga yoziladi.',
+      ),
+    );
+  }
+
+  Widget _confirmation(bool reusing) {
+    final group = _group!;
+    final preview = _preview!;
+    final firstCharge = preview.isMidCycle && _firstMonth == 'prorated'
+        ? preview.proratedAmount
+        : preview.fullAmount;
+    final payment = ThousandsInputFormatter.unformat(_payment.text) ?? 0;
+    final discount = _validDiscount;
+    final rows = <(String, String)>[
+      (
+        'O\'quvchi',
+        reusing
+            ? '${_phoneOwner!.fullName} (mavjud o\'quvchi)'
+            : '${_name.text.trim()} (yangi o\'quvchi)',
+      ),
+      ('Telefon', '+998 ${_phone.text}'),
+      ('Guruh', '${group.name} · ${group.teacherName ?? 'o\'qituvchisiz'}'),
+      ('Boshlanish', DateFormatters.date(_startDate)),
+      ('Oylik', CurrencyFormatter.format(_monthlyAfterDiscount(group))),
+      if (discount != null)
+        (
+          'Chegirma',
+          discount.kind == 'percent'
+              ? '${discount.value}%'
+              : CurrencyFormatter.format(discount.value),
+        ),
+      (
+        'Birinchi oy',
+        '${CurrencyFormatter.format(firstCharge)}'
+            '${preview.isMidCycle && _firstMonth == 'prorated' ? ' (proporsional)' : ''}',
+      ),
+      (
+        'Birinchi to\'lov',
+        payment > 0
+            ? '${CurrencyFormatter.format(payment)} · ${paymentMethodLabels[_paymentMethod]}'
+            : 'yo\'q',
+      ),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(
+          'Quyidagilar bir vaqtda saqlanadi. So\'rov va sinov tarixi '
+          'o\'quvchiga bog\'lanib qoladi.',
+          style: context.textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 14),
+        Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: context.colors.outlineVariant),
+          ),
+          child: Column(
+            children: <Widget>[
+              for (var i = 0; i < rows.length; i++) ...<Widget>[
+                if (i > 0) const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: <Widget>[
+                      SizedBox(
+                        width: 130,
+                        child: Text(
+                          rows[i].$1,
+                          style: context.textTheme.bodyMedium?.copyWith(
+                            color: context.colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          rows[i].$2,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        if (_error != null) ...<Widget>[
+          const SizedBox(height: 14),
+          Text(_error!, style: TextStyle(color: context.colors.error)),
+        ],
       ],
     );
   }
@@ -560,8 +854,15 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
         if (snapshot.hasError) {
           return Text('Guruhlarni yuklab bo\'lmadi: ${snapshot.error}');
         }
+        final subjectId = widget.lead?.subjectId;
+        // In the wizard, groups of the course they asked about come first.
         final groups = [...?snapshot.data]
-          ..sort((a, b) => a.name.compareTo(b.name));
+          ..sort((a, b) {
+            final byCourse =
+                (a.subjectId == subjectId ? 0 : 1) -
+                (b.subjectId == subjectId ? 0 : 1);
+            return byCourse != 0 ? byCourse : a.name.compareTo(b.name);
+          });
         return DropdownMenu<int>(
           expandedInsets: EdgeInsets.zero,
           enabled: snapshot.hasData,

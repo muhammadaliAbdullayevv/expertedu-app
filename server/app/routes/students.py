@@ -22,8 +22,8 @@ _BALANCE_EXPR = """
 coalesce(sum(case when t.kind = 'charge' then t.amount when t.kind = 'payment' then -t.amount else 0 end), 0)
 """
 
-_HEARD_FROM = ("instagram", "telegram", "referral", "walk_in", "other")
-_PAYMENT_METHODS = ("cash", "card", "click_payme")
+HEARD_FROM = ("instagram", "telegram", "referral", "walk_in", "other")
+PAYMENT_METHODS = ("cash", "card", "click_payme")
 
 
 def valid_phone(raw: str | None, label: str = "Telefon") -> str:
@@ -38,14 +38,14 @@ def valid_phone(raw: str | None, label: str = "Telefon") -> str:
     return phone
 
 
-def _optional_phone(raw: str | None, label: str) -> str | None:
+def optional_phone(raw: str | None, label: str) -> str | None:
     return valid_phone(raw, label) if raw and raw.strip() else None
 
 
-def _heard_from(value: str | None) -> str | None:
+def heard_from_value(value: str | None) -> str | None:
     if value is None:
         return None
-    if value not in _HEARD_FROM:
+    if value not in HEARD_FROM:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "\"Qayerdan eshitdi\" qiymati noto'g'ri.")
     return value
 
@@ -134,8 +134,8 @@ async def create_student(payload: CreateStudentRequest):
             phone,
             payload.telegram_username,
             payload.note,
-            _optional_phone(payload.parent_phone, "Ota-ona telefoni"),
-            _heard_from(payload.heard_from),
+            optional_phone(payload.parent_phone, "Ota-ona telefoni"),
+            heard_from_value(payload.heard_from),
         )
     except asyncpg.UniqueViolationError:
         # Someone saved the same number between the check and the insert.
@@ -154,14 +154,14 @@ async def create_student_with_enrollment(
     if not full_name:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "F.I.Sh. kiritilishi shart.")
     phone = valid_phone(payload.phone)
-    parent_phone = _optional_phone(payload.parent_phone, "Ota-ona telefoni")
-    heard_from = _heard_from(payload.heard_from)
+    parent_phone = optional_phone(payload.parent_phone, "Ota-ona telefoni")
+    heard_from = heard_from_value(payload.heard_from)
     note = (payload.note or "").strip() or None
 
     first_payment = payload.first_payment_amount or 0
     if first_payment < 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "To'lov summasi manfiy bo'lishi mumkin emas.")
-    if first_payment and payload.first_payment_method not in _PAYMENT_METHODS:
+    if first_payment and payload.first_payment_method not in PAYMENT_METHODS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "To'lov usulini tanlang.")
 
     async with db.pool().acquire() as conn:

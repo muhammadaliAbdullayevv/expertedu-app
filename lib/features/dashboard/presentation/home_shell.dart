@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/layout/breakpoints.dart';
+import '../../../services/sync/sync_engine.dart';
+import '../../admissions/presentation/admissions_screen.dart';
 import '../../debtors/presentation/debtors_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../../stats/presentation/stats_screen.dart';
@@ -13,6 +15,12 @@ import 'desktop_sidebar.dart';
 
 enum _Tab {
   home(Icons.home_outlined, Icons.home_rounded, 'Bosh sahifa'),
+  admissions(
+    Icons.how_to_reg_outlined,
+    Icons.how_to_reg_rounded,
+    'Qabul',
+    desktopOnly: true,
+  ),
   subjects(Icons.menu_book_outlined, Icons.menu_book_rounded, 'Fanlar'),
   students(Icons.school_outlined, Icons.school_rounded, 'O\'quvchilar'),
   debtors(
@@ -54,10 +62,19 @@ class _HomeShellState extends ConsumerState<HomeShell> {
 
   _Tab _currentTab = _Tab.home;
 
+  @override
+  void initState() {
+    super.initState();
+    // Signed in from here on: send anything queued offline (this or an
+    // earlier run), and keep sending as connectivity comes and goes.
+    ref.read(syncEngineProvider).start();
+  }
+
   final _dashboardKey = GlobalKey<DashboardScreenState>();
   final _subjectsKey = GlobalKey<SubjectsListScreenState>();
   final _studentsKey = GlobalKey<StudentsListScreenState>();
   final _debtorsKey = GlobalKey<DebtorsScreenState>();
+  final _admissionsKey = GlobalKey<AdmissionsScreenState>();
 
   // Resizing a desktop window across the wide-layout breakpoint moves the
   // content Scaffold to a different spot in the tree -- this key carries it
@@ -71,7 +88,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     _Tab.home: DashboardScreen(
       key: _dashboardKey,
       onOpenDebtors: () => _selectTab(_Tab.debtors),
+      onOpenAdmissions: () => _selectTab(_Tab.admissions),
     ),
+    _Tab.admissions: AdmissionsScreen(key: _admissionsKey),
     _Tab.subjects: SubjectsListScreen(key: _subjectsKey),
     _Tab.students: StudentsListScreen(key: _studentsKey),
     _Tab.debtors: DebtorsScreen(key: _debtorsKey),
@@ -138,13 +157,18 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             ),
           // Pull-to-refresh needs a touch drag -- a mouse can't do it, so
           // the desktop's own screens get an explicit button instead.
-          if (useRail && (tab == _Tab.home || tab == _Tab.debtors))
+          if (useRail &&
+              (tab == _Tab.home ||
+                  tab == _Tab.debtors ||
+                  tab == _Tab.admissions))
             IconButton(
-              tooltip: 'Yangilash',
+              tooltip: tab == _Tab.admissions ? 'Yangilash (F5)' : 'Yangilash',
               icon: const Icon(Icons.refresh_rounded),
-              onPressed: () => tab == _Tab.home
-                  ? _dashboardKey.currentState?.reload()
-                  : _debtorsKey.currentState?.reload(),
+              onPressed: () => switch (tab) {
+                _Tab.home => _dashboardKey.currentState?.reload(),
+                _Tab.admissions => _admissionsKey.currentState?.reload(),
+                _ => _debtorsKey.currentState?.reload(),
+              },
             ),
           const SizedBox(width: 12),
         ],
