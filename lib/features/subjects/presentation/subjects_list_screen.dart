@@ -31,7 +31,10 @@ class SubjectsListScreenState extends ConsumerState<SubjectsListScreen> {
   }
 
   void _reload() {
-    setState(() => _future = ref.read(subjectsRepositoryProvider).list());
+    final next = ref.read(subjectsRepositoryProvider).list();
+    setState(() {
+      _future = next;
+    });
   }
 
   /// Called from HomeShell's shared search icon.

@@ -143,7 +143,9 @@ class _SummaryViewState extends ConsumerState<_SummaryView>
       ref.read(financeRepositoryProvider).summary(months: 6);
 
   @override
-  void reload() => setState(() => _summary = _load());
+  void reload() => setState(() {
+    _summary = _load();
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -399,7 +401,9 @@ class _SalariesViewState extends ConsumerState<_SalariesView>
       ref.read(financeRepositoryProvider).salaries(_month);
 
   @override
-  void reload() => setState(() => _data = _load());
+  void reload() => setState(() {
+    _data = _load();
+  });
 
   void _shift(int months) {
     _month = DateTime(_month.year, _month.month + months);
@@ -425,7 +429,9 @@ class _SalariesViewState extends ConsumerState<_SalariesView>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('${DateFormatters.monthYearLabel(month.month)} oyini yopish'),
+        title: Text(
+          '${DateFormatters.monthYearLabel(month.month)} oyini yopish',
+        ),
         content: const Text(
           'Yopilgandan keyin bu oyning hisobi o\'zgarmaydi: foiz yoki summa keyin o\'zgartirilsa ham. '
           'Oylik faqat yopilgan oy uchun to\'lanadi.',
@@ -448,7 +454,9 @@ class _SalariesViewState extends ConsumerState<_SalariesView>
       widget.onChanged();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$e')));
       }
     }
   }
@@ -661,7 +669,9 @@ class _ExpensesViewState extends ConsumerState<_ExpensesView>
       );
 
   @override
-  void reload() => setState(() => _data = _load());
+  void reload() => setState(() {
+    _data = _load();
+  });
 
   Future<void> _add() async {
     final saved = await showExpenseDialog(context, ref);
@@ -827,7 +837,10 @@ class _ExpensesViewState extends ConsumerState<_ExpensesView>
                             ),
                             _ =>
                               // Voiding is the owner's alone.
-                              e.isVoided || !ref.read(sessionControllerProvider).isOwner
+                              e.isVoided ||
+                                      !ref
+                                          .read(sessionControllerProvider)
+                                          .isOwner
                                   ? const SizedBox.shrink()
                                   : IconButton(
                                       tooltip: 'Bekor qilish',
@@ -1210,9 +1223,10 @@ class _SalaryRuleDialogState extends ConsumerState<_SalaryRuleDialog> {
       'percent' => widget.teacher.salaryPercent?.toStringAsFixed(
         widget.teacher.salaryPercent! % 1 == 0 ? 0 : 1,
       ),
-      'fixed' => widget.teacher.salaryFixed == null
-          ? null
-          : ThousandsInputFormatter.format(widget.teacher.salaryFixed!),
+      'fixed' =>
+        widget.teacher.salaryFixed == null
+            ? null
+            : ThousandsInputFormatter.format(widget.teacher.salaryFixed!),
       _ => null,
     },
   );
@@ -1278,7 +1292,10 @@ class _SalaryRuleDialogState extends ConsumerState<_SalaryRuleDialog> {
               isExpanded: true,
               decoration: const InputDecoration(labelText: 'Hisoblash usuli'),
               items: const <DropdownMenuItem<String?>>[
-                DropdownMenuItem(value: 'percent', child: Text('To\'lovlardan foiz')),
+                DropdownMenuItem(
+                  value: 'percent',
+                  child: Text('To\'lovlardan foiz'),
+                ),
                 DropdownMenuItem(value: 'fixed', child: Text('Qat\'iy oylik')),
                 DropdownMenuItem(value: null, child: Text('Qoida yo\'q')),
               ],
@@ -1292,7 +1309,9 @@ class _SalaryRuleDialogState extends ConsumerState<_SalaryRuleDialog> {
               TextField(
                 controller: _value,
                 autofocus: true,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
                 inputFormatters: _method == 'fixed'
                     ? <TextInputFormatter>[ThousandsInputFormatter()]
                     : <TextInputFormatter>[
@@ -1310,7 +1329,10 @@ class _SalaryRuleDialogState extends ConsumerState<_SalaryRuleDialog> {
             if (_error != null)
               Padding(
                 padding: const EdgeInsets.only(top: 10),
-                child: Text(_error!, style: const TextStyle(color: AppColors.danger)),
+                child: Text(
+                  _error!,
+                  style: const TextStyle(color: AppColors.danger),
+                ),
               ),
           ],
         ),

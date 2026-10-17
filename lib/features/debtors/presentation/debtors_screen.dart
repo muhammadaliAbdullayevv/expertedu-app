@@ -48,7 +48,10 @@ class DebtorsScreenState extends ConsumerState<DebtorsScreen> {
   }
 
   void reload() {
-    setState(() => _future = ref.read(debtorsRepositoryProvider).list());
+    final next = ref.read(debtorsRepositoryProvider).list();
+    setState(() {
+      _future = next;
+    });
   }
 
   List<Debtor> _visible(List<Debtor> all) {

@@ -123,7 +123,11 @@ class _WeekViewState extends ConsumerState<_WeekView> {
       .list();
 
   void reload() {
-    if (mounted) setState(() => _data = _load());
+    if (mounted) {
+      setState(() {
+        _data = _load();
+      });
+    }
   }
 
   Future<_Week> _load() async {
@@ -773,7 +777,11 @@ class _AttendanceReportViewState extends ConsumerState<_AttendanceReportView> {
   }
 
   void reload() {
-    if (mounted) setState(() => _rows = _load());
+    if (mounted) {
+      setState(() {
+        _rows = _load();
+      });
+    }
   }
 
   Future<List<AttendanceReportRow>> _load() => ref

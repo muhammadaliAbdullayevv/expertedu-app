@@ -51,7 +51,10 @@ class DesktopDashboardState extends ConsumerState<DesktopDashboard> {
   }
 
   void reload() {
-    setState(() => _summary = ref.read(dashboardRepositoryProvider).fetch());
+    final next = ref.read(dashboardRepositoryProvider).fetch();
+    setState(() {
+      _summary = next;
+    });
   }
 
   @override

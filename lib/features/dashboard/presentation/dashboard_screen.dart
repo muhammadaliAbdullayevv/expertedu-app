@@ -78,7 +78,9 @@ class DashboardScreenState extends ConsumerState<DashboardScreen> {
   /// trial lessons change with every logged call or status change.
   void _reloadLeads() {
     if (!mounted) return;
-    setState(() => _leadsFuture = _loadLeads());
+    setState(() {
+      _leadsFuture = _loadLeads();
+    });
     _desktopKey.currentState?.reload();
   }
 

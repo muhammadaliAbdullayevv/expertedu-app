@@ -1,4 +1,5 @@
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,7 +17,8 @@ import '../../../core/layout/breakpoints.dart';
 import '../../../l10n/app_strings.dart';
 import '../../../services/sync/sync_engine.dart';
 import '../../admissions/presentation/admissions_screen.dart';
-import '../../admissions/presentation/admissions_ui.dart' show admissionsRefreshProvider;
+import '../../admissions/presentation/admissions_ui.dart'
+    show admissionsRefreshProvider;
 import '../../auth/application/session_controller.dart';
 import '../../debtors/presentation/debtors_screen.dart';
 import '../../finance/presentation/finance_screen.dart';
@@ -77,7 +79,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     super.dispose();
   }
 
-  late final ValueNotifier<int> _admissionsRefresh = ref.read(admissionsRefreshProvider);
+  late final ValueNotifier<int> _admissionsRefresh = ref.read(
+    admissionsRefreshProvider,
+  );
 
   void _onAdmissionsChanged() {
     if (!mounted) return;
@@ -172,7 +176,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     if (destination != _current) HapticFeedback.selectionClick();
     setState(() => _current = destination);
     // Keep the sidebar numbers fresh without asking on every click.
-    if (DateTime.now().difference(_countsFetchedAt) > const Duration(minutes: 1)) {
+    if (DateTime.now().difference(_countsFetchedAt) >
+        const Duration(minutes: 1)) {
       _countsFetchedAt = DateTime.now();
       ref.invalidate(shellCountsProvider);
     }
@@ -319,7 +324,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                 _PageHeader(
                   title: _title(current),
                   subtitle: _subtitle(current),
-                  onRefresh: _hasRefresh(current) ? () => _refresh(current) : null,
+                  onRefresh: _hasRefresh(current)
+                      ? () => _refresh(current)
+                      : null,
                 ),
                 Expanded(child: body),
               ],
@@ -486,12 +493,19 @@ class _PhoneNotReady extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              const Icon(Icons.desktop_windows_outlined, size: 40, color: AppColors.inkMuted),
+              const Icon(
+                Icons.desktop_windows_outlined,
+                size: 40,
+                color: AppColors.inkMuted,
+              ),
               const SizedBox(height: 16),
               Text(
                 s.phoneNotReadyTitle,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(height: 8),
               Text(

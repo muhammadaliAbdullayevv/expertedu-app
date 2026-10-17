@@ -90,6 +90,7 @@ class TeacherSalary {
   final int teacherId;
   final String fullName;
   final bool isActive;
+
   /// How they are paid: 'percent', 'fixed' or null (no rule).
   final String? salaryMethod;
   final double? salaryPercent;
@@ -233,9 +234,8 @@ class FinanceRepository {
   );
 
   /// OWNER ONLY: freezes the month so its pay can be paid out.
-  Future<void> closeSalaryMonth(DateTime month) => _api.post(
-    '/finance/salaries/close?month=${_day(month)}',
-  );
+  Future<void> closeSalaryMonth(DateTime month) =>
+      _api.post('/finance/salaries/close?month=${_day(month)}');
 
   Future<List<Expense>> expenses(
     DateTime from,
