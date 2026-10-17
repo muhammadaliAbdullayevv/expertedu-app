@@ -1,6 +1,8 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'api_config.dart';
+
 final tokenStorageProvider = Provider<TokenStorage>((ref) => TokenStorage());
 
 class TokenStorage {
@@ -12,10 +14,17 @@ class TokenStorage {
       );
 
   final FlutterSecureStorage _storage;
-  static const _tokenKey = 'auth_token';
+
+  /// Credentials belong to one server: a token the demo or a test server
+  /// issued is never sent to production (it would be refused with a 401 and
+  /// show "Sessiya tugadi" on start). Everything else stays shared.
+  static String serverKey(String name, [String? baseUrl]) =>
+      '$name@${baseUrl ?? ApiConfig.baseUrl}';
+
+  static String get _tokenKey => serverKey('auth_token');
   static const _gatewayKeyKey = 'sms_gateway_key';
   static const _gatewayEnabledKey = 'sms_gateway_enabled';
-  static const _savedAccountsKey = 'saved_accounts';
+  static String get _savedAccountsKey => serverKey('saved_accounts');
   static const _lastFcmTokenKey = 'last_fcm_token';
   static const _useDynamicColorKey = 'use_dynamic_color';
 
