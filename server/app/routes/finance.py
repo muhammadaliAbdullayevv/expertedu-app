@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from .. import clock, db
 from ..money import service as money
 from ..config import settings
-from ..deps import CurrentUser, require_owner
+from ..deps import CurrentUser, get_current_user, require_owner
 from ..schemas import (
     CreateExpenseRequest,
     Expense,
@@ -20,11 +20,15 @@ from ..schemas import (
     FinanceSummary,
     SalaryMonth,
     SetSalaryPercentRequest,
+    SetSalaryRuleRequest,
     TeacherSalary,
     VoidExpenseRequest,
 )
 
-router = APIRouter(tags=["finance"], dependencies=[Depends(require_owner)])
+# The owner and the admin both see Moliya, take payments and record
+# expenses and payouts. Only the owner closes a salary month or changes how
+# anyone is paid (see the endpoints marked require_owner below).
+router = APIRouter(tags=["finance"], dependencies=[Depends(get_current_user)])
 
 CATEGORIES = ("salary", "rent", "utilities", "marketing", "supplies", "tax", "other")
 _METHODS = ("cash", "card", "click_payme")
@@ -71,7 +75,7 @@ async def list_expenses(
 
 
 @router.post("/expenses", response_model=Expense, status_code=status.HTTP_201_CREATED)
-async def create_expense(payload: CreateExpenseRequest, user: CurrentUser = Depends(require_owner)):
+async def create_expense(payload: CreateExpenseRequest, user: CurrentUser = Depends(get_current_user)):
     if payload.category not in CATEGORIES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Xarajat turi noto'g'ri.")
     if payload.amount <= 0:
@@ -117,7 +121,7 @@ async def create_expense(payload: CreateExpenseRequest, user: CurrentUser = Depe
 
 
 @router.post("/expenses/{expense_id}/void", response_model=Expense)
-async def void_expense(expense_id: int, payload: VoidExpenseRequest, user: CurrentUser = Depends(require_owner)):
+async def void_expense(expense_id: int, payload: VoidExpenseRequest, user: CurrentUser = Depends(get_current_user)):
     """Cancels a mistaken expense. It stays on record, marked void."""
     reason = payload.reason.strip()
     if not reason:
@@ -147,11 +151,37 @@ async def void_expense(expense_id: int, payload: VoidExpenseRequest, user: Curre
 # --- Salaries ---------------------------------------------------------------------
 
 
+def _decimal(value: float | None) -> Decimal | None:
+    return None if value is None else Decimal(str(value))
+
+
+@router.put("/finance/teachers/{teacher_id}/salary", response_model=TeacherSalary)
+async def set_teacher_salary(
+    teacher_id: int, payload: SetSalaryRuleRequest, user: CurrentUser = Depends(require_owner)
+):
+    """OWNER ONLY. How this teacher is paid: percent, fixed, or no rule."""
+    async with db.pool().acquire() as conn:
+        await money.set_teacher_rule(
+            conn, teacher_id, payload.method, _decimal(payload.percent), payload.fixed, user.id
+        )
+        month = await _salary_month(conn, _month_start(clock.today()))
+    return next(t for t in month.teachers if t.teacher_id == teacher_id)
+
+
+@router.put("/finance/groups/{group_id}/salary", status_code=status.HTTP_204_NO_CONTENT)
+async def set_group_salary(group_id: int, payload: SetSalaryRuleRequest, user: CurrentUser = Depends(require_owner)):
+    """OWNER ONLY. This group's own pay rule, which wins over its teacher's
+    (null method = follow the teacher)."""
+    async with db.pool().acquire() as conn:
+        await money.set_group_rule(conn, group_id, payload.method, _decimal(payload.percent), payload.fixed, user.id)
+
+
 @router.put("/finance/teachers/{teacher_id}/percent", response_model=TeacherSalary)
 async def set_salary_percent(
     teacher_id: int, payload: SetSalaryPercentRequest, user: CurrentUser = Depends(require_owner)
 ):
-    percent = None if payload.salary_percent is None else Decimal(str(payload.salary_percent))
+    """OWNER ONLY. Shortcut for a percent rule (null clears the rule)."""
+    percent = _decimal(payload.salary_percent)
     async with db.pool().acquire() as conn:
         await money.set_teacher_percent(conn, teacher_id, percent, user.id)
         month = await _salary_month(conn, _month_start(clock.today()))
@@ -162,10 +192,9 @@ async def set_salary_percent(
 async def set_group_salary_percent(
     group_id: int, payload: SetSalaryPercentRequest, user: CurrentUser = Depends(require_owner)
 ):
-    """This group's own percent, instead of its teacher's (null = the teacher's)."""
-    percent = None if payload.salary_percent is None else Decimal(str(payload.salary_percent))
+    """OWNER ONLY. This group's own percent, instead of its teacher's."""
     async with db.pool().acquire() as conn:
-        await money.set_group_percent(conn, group_id, percent, user.id)
+        await money.set_group_percent(conn, group_id, _decimal(payload.salary_percent), user.id)
 
 
 async def _salary_month(conn, month: date) -> SalaryMonth:
@@ -182,7 +211,7 @@ async def salaries(month: date | None = None):
 
 @router.post("/finance/salaries/close", response_model=SalaryMonth)
 async def close_salary_month(month: date, user: CurrentUser = Depends(require_owner)):
-    """"Oyni yopish": freezes the month so later changes can't alter it."""
+    """OWNER ONLY. "Oyni yopish": freezes the month so later changes can't alter it."""
     async with db.pool().acquire() as conn:
         return SalaryMonth(**await money.close_month(conn, month, user.id))
 

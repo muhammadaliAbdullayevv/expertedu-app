@@ -49,7 +49,14 @@ class CreateGroupRequest(BaseModel):
     # matched to (or becomes) a teacher record, see routes/groups.py.
     teacher_name: str | None = None
     fee_amount: int
-    due_day: int
+    # How the group bills: 'fixed_day' (everyone on billing_day, 1-28) or
+    # 'student_anniversary' (each student on their own start day).
+    billing_mode: str = "fixed_day"
+    billing_day: int | None = None
+    # Prorate a first period that starts between billing days.
+    prorate_first_period: bool = True
+    # Older builds send due_day instead of billing_day.
+    due_day: int | None = None
     capacity: int | None = None
     note: str | None = None
 
@@ -59,6 +66,9 @@ class UpdateGroupRequest(BaseModel):
     name: str | None = None
     teacher_id: int | None = None
     fee_amount: int | None = None
+    billing_mode: str | None = None
+    billing_day: int | None = None
+    prorate_first_period: bool | None = None
     due_day: int | None = None
     # Null clears it (no seat limit).
     capacity: int | None = None
@@ -73,7 +83,14 @@ class Group(BaseModel):
     teacher_id: int | None
     teacher_name: str | None
     fee_amount: int
-    due_day: int
+    billing_mode: str
+    billing_day: int | None
+    prorate_first_period: bool
+    # Pay rule of this group alone (null method = follows its teacher's);
+    # shown to the owner and admin on the salary pages.
+    salary_method: str | None = None
+    salary_percent: float | None = None
+    salary_fixed: int | None = None
     capacity: int | None = None
     is_active: bool
     note: str | None
@@ -189,6 +206,8 @@ class RosterEntry(BaseModel):
     joined_at: date
     status: str
     balance: int
+    # When this enrollment's next charge falls due (today counts).
+    next_due_date: date | None = None
 
 
 class StudentEnrollment(BaseModel):
@@ -201,6 +220,7 @@ class StudentEnrollment(BaseModel):
     joined_at: date
     status: str
     balance: int
+    next_due_date: date | None = None
 
 
 class CreatePaymentRequest(BaseModel):
@@ -875,6 +895,15 @@ class SetSalaryPercentRequest(BaseModel):
     salary_percent: float | None
 
 
+class SetSalaryRuleRequest(BaseModel):
+    """How a teacher or group is paid: 'percent' (with percent), 'fixed'
+    (with fixed, so'm a month), or null for no rule of its own."""
+
+    method: str | None = None
+    percent: float | None = None
+    fixed: int | None = None
+
+
 class SalaryLine(BaseModel):
     student_id: int | None
     student_name: str
@@ -882,6 +911,8 @@ class SalaryLine(BaseModel):
     group_name: str
     collected: int
     percent: float | None
+    # 'percent' (a share of payments) or 'fixed' (the fixed monthly amount).
+    method: str = "percent"
     share: int
 
 
@@ -892,7 +923,9 @@ class TeacherSalary(BaseModel):
     teacher_id: int
     full_name: str
     is_active: bool
+    salary_method: str | None = None
     salary_percent: float | None
+    salary_fixed: int | None = None
     collected: int
     earned: int
     paid: int

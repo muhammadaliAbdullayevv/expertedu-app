@@ -33,9 +33,9 @@ class World:
     async def build(self):
         pool = self.pool
         subject = await pool.fetchval("insert into subjects (name) values ('Ingliz tili') returning id")
-        self.t1 = await pool.fetchval("insert into teachers (full_name, salary_percent) values ('Dilnoza', 30) returning id")
-        self.t2 = await pool.fetchval("insert into teachers (full_name, salary_percent) values ('Jasur', 30) returning id")
-        self.t3 = await pool.fetchval("insert into teachers (full_name, salary_percent) values ('Bahor', 30) returning id")
+        self.t1 = await pool.fetchval("insert into teachers (full_name, salary_method, salary_percent) values ('Dilnoza', 'percent', 30) returning id")
+        self.t2 = await pool.fetchval("insert into teachers (full_name, salary_method, salary_percent) values ('Jasur', 'percent', 30) returning id")
+        self.t3 = await pool.fetchval("insert into teachers (full_name, salary_method, salary_percent) values ('Bahor', 'percent', 30) returning id")
         self.g1 = await self.group(subject, "IELTS", self.t1, 400000)
         self.g2 = await self.group(subject, "Speaking", self.t2, 300000)
         self.s1 = await self.student("Aziz", "998901000001")
@@ -44,7 +44,7 @@ class World:
 
     async def group(self, subject, name, teacher, fee):
         return await self.pool.fetchval(
-            "insert into groups (subject_id, name, teacher_id, fee_amount, due_day) values ($1, $2, $3, $4, 1) returning id",
+            "insert into groups (subject_id, name, teacher_id, fee_amount, billing_day) values ($1, $2, $3, $4, 1) returning id",
             subject, name, teacher, fee,
         )
 
@@ -62,7 +62,8 @@ class World:
     async def charge(self, enrollment, month, amount, due=None):
         async with self.pool.acquire() as conn:
             return await money.create_charge(
-                conn, enrollment_id=enrollment, month=month, due_date=due or month, amount=amount, base_fee=amount
+                conn, enrollment_id=enrollment, period_start=due or month,
+                period_end=(due or month) + timedelta(days=30), amount=amount, base_fee=amount
             )
 
     async def pay(self, student, amount, received_at=None, method="cash"):
@@ -92,73 +93,84 @@ async def w(api):
 # --- Charges ------------------------------------------------------------------------------------
 
 
-async def test_a_month_is_charged_once_per_enrollment(w):
+async def test_a_period_is_charged_once_per_enrollment(w):
     e = await w.enroll(w.s1, w.g1)
     assert await w.charge(e, M, 400000) is not None
     assert await w.charge(e, M, 999) is None
     assert await w.pool.fetchval("select count(*) from charges") == 1
-    # Another enrollment, or another month, is its own charge.
+    # Another period is its own charge.
     assert await w.charge(e, N, 400000) is not None
 
 
-async def test_generating_monthly_charges_is_idempotent_and_applies_discounts(w):
+async def test_generating_charges_is_idempotent_and_applies_discounts(w):
     joined = P.replace(day=10)
     e = await w.enroll(w.s1, w.g1, joined)
     await w.pool.execute("update enrollments set discount_kind = 'percent', discount_value = 25 where id = $1", e)
     async with w.pool.acquire() as conn:
         first = await money.generate_charges(conn, clock.today())
         again = await money.generate_charges(conn, clock.today())
-    # The month after joining up to this month (billing day 1 has come).
-    assert first == 1 and again == 0
-    row = await w.pool.fetchrow("select period_month, amount, base_fee, discount_amount from charges")
-    assert (row["period_month"], row["amount"], row["base_fee"], row["discount_amount"]) == (M, 300000, 400000, 100000)
+    # Group billing day is 1: the first stretch (Prorated, joined on the 10th)
+    # and this month's period.
+    assert first == 2 and again == 0
+    rows = await w.pool.fetch(
+        "select period_start, period_end, amount, base_fee, discount_amount, is_prorated from charges order by period_start"
+    )
+    cycle = (M - P).days
+    expected_first = rules.half_up_div(300000 * (M - joined).days, cycle)
+    assert [(r["period_start"], r["period_end"], r["amount"], r["is_prorated"]) for r in rows] == [
+        (joined, M, expected_first, True),
+        (M, rules.next_month(M), 300000, False),
+    ]
+    assert (rows[1]["base_fee"], rows[1]["discount_amount"]) == (400000, 100000)
 
 
 async def test_a_cancelled_charge_is_not_generated_again(w):
     e = await w.enroll(w.s1, w.g1, P.replace(day=10))
     async with w.pool.acquire() as conn:
         await money.generate_charges(conn, clock.today())
-        charge_id = await conn.fetchval("select id from charges")
+        charge_id = await conn.fetchval("select id from charges where period_start = $1", M)
         await money.cancel_charge(conn, charge_id, "Xato yaratilgan", w.api.owner_id)
         assert await money.generate_charges(conn, clock.today()) == 0
-    row = await w.pool.fetchrow("select status, cancel_reason from charges")
+    row = await w.pool.fetchrow("select status, cancel_reason from charges where id = $1", charge_id)
     assert (row["status"], row["cancel_reason"]) == ("cancelled", "Xato yaratilgan")
     assert e
 
 
-async def test_first_charge_follows_the_setting_and_the_choice(w):
+async def test_the_first_charge_follows_the_group_and_the_persons_choice(w):
     start = M.replace(day=16)
     e = await w.enroll(w.s1, w.g1, start)
     async with w.pool.acquire() as conn:
         group = dict(await conn.fetchrow("select * from groups where id = $1", w.g1))
         enrollment = dict(await conn.fetchrow("select * from enrollments where id = $1", e))
         amount = await money.issue_first_charge(conn, enrollment, group, w.api.owner_id)
-    expected, prorated = rules.first_month_charge(400000, start, "prorated")
-    assert amount == expected and prorated
+    next_first = rules.next_month(M)
+    assert amount == rules.half_up_div(400000 * (next_first - start).days, (next_first - M).days)
 
+    # The group's prorate_first_period switch: off, the first charge is the full price.
+    await w.pool.execute("update groups set prorate_first_period = false where id = $1", w.g1)
     async with w.pool.acquire() as conn:
-        await money.update_settings(conn, w.api.owner_id, first_month_mode="full")
+        group = dict(await conn.fetchrow("select * from groups where id = $1", w.g1))
         e2 = await conn.fetchval(
             "insert into enrollments (student_id, group_id, joined_at) values ($1, $2, $3) returning id", w.s2, w.g1, start
         )
         enrollment2 = dict(await conn.fetchrow("select * from enrollments where id = $1", e2))
         assert await money.issue_first_charge(conn, enrollment2, group, None) == 400000
-        # An explicit choice beats the setting.
+        # An explicit choice for this student beats the group's setting.
         e3 = await conn.fetchval(
             "insert into enrollments (student_id, group_id, joined_at) values ($1, $2, $3) returning id", w.s2, w.g2, start
         )
         enrollment3 = dict(await conn.fetchrow("select * from enrollments where id = $1", e3))
-        assert await money.issue_first_charge(conn, enrollment3, group, None, "prorated") == expected
+        group2 = dict(await conn.fetchrow("select * from groups where id = $1", w.g2))
+        assert await money.issue_first_charge(conn, enrollment3, group2, None, "full") == 300000
 
 
 async def test_settings_are_validated_and_audited(w):
     async with w.pool.acquire() as conn:
-        for bad in ({"billing_day": 0}, {"billing_day": 29}, {"first_month_mode": "half"}, {"trial_limit_per_person": 0}):
-            with pytest.raises(Exception):
-                await money.update_settings(conn, w.api.owner_id, **bad)
-        updated = await money.update_settings(conn, w.api.owner_id, billing_day=5)
-        assert updated.billing_day == 5
-        assert (await money.get_settings(conn)).billing_day == 5
+        with pytest.raises(Exception):
+            await money.update_settings(conn, w.api.owner_id, trial_limit_per_person=0)
+        updated = await money.update_settings(conn, w.api.owner_id, trial_limit_per_person=2)
+        assert updated.trial_limit_per_person == 2
+        assert (await money.get_settings(conn)).trial_limit_per_person == 2
     assert await w.pool.fetchval("select count(*) from audit_log where entity = 'settings'") == 1
 
 
@@ -415,7 +427,7 @@ async def test_a_group_percent_overrides_the_teachers(w):
     async with w.pool.acquire() as conn:
         await money.set_group_percent(conn, w.g1, None, w.api.owner_id)
     assert (await w.salary(M))[w.t1]["earned"] == 120000
-    assert await w.pool.fetchval("select count(*) from audit_log where action = 'set_salary_percent'") == 2
+    assert await w.pool.fetchval("select count(*) from audit_log where action = 'set_salary_rule'") == 2
 
 
 async def test_payouts_reduce_what_is_left(w):

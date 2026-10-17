@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 from .. import admissions, db, idempotency, schedule
 from ..config import settings
 from ..deps import CurrentUser, get_current_user
+from ..money import service as money
 from ..schemas import (
     CancelRequest,
     CreateTrialBookingRequest,
@@ -242,7 +243,35 @@ async def _session_for(conn, session_id: int | None, session: CreateTrialSession
     return session_id
 
 
-async def book(conn, *, lead_id: int, session_id: int, user_id: int, rescheduled_from_id: int | None = None) -> int:
+async def _check_trial_allowance(conn, lead, user_id: int, is_owner: bool) -> None:
+    """A trial lesson is free, and a person gets one (the limit is a
+    setting): the same phone counts across subjects. Only the owner may
+    book another. Trials that were cancelled, moved or missed don't count;
+    moving a booking isn't a new trial at all (the caller skips this)."""
+    limit = (await money.get_settings(conn)).trial_limit_per_person
+    used = await conn.fetchval(
+        """
+        select count(*) from trial_bookings b join leads l on l.id = b.lead_id
+        where l.phone = $1 and b.status in ('scheduled', 'attended')
+        """,
+        lead["phone"],
+    )
+    if used < limit:
+        return
+    if not is_owner:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Bu odam allaqachon sinov darsiga yozilgan. Yana bir sinovni faqat egasi belgilay oladi.",
+        )
+    await money.audit(
+        conn, user_id, "lead", lead["id"], "extra_trial", reason="Egasi qo'shimcha sinovga ruxsat berdi",
+        after={"trials_before": used, "limit": limit},
+    )
+
+
+async def book(
+    conn, *, lead_id: int, session_id: int, user_id: int, rescheduled_from_id: int | None = None, is_owner: bool = False
+) -> int:
     # Session before lead -- the same order cancelling a session locks them in.
     session = await conn.fetchrow("select * from trial_sessions where id = $1 for update", session_id)
     if session is None:
@@ -270,6 +299,9 @@ async def book(conn, *, lead_id: int, session_id: int, user_id: int, rescheduled
             status.HTTP_409_CONFLICT,
             f"Bu so'rovda rejalashtirilgan sinov bor: {describe_time(booked_at)}. Uni ko'chiring yoki bekor qiling.",
         )
+
+    if rescheduled_from_id is None:
+        await _check_trial_allowance(conn, lead, user_id, is_owner)
 
     taken = await conn.fetchval(
         "select count(*) from trial_bookings where session_id = $1 and status = any($2::text[])",
@@ -446,7 +478,9 @@ async def create_trial_booking(
 
     async def work(conn):
         session_id = await _session_for(conn, payload.session_id, payload.session, user.id)
-        booking_id = await book(conn, lead_id=payload.lead_id, session_id=session_id, user_id=user.id)
+        booking_id = await book(
+            conn, lead_id=payload.lead_id, session_id=session_id, user_id=user.id, is_owner=user.role == "owner"
+        )
         return await fetch_booking(conn, booking_id)
 
     return await idempotency.run(

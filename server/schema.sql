@@ -42,7 +42,11 @@ create table if not exists teachers (
   created_by bigint references users(id),
   created_at timestamptz not null default now(),
   -- Share of their groups' payments, in percent (owner only; 0011).
-  salary_percent numeric(5, 2) check (salary_percent is null or salary_percent between 0 and 100)
+  salary_percent numeric(5, 2) check (salary_percent is null or salary_percent between 0 and 100),
+  -- How they are paid: 'percent' of payments (salary_percent) or a 'fixed'
+  -- monthly amount; a group's own rule wins (0014).
+  salary_method text check (salary_method in ('percent', 'fixed')),
+  salary_fixed bigint check (salary_fixed is null or salary_fixed >= 0)
 );
 
 create table if not exists groups (
@@ -51,14 +55,26 @@ create table if not exists groups (
   name text not null,
   teacher_id bigint references teachers(id),
   fee_amount bigint not null,
-  due_day smallint not null check (due_day between 1 and 31),
   capacity int check (capacity > 0),
   is_active boolean not null default true,
   note text,
   created_by bigint references users(id),
   created_at timestamptz not null default now(),
-  -- Overrides the teacher's percent for this group (0014).
-  salary_percent numeric(5, 2) check (salary_percent is null or salary_percent between 0 and 100)
+  -- Billing is a per-group rule (0015): everyone on billing_day, or each
+  -- enrollment on its own start day.
+  billing_mode text not null default 'fixed_day' check (billing_mode in ('fixed_day', 'student_anniversary')),
+  billing_day smallint check (billing_day between 1 and 28),
+  prorate_first_period boolean not null default true,
+  -- This group's own pay rule; null salary_method = the teacher's (0014).
+  salary_method text check (salary_method in ('percent', 'fixed')),
+  salary_percent numeric(5, 2) check (salary_percent is null or salary_percent between 0 and 100),
+  salary_fixed bigint check (salary_fixed is null or salary_fixed >= 0),
+  constraint groups_billing_day_for_mode check ((billing_mode = 'fixed_day') = (billing_day is not null)),
+  constraint groups_salary_rule check (
+    salary_method is null
+    or (salary_method = 'percent' and salary_percent is not null)
+    or (salary_method = 'fixed' and salary_fixed is not null)
+  )
 );
 
 create table if not exists students (
@@ -381,12 +397,10 @@ create table if not exists sms_log (
 -- Center-wide settings (one row) and the audit log. Phase 1 of the V2 money rework.
 
 -- Missing row = these defaults (see app/money/service.py get_settings).
+-- Billing is per group, not here (0015).
 create table if not exists app_settings (
   id boolean primary key default true check (id),
-  -- Day of the month new monthly charges are created. Capped at 28 so every month has it.
-  billing_day smallint not null default 1 check (billing_day between 1 and 28),
-  -- How a student joining mid-month is charged for that first month.
-  first_month_mode text not null default 'prorated' check (first_month_mode in ('prorated', 'full')),
+  -- Free trial lessons one person may have; only the owner can allow more.
   trial_limit_per_person smallint not null default 1 check (trial_limit_per_person >= 1),
   updated_by bigint references users(id),
   updated_at timestamptz not null default now()
@@ -413,7 +427,6 @@ begin
   raise exception 'audit_log is append-only';
 end;
 $$;
-drop trigger if exists audit_log_append_only on audit_log;
 create trigger audit_log_append_only
   before update or delete on audit_log
   for each row execute function audit_log_append_only();
@@ -425,12 +438,14 @@ create trigger audit_log_append_only
 create table if not exists charges (
   id bigserial primary key,
   enrollment_id bigint not null references enrollments(id),
-  -- First day of the month this charge is for.
-  period_month date not null check (extract(day from period_month) = 1),
+  -- The billing period this charge pays for: [period_start, period_end).
+  -- Charged on its first day, so due_date is period_start.
+  period_start date not null,
+  period_end date not null,
   due_date date not null,
   amount bigint not null check (amount >= 0),
   -- What the amount was made of: the group's fee at the time, less the
-  -- enrollment's discount (a first prorated month is smaller than both).
+  -- enrollment's discount (a prorated first period is smaller than both).
   base_fee bigint not null check (base_fee >= 0),
   discount_amount bigint not null default 0 check (discount_amount >= 0),
   is_prorated boolean not null default false,
@@ -441,12 +456,14 @@ create table if not exists charges (
   cancel_reason text,
   created_by bigint references users(id),
   created_at timestamptz not null default now(),
+  constraint charges_period_order check (period_end > period_start),
+  constraint charges_due_on_start check (due_date = period_start),
   constraint charges_cancel_fields check (
     (status = 'cancelled') = (cancelled_at is not null and cancel_reason is not null)
   )
 );
--- One live charge per enrollment per month: generating twice is harmless.
-create unique index if not exists uq_charges_enrollment_month on charges (enrollment_id, period_month) where status = 'active';
+-- One live charge per enrollment per billing period: generating twice is harmless.
+create unique index if not exists uq_charges_enrollment_period on charges (enrollment_id, period_start) where status = 'active';
 create index if not exists idx_charges_enrollment on charges (enrollment_id);
 
 -- A payment, or the reversal that cancels one. Cancelling never deletes:
@@ -523,11 +540,10 @@ drop trigger if exists payment_allocations_append_only on payment_allocations;
 create trigger payment_allocations_append_only before update or delete on payment_allocations
   for each row execute function allocations_append_only();
 
-
 -- One definition of "how much is owed", used by every screen and report.
 -- What each charge has been paid so far, and what's left of it.
 create or replace view charge_balances as
-select c.id as charge_id, c.enrollment_id, e.student_id, e.group_id, c.period_month, c.due_date,
+select c.id as charge_id, c.enrollment_id, e.student_id, e.group_id, c.period_start, c.period_end, c.due_date,
        c.status, c.amount,
        coalesce(a.paid, 0)::bigint as paid,
        (c.amount - coalesce(a.paid, 0))::bigint as owed
@@ -564,10 +580,9 @@ left join (
   where ch.status = 'active' group by e.student_id
 ) c on c.student_id = s.id;
 
--- ---- 0014: salary runs and payouts ----
+-- ---- 0014: salary rules, runs and payouts ----
 -- Teacher salary: an optional percent per group, month closings that
 -- freeze what was earned, and payouts.
-
 
 -- A closed month ("Oyni yopish"): never recomputed, whatever changes later.
 create table if not exists salary_months (
@@ -596,6 +611,8 @@ create table if not exists salary_run_lines (
   group_name text not null,
   collected bigint not null,
   percent numeric(5, 2),
+  -- 'fixed' lines are the fixed monthly amount, not a share of payments.
+  method text not null default 'percent' check (method in ('percent', 'fixed')),
   share bigint not null
 );
 create index if not exists idx_salary_run_lines_run on salary_run_lines (run_id);

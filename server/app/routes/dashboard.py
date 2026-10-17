@@ -66,17 +66,22 @@ async def get_dashboard():
             list(admissions.OPEN_STAGES),
         )
 
-        # Recurring charges only -- an enrollment created today also has a
-        # charge dated today, but that's a new student joining, not a due day.
-        due_today = await conn.fetchrow(
-            """
-            select count(*) as due_today_count, coalesce(sum(c.amount), 0)::bigint as due_today_amount
-            from charges c
-            join enrollments e on e.id = c.enrollment_id
-            where c.status = 'active' and c.due_date = $1 and e.joined_at < $1
-            """,
+        # Students whose next charge falls due today (a student joining today
+        # isn't a due day, it's a new student).
+        due = await money.next_due_dates(
+            conn,
+            [r["id"] for r in await conn.fetch("select id from enrollments where status = 'active' and joined_at < $1", today)],
             today,
         )
+        due_today_ids = [i for i, d in due.items() if d == today]
+        due_today = {
+            "due_today_count": len(due_today_ids),
+            "due_today_amount": await conn.fetchval(
+                "select coalesce(sum(amount), 0)::bigint from charges "
+                "where status = 'active' and due_date = $1 and enrollment_id = any($2::bigint[])",
+                today, due_today_ids,
+            ),
+        }
 
         trials = await conn.fetch(
             """

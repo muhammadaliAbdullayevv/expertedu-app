@@ -26,7 +26,7 @@ async def seed(api, *, capacity: int | None = None) -> dict:
     teacher_id = await pool.fetchval("insert into teachers (full_name) values ('Dilnoza') returning id")
     other_teacher_id = await pool.fetchval("insert into teachers (full_name) values ('Jasur') returning id")
     group_id = await pool.fetchval(
-        "insert into groups (subject_id, name, teacher_id, fee_amount, due_day, capacity) "
+        "insert into groups (subject_id, name, teacher_id, fee_amount, billing_day, capacity) "
         "values ($1, 'IELTS 1', $2, 400000, 5, $3) returning id",
         subject_id,
         teacher_id,

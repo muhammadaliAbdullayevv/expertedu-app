@@ -17,7 +17,7 @@ async def seed(api) -> dict:
     dilnoza = await pool.fetchval("insert into teachers (full_name) values ('Dilnoza') returning id")
     jasur = await pool.fetchval("insert into teachers (full_name) values ('Jasur') returning id")
     group = await pool.fetchval(
-        "insert into groups (subject_id, name, teacher_id, fee_amount, due_day) "
+        "insert into groups (subject_id, name, teacher_id, fee_amount, billing_day) "
         "values ($1, 'IELTS', $2, 400000, 5) returning id",
         subject,
         dilnoza,
@@ -51,26 +51,37 @@ async def charge(api, enrollment: int, month: date, amount: int) -> None:
     have paid a charge."""
     async with api.pool.acquire() as conn:
         await money.create_charge(
-            conn, enrollment_id=enrollment, month=month, due_date=month, amount=amount, base_fee=amount
+            conn, enrollment_id=enrollment, period_start=month, period_end=rules.next_month(month),
+            amount=amount, base_fee=amount
         )
 
 
-async def test_finance_is_owner_only(api):
+async def test_the_admin_sees_finance_but_only_the_owner_changes_pay(api):
+    ids = await seed(api)
+    today = clock.today().isoformat()
     async with api.as_admin() as admin:
+        # Moliya, salary pages and expenses are open to the admin...
         for path in ("/finance/summary", "/finance/salaries"):
-            assert (await admin.get(path)).status_code == 403
+            assert (await admin.get(path)).status_code == 200
         assert (
             await admin.get("/expenses", params={"date_from": "2026-01-01", "date_to": "2026-12-31"})
-        ).status_code == 403
+        ).status_code == 200
         assert (
-            await admin.post("/expenses", json={"category": "rent", "amount": 1, "spent_on": "2026-10-01"})
-        ).status_code == 403
-    # And an admin listing teachers doesn't see their percentages.
-    ids = await seed(api)
-    await api.client.put(f"/finance/teachers/{ids['dilnoza']}/percent", json={"salary_percent": 40})
-    async with api.as_admin() as admin:
-        teachers = (await admin.get("/teachers")).json()
-    assert all("salary_percent" not in t for t in teachers)
+            await admin.post("/expenses", json={"category": "rent", "amount": 1000, "spent_on": today})
+        ).status_code == 201
+        # ...but closing a month and changing how anyone is paid are owner only.
+        assert (await admin.post("/finance/salaries/close", params={"month": today})).status_code == 403
+        percent = {"salary_percent": 40}
+        assert (await admin.put(f"/finance/teachers/{ids['dilnoza']}/percent", json=percent)).status_code == 403
+        assert (await admin.put(f"/finance/groups/{ids['group']}/percent", json=percent)).status_code == 403
+        rule = {"method": "fixed", "fixed": 1000000}
+        assert (await admin.put(f"/finance/teachers/{ids['dilnoza']}/salary", json=rule)).status_code == 403
+        assert (await admin.put(f"/finance/groups/{ids['group']}/salary", json=rule)).status_code == 403
+        # Staff accounts are the owner's too.
+        assert (await admin.get("/staff")).status_code == 403
+    assert await api.pool.fetchval("select salary_method from teachers where id = $1", ids["dilnoza"]) is None
+    # The owner can.
+    assert (await api.client.put(f"/finance/teachers/{ids['dilnoza']}/percent", json={"salary_percent": 40})).status_code == 200
 
 
 async def test_payments_count_towards_the_teacher_at_the_time(api):

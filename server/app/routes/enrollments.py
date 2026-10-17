@@ -111,24 +111,27 @@ async def first_charge_preview(
 ):
     """Both possible first charges for a student starting in a group on
     joined_at -- shown in the dialog before the user chooses."""
-    group = await db.pool().fetchrow("select fee_amount, due_day from groups where id = $1", group_id)
+    group = await db.pool().fetchrow(
+        "select fee_amount, billing_mode, billing_day from groups where id = $1", group_id
+    )
     if group is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
     kind, value = validate_discount(discount_kind, discount_value, group["fee_amount"])
     fee = rules.discounted_fee(group["fee_amount"], kind, value)
-    start = rules.month_start(joined_at)
-    end = rules.next_month(start)
-    prorated, is_prorated = rules.first_month_charge(fee, joined_at, "prorated")
+    first = rules.billing_periods(group["billing_mode"], group["billing_day"], joined_at, joined_at)[0]
+    # Days from the start to the next billing day, over the days of the
+    # full cycle it falls in (a fixed-day group); anniversary groups never prorate.
+    cycle_days = first.cycle_days if first.cycle_days else (first.end - first.start).days
     return FirstChargePreview(
         monthly_fee=group["fee_amount"],
         discounted_fee=fee,
-        period_start=start,
-        period_end=end,
-        days_left=(end - joined_at).days,
-        days_in_period=(end - start).days,
-        prorated_amount=prorated,
+        period_start=first.end - rules.timedelta(days=cycle_days),
+        period_end=first.end,
+        days_left=(first.end - joined_at).days,
+        days_in_period=cycle_days,
+        prorated_amount=first.amount(fee),
         full_amount=fee,
-        is_mid_cycle=is_prorated,
+        is_mid_cycle=first.prorated,
     )
 
 
@@ -174,4 +177,5 @@ async def list_student_enrollments(student_id: int):
         """,
         student_id,
     )
-    return [StudentEnrollment(**row) for row in rows]
+    due = await money.next_due_dates(db.pool(), [row["enrollment_id"] for row in rows])
+    return [StudentEnrollment(**row, next_due_date=due.get(row["enrollment_id"])) for row in rows]

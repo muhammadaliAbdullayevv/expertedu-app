@@ -176,17 +176,21 @@ async def test_0013_moves_charges_and_payments_into_the_money_tables(server):
 
         await _apply(conn, SERVER_DIR / "migrations" / "0013_money_core.sql")
 
-        # Aziz's two September charges for IELTS became one; no money lost.
+        # One to one: each charge covers the days up to the next one -- the
+        # latest, up to the group's next due day (the 5th).
         charges = await conn.fetch(
-            "select enrollment_id, period_month::text, amount, is_prorated from charges order by enrollment_id, period_month"
+            "select enrollment_id, period_start::text, period_end::text, amount, is_prorated "
+            "from charges order by enrollment_id, period_start"
         )
         assert [tuple(c) for c in charges] == [
-            (1, "2026-09-01", 500000, True), (1, "2026-10-01", 400000, False),
-            (2, "2026-09-01", 200000, True), (3, "2026-09-01", 100000, True),
+            (1, "2026-09-03", "2026-09-05", 100000, True),
+            (1, "2026-09-05", "2026-10-05", 400000, False),
+            (1, "2026-10-05", "2026-11-05", 400000, False),
+            (2, "2026-09-20", "2026-10-05", 200000, True),
+            (3, "2026-09-20", "2026-10-05", 100000, True),
         ]
         assert await conn.fetchval("select sum(amount) from charges") == before
-        merged = await conn.fetchrow("select reason, after->>'amount' as total from audit_log where action = 'migrated_merge'")
-        assert merged["total"] == "500000"
+        assert await conn.fetchval("select count(*) from audit_log") == 0
 
         # Payments, numbered in the order they were received.
         payments = await conn.fetch("select student_id, amount, method, receipt_no from payments order by receipt_no")

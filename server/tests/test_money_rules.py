@@ -1,3 +1,5 @@
+import pytest
+
 """The money rules as plain functions -- no database."""
 
 from datetime import date
@@ -13,61 +15,12 @@ def test_half_up_rounds_ties_up_not_to_even():
     assert rules.half_up_div(2, 3) == 1
 
 
-def test_first_month_prorates_remaining_days_including_the_start_day():
-    # October has 31 days; starting on the 16th leaves 16 days (16..31).
-    assert rules.first_month_charge(310000, date(2026, 10, 16), "prorated") == (160000, True)
-    # The last day of the month is one day.
-    assert rules.first_month_charge(310000, date(2026, 10, 31), "prorated") == (10000, True)
-
-
-def test_first_month_on_the_1st_or_in_full_mode_is_the_whole_fee():
-    assert rules.first_month_charge(300000, date(2026, 10, 1), "prorated") == (300000, False)
-    assert rules.first_month_charge(300000, date(2026, 10, 16), "full") == (300000, False)
-
-
-def test_first_month_proration_in_february_and_a_leap_february():
-    # 2026: 28 days; 2028: 29 days.
-    assert rules.first_month_charge(280000, date(2026, 2, 15), "prorated") == (140000, True)
-    assert rules.first_month_charge(290000, date(2028, 2, 15), "prorated") == (150000, True)
-
-
-def test_proration_rounds_half_up():
-    # 100001 * 15 / 30 = 50000.5 -> 50001 (banker's rounding would give 50000).
-    assert rules.first_month_charge(100001, date(2026, 11, 16), "prorated")[0] == 50001
-
-
 def test_discounts():
     assert rules.discounted_fee(400000, "amount", 50000) == 350000
     assert rules.discounted_fee(400000, "amount", 999999) == 0
     assert rules.discounted_fee(400000, "percent", 25) == 300000
     assert rules.discounted_fee(100005, "percent", 50) == 50003  # 50002.5 up
     assert rules.discounted_fee(400000, None, None) == 400000
-
-
-def test_billing_date_is_clamped_to_the_month():
-    assert rules.billing_date(date(2026, 2, 1), 1) == date(2026, 2, 1)
-    assert rules.billing_date(date(2026, 2, 1), 28) == date(2026, 2, 28)
-    assert rules.billing_date(date(2026, 2, 1), 31) == date(2026, 2, 28)
-
-
-def test_months_to_charge_follow_the_billing_day():
-    start = date(2026, 10, 16)
-    assert rules.months_to_charge(start, date(2026, 10, 31), 1) == []
-    assert rules.months_to_charge(start, date(2026, 11, 1), 1) == [date(2026, 11, 1)]
-    # Billing day 5: not yet on the 4th.
-    assert rules.months_to_charge(start, date(2026, 11, 4), 5) == []
-    assert rules.months_to_charge(start, date(2026, 11, 5), 5) == [date(2026, 11, 1)]
-    # A server down for months catches up on every month.
-    assert rules.months_to_charge(start, date(2027, 1, 1), 1) == [
-        date(2026, 11, 1), date(2026, 12, 1), date(2027, 1, 1)
-    ]
-
-
-def test_months_to_charge_stop_after_the_month_they_left_in():
-    start = date(2026, 9, 10)
-    assert rules.months_to_charge(start, date(2027, 1, 1), 1, ended_at=date(2026, 11, 20)) == [
-        date(2026, 10, 1), date(2026, 11, 1)
-    ]
 
 
 def test_allocate_pays_the_oldest_charge_first():
@@ -102,3 +55,68 @@ def test_salary_share_at_30_percent_rounds_half_up():
     assert rules.salary_share(500_000, None) == 0
     assert rules.salary_share(0, 30) == 0
     assert rules.salary_share(-1_000_000, 30) == -300_000
+
+
+def starts(periods):
+    return [p.start for p in periods]
+
+
+def test_fixed_day_first_period_is_prorated_from_the_start_to_the_next_billing_day():
+    first = rules.billing_periods("fixed_day", 1, date(2026, 10, 16), date(2026, 10, 16))[0]
+    assert (first.start, first.end, first.days, first.cycle_days, first.prorated) == (
+        date(2026, 10, 16), date(2026, 11, 1), 16, 31, True
+    )
+    assert first.amount(310_000) == 160_000
+    # February: 28 days in the cycle, 2028's leap February 29.
+    assert rules.billing_periods("fixed_day", 1, date(2026, 2, 15), date(2026, 2, 15))[0].amount(280_000) == 140_000
+    assert rules.billing_periods("fixed_day", 1, date(2028, 2, 15), date(2028, 2, 15))[0].amount(290_000) == 150_000
+    # Half up, not banker's: 100001 * 15 / 30 = 50000.5 -> 50001.
+    assert rules.billing_periods("fixed_day", 1, date(2026, 11, 16), date(2026, 11, 16))[0].amount(100_001) == 50_001
+
+
+def test_fixed_day_joining_on_a_billing_day_or_with_proration_off_is_the_full_fee():
+    on_day = rules.billing_periods("fixed_day", 14, date(2026, 10, 14), date(2026, 10, 14))[0]
+    assert (on_day.prorated, on_day.amount(300_000), on_day.end) == (False, 300_000, date(2026, 11, 14))
+    off = rules.billing_periods("fixed_day", 1, date(2026, 10, 16), date(2026, 10, 16), prorate_first=False)[0]
+    assert (off.prorated, off.amount(300_000), off.end) == (False, 300_000, date(2026, 11, 1))
+
+
+def test_fixed_day_periods_follow_each_other_without_gaps():
+    periods = rules.billing_periods("fixed_day", 14, date(2026, 10, 5), date(2027, 1, 20))
+    assert starts(periods) == [date(2026, 10, 5), date(2026, 10, 14), date(2026, 11, 14), date(2026, 12, 14), date(2027, 1, 14)]
+    for before, after in zip(periods, periods[1:]):
+        assert before.end == after.start
+
+
+def test_anniversary_periods_never_prorate_and_keep_the_day():
+    periods = rules.billing_periods("student_anniversary", None, date(2027, 1, 31), date(2027, 5, 1))
+    assert starts(periods) == [date(2027, 1, 31), date(2027, 2, 28), date(2027, 3, 31), date(2027, 4, 30)]
+    assert not any(p.prorated for p in periods) and all(p.amount(400_000) == 400_000 for p in periods)
+    assert [p.end for p in periods][:2] == [date(2027, 2, 28), date(2027, 3, 31)]
+    leap = rules.billing_periods("student_anniversary", None, date(2028, 1, 31), date(2028, 3, 31))
+    assert starts(leap) == [date(2028, 1, 31), date(2028, 2, 29), date(2028, 3, 31)]
+
+
+def test_leaving_ends_billing_from_that_day_but_the_first_period_is_always_listed():
+    left = rules.billing_periods("fixed_day", 1, date(2026, 9, 10), date(2027, 1, 1), ended_at=date(2026, 11, 20))
+    assert starts(left) == [date(2026, 9, 10), date(2026, 10, 1), date(2026, 11, 1)]
+    same_day = rules.billing_periods("student_anniversary", None, date(2026, 9, 14), date(2027, 1, 1), ended_at=date(2026, 9, 14))
+    assert starts(same_day) == [date(2026, 9, 14)]
+
+
+def test_next_due_date():
+    # Fixed 14th: today counts when it is the day.
+    assert rules.next_due_date("fixed_day", 14, date(2026, 10, 5), date(2026, 10, 14)) == date(2026, 10, 14)
+    assert rules.next_due_date("fixed_day", 14, date(2026, 10, 5), date(2026, 10, 15)) == date(2026, 11, 14)
+    assert rules.next_due_date("student_anniversary", None, date(2026, 10, 14), date(2026, 10, 20)) == date(2026, 11, 14)
+    assert rules.next_due_date("student_anniversary", None, date(2027, 1, 31), date(2027, 2, 1)) == date(2027, 2, 28)
+    # Nothing after the student left.
+    assert rules.next_due_date("fixed_day", 1, date(2026, 9, 1), date(2026, 12, 5), ended_at=date(2026, 11, 20)) is None
+
+
+def test_bad_billing_rules_are_refused():
+    with pytest.raises(ValueError):
+        rules.billing_periods("weekly", 1, date(2026, 1, 1), date(2026, 2, 1))
+    for day in (None, 0, 29):
+        with pytest.raises(ValueError):
+            rules.billing_periods("fixed_day", day, date(2026, 1, 1), date(2026, 2, 1))

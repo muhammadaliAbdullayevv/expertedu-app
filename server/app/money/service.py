@@ -5,17 +5,20 @@ connection and, for writes, expect to run inside the caller's transaction
 (each opens its own nested one where it needs to be atomic on its own).
 
 Money rules in short -- see docs/DOMAIN.md:
-- charges: one per enrollment per month; cancelled with a reason, never deleted
-- payments: cancelled by a reversal row with a reason, never deleted
+- billing is a per-group rule: everyone on a fixed day, or each enrollment
+  on its own start day. One charge per enrollment per billing period.
+- charges are cancelled with a reason, never deleted
+- payments are cancelled by a reversal row with a reason, never deleted
 - allocation: a student's payments pay their oldest unpaid charge first;
   what is left is credit. Allocations are append-only and signed.
 - balance = valid payments - active charges (negative = debt), computed
-- salary: a teacher's percent of the allocations that count in a month
+- teacher pay: per teacher, with an optional per-group override, either a
+  percent of the payments allocated in the month or a fixed monthly amount
 """
 
 import json
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException, status
@@ -25,6 +28,8 @@ from ..config import settings as app_config
 from . import rules
 
 PAYMENT_METHODS = ("cash", "card", "click_payme")
+SALARY_METHODS = ("percent", "fixed")
+FIXED_SALARY_LABEL = "Qat'iy oylik"
 
 _LOCK_STUDENT = 7001
 _LOCK_MONTHS = 7002
@@ -35,8 +40,6 @@ _LOCK_MONTHS = 7002
 
 @dataclass
 class MoneySettings:
-    billing_day: int = 1
-    first_month_mode: str = "prorated"
     trial_limit_per_person: int = 1
 
 
@@ -44,7 +47,7 @@ async def get_settings(conn) -> MoneySettings:
     row = await conn.fetchrow("select * from app_settings")
     if row is None:
         return MoneySettings()
-    return MoneySettings(row["billing_day"], row["first_month_mode"], row["trial_limit_per_person"])
+    return MoneySettings(row["trial_limit_per_person"])
 
 
 async def audit(conn, user_id, entity: str, entity_id, action: str, reason=None, before=None, after=None) -> None:
@@ -61,32 +64,20 @@ async def audit(conn, user_id, entity: str, entity_id, action: str, reason=None,
     )
 
 
-async def update_settings(
-    conn, user_id: int, *, billing_day: int | None = None, first_month_mode: str | None = None,
-    trial_limit_per_person: int | None = None,
-) -> MoneySettings:
+async def update_settings(conn, user_id: int, *, trial_limit_per_person: int | None = None) -> MoneySettings:
     current = await get_settings(conn)
     new = MoneySettings(
-        billing_day if billing_day is not None else current.billing_day,
-        first_month_mode if first_month_mode is not None else current.first_month_mode,
-        trial_limit_per_person if trial_limit_per_person is not None else current.trial_limit_per_person,
+        trial_limit_per_person if trial_limit_per_person is not None else current.trial_limit_per_person
     )
-    if not 1 <= new.billing_day <= 28:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Hisob-kitob kuni 1 dan 28 gacha bo'lsin.")
-    if new.first_month_mode not in rules.FIRST_MONTH_MODES:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Birinchi oy turi noto'g'ri.")
     if new.trial_limit_per_person < 1:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sinov darslari soni kamida 1 bo'lsin.")
     async with conn.transaction():
         await conn.execute(
             """
-            insert into app_settings (id, billing_day, first_month_mode, trial_limit_per_person, updated_by, updated_at)
-            values (true, $1, $2, $3, $4, now())
-            on conflict (id) do update set billing_day = $1, first_month_mode = $2,
-              trial_limit_per_person = $3, updated_by = $4, updated_at = now()
+            insert into app_settings (id, trial_limit_per_person, updated_by, updated_at)
+            values (true, $1, $2, now())
+            on conflict (id) do update set trial_limit_per_person = $1, updated_by = $2, updated_at = now()
             """,
-            new.billing_day,
-            new.first_month_mode,
             new.trial_limit_per_person,
             user_id,
         )
@@ -128,85 +119,130 @@ async def _student_of(conn, enrollment_id: int) -> int:
 
 
 async def create_charge(
-    conn, *, enrollment_id: int, month: date, due_date: date, amount: int, base_fee: int,
+    conn, *, enrollment_id: int, period_start: date, period_end: date, amount: int, base_fee: int,
     discount_amount: int = 0, is_prorated: bool = False, user_id: int | None = None, note: str | None = None,
 ) -> int | None:
-    """The charge for one enrollment and month; None (nothing happens) if
-    that month already has one. Pays itself from any credit the student has."""
+    """The charge for one enrollment and billing period; None (nothing
+    happens) if that period already has one. Pays itself from any credit
+    the student has."""
     student_id = await _student_of(conn, enrollment_id)
     async with conn.transaction():
         await _lock_student(conn, student_id)
         charge_id = await conn.fetchval(
             """
-            insert into charges (enrollment_id, period_month, due_date, amount, base_fee, discount_amount,
-                                 is_prorated, note, created_by)
-            select $1, $2, $3, $4, $5, $6, $7, $8, $9
-            where not exists (select 1 from charges where enrollment_id = $1 and period_month = $2)
+            insert into charges (enrollment_id, period_start, period_end, due_date, amount, base_fee,
+                                 discount_amount, is_prorated, note, created_by)
+            select $1, $2, $3, $2, $4, $5, $6, $7, $8, $9
+            where not exists (select 1 from charges where enrollment_id = $1 and period_start = $2)
             returning id
             """,
-            enrollment_id, month, due_date, amount, base_fee, discount_amount, is_prorated, note, user_id,
+            enrollment_id, period_start, period_end, amount, base_fee, discount_amount, is_prorated, note, user_id,
         )
         if charge_id is not None:
             await apply_credit(conn, student_id)
     return charge_id
 
 
-async def issue_first_charge(conn, enrollment: dict, group: dict, user_id: int | None, mode: str | None = None) -> int:
-    """The charge for the month a student starts in; returns its amount.
-    `mode` is 'prorated' or 'full', or None for the center's setting."""
-    mode = mode or (await get_settings(conn)).first_month_mode
-    if mode not in rules.FIRST_MONTH_MODES:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Birinchi oy turi noto'g'ri.")
+def _fee_parts(group, enrollment) -> tuple[int, int]:
+    """(discounted fee, discount amount) for one enrollment of a group."""
     fee = rules.discounted_fee(group["fee_amount"], enrollment["discount_kind"], enrollment["discount_value"])
-    amount, prorated = rules.first_month_charge(fee, enrollment["joined_at"], mode)
+    return fee, group["fee_amount"] - fee
+
+
+async def issue_first_charge(conn, enrollment: dict, group: dict, user_id: int | None, mode: str | None = None) -> int:
+    """The charge for the first billing period of a new enrollment; returns
+    its amount. `mode` 'full' or 'prorated' is the person's choice for this
+    student; None follows the group's prorate_first_period."""
+    if mode not in (None, "prorated", "full"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Birinchi oy turi noto'g'ri.")
+    prorate = group["prorate_first_period"] if mode is None else mode == "prorated"
+    period = rules.billing_periods(
+        group["billing_mode"], group["billing_day"], enrollment["joined_at"], enrollment["joined_at"],
+        prorate_first=prorate,
+    )[0]
+    fee, discount = _fee_parts(group, enrollment)
+    amount = period.amount(fee)
     await create_charge(
         conn,
         enrollment_id=enrollment["id"],
-        month=rules.month_start(enrollment["joined_at"]),
-        due_date=enrollment["joined_at"],
+        period_start=period.start,
+        period_end=period.end,
         amount=amount,
         base_fee=group["fee_amount"],
-        discount_amount=group["fee_amount"] - fee,
-        is_prorated=prorated,
+        discount_amount=discount,
+        is_prorated=period.prorated,
         user_id=user_id,
     )
     return amount
 
 
 async def generate_charges(conn, as_of: date) -> int:
-    """Creates every monthly charge due on or before `as_of` that doesn't
-    exist yet; returns how many. Safe to run any number of times, from any
-    number of workers. A cancelled charge is not made again."""
-    config = await get_settings(conn)
+    """Creates every charge due on or before `as_of` that doesn't exist yet;
+    returns how many. Safe to run any number of times, from any number of
+    workers. A cancelled charge is not made again."""
     rows = await conn.fetch(
         """
-        select e.id, e.student_id, e.joined_at, e.ended_at, e.discount_kind, e.discount_value, g.fee_amount
+        select e.id, e.joined_at, e.ended_at, e.discount_kind, e.discount_value,
+               g.fee_amount, g.billing_mode, g.billing_day, g.prorate_first_period
         from enrollments e join groups g on g.id = e.group_id
         where e.status = 'active' or e.ended_at is not null
         """
     )
     have = {
-        (r["enrollment_id"], r["period_month"])
-        for r in await conn.fetch("select enrollment_id, period_month from charges")
+        (r["enrollment_id"], r["period_start"])
+        for r in await conn.fetch("select enrollment_id, period_start from charges")
+    }
+    # Billing resumes where the last charge ended, whatever the grid says:
+    # a group's rule never makes old periods bill again.
+    covered_until = {
+        r["enrollment_id"]: r["last_end"]
+        for r in await conn.fetch("select enrollment_id, max(period_end) as last_end from charges group by 1")
     }
     created = 0
     for row in rows:
-        fee = rules.discounted_fee(row["fee_amount"], row["discount_kind"], row["discount_value"])
-        for month in rules.months_to_charge(row["joined_at"], as_of, config.billing_day, row["ended_at"]):
-            if (row["id"], month) in have:
+        fee, discount = _fee_parts(row, row)
+        periods = rules.billing_periods(
+            row["billing_mode"], row["billing_day"], row["joined_at"], as_of, row["ended_at"],
+            row["prorate_first_period"],
+        )
+        for period in periods:
+            if (row["id"], period.start) in have or period.start > as_of:
+                continue
+            if period.start < covered_until.get(row["id"], date.min):
                 continue
             charge_id = await create_charge(
                 conn,
                 enrollment_id=row["id"],
-                month=month,
-                due_date=rules.billing_date(month, config.billing_day),
-                amount=fee,
+                period_start=period.start,
+                period_end=period.end,
+                amount=period.amount(fee),
                 base_fee=row["fee_amount"],
-                discount_amount=row["fee_amount"] - fee,
+                discount_amount=discount,
+                is_prorated=period.prorated,
             )
             if charge_id is not None:
                 created += 1
     return created
+
+
+async def next_due_dates(conn, enrollment_ids: list[int], today: date | None = None) -> dict[int, date | None]:
+    """When each enrollment's next charge falls due (today counts), or None
+    once it has ended -- from the group's billing rule."""
+    today = today or clock.today()
+    rows = await conn.fetch(
+        """
+        select e.id, e.joined_at, e.ended_at, g.billing_mode, g.billing_day, g.prorate_first_period
+        from enrollments e join groups g on g.id = e.group_id
+        where e.id = any($1::bigint[])
+        """,
+        enrollment_ids,
+    )
+    return {
+        r["id"]: rules.next_due_date(
+            r["billing_mode"], r["billing_day"], r["joined_at"], today, r["ended_at"], r["prorate_first_period"]
+        )
+        for r in rows
+    }
 
 
 async def cancel_charge(conn, charge_id: int, reason: str, user_id: int | None) -> None:
@@ -236,13 +272,13 @@ async def cancel_charge(conn, charge_id: int, reason: str, user_id: int | None) 
 
 
 async def cancel_charges_after(conn, enrollment_id: int, ended_at: date, reason: str, user_id: int | None) -> int:
-    """When a student leaves: cancels the charges for months after the one
-    they left in, and one dated on or after the day they left (starting and
-    leaving the same day owes nothing). Returns how many."""
+    """When a student leaves: cancels the charges for periods that start on
+    or after the day they left (so leaving the day you started owes
+    nothing). The period they were in stays charged, and old charges stay.
+    Returns how many were cancelled."""
     ids = await conn.fetch(
-        "select id from charges where enrollment_id = $1 and status = 'active' "
-        "and (period_month > $2 or due_date >= $3)",
-        enrollment_id, rules.month_start(ended_at), ended_at,
+        "select id from charges where enrollment_id = $1 and status = 'active' and period_start >= $2",
+        enrollment_id, ended_at,
     )
     for row in ids:
         await cancel_charge(conn, row["id"], reason, user_id)
@@ -294,7 +330,7 @@ async def apply_credit(conn, student_id: int) -> None:
             select cb.charge_id, cb.owed, cb.group_id, g.teacher_id
             from charge_balances cb join groups g on g.id = cb.group_id
             where cb.student_id = $1 and cb.status = 'active' and cb.owed > 0
-            order by cb.period_month, cb.charge_id
+            order by cb.period_start, cb.charge_id
             """,
             student_id,
         )
@@ -396,23 +432,37 @@ async def student_balance(conn, student_id: int) -> dict:
 
 
 async def monthly_plan(conn, month: date) -> int:
-    """What the center expects to bill for `month`: each active enrollment's
-    charge for it, or its discounted fee if the charge isn't made yet."""
+    """What the center expects to bill in `month`: every active enrollment's
+    charges for periods starting in it, as made or -- if not made yet --
+    as they will be."""
+    month = rules.month_start(month)
+    month_end = rules.next_month(month)
     rows = await conn.fetch(
         """
-        select e.discount_kind, e.discount_value, g.fee_amount, c.amount as charged
-        from enrollments e
-        join groups g on g.id = e.group_id
-        left join charges c on c.enrollment_id = e.id and c.period_month = $1 and c.status = 'active'
+        select e.id, e.joined_at, e.discount_kind, e.discount_value,
+               g.fee_amount, g.billing_mode, g.billing_day, g.prorate_first_period
+        from enrollments e join groups g on g.id = e.group_id
         where e.status = 'active'
-        """,
-        rules.month_start(month),
+        """
     )
-    return sum(
-        r["charged"] if r["charged"] is not None
-        else rules.discounted_fee(r["fee_amount"], r["discount_kind"], r["discount_value"])
-        for r in rows
-    )
+    charged = {
+        (r["enrollment_id"], r["period_start"]): r["amount"]
+        for r in await conn.fetch(
+            "select enrollment_id, period_start, amount from charges "
+            "where status = 'active' and period_start >= $1 and period_start < $2",
+            month, month_end,
+        )
+    }
+    total = 0
+    for row in rows:
+        fee = rules.discounted_fee(row["fee_amount"], row["discount_kind"], row["discount_value"])
+        for period in rules.billing_periods(
+            row["billing_mode"], row["billing_day"], row["joined_at"], month_end - timedelta(days=1),
+            None, row["prorate_first_period"],
+        ):
+            if month <= period.start < month_end:
+                total += charged.get((row["id"], period.start), period.amount(fee))
+    return total
 
 
 async def debt_age(conn, student_id: int, today: date | None = None) -> dict | None:
@@ -428,39 +478,100 @@ async def debt_age(conn, student_id: int, today: date | None = None) -> dict | N
     return {"due_date": due, "days_overdue": days, "bucket": rules.debt_bucket(days)}
 
 
-# --- Teacher salary ------------------------------------------------------------------------------
+# --- Teacher pay -----------------------------------------------------------------------------------
+
+
+def _check_rule(method: str | None, percent, fixed) -> tuple[str | None, object, int | None]:
+    """The (method, percent, fixed) to store: only what the method uses."""
+    if method is None:
+        return None, None, None
+    if method not in SALARY_METHODS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Oylik turi noto'g'ri.")
+    if method == "percent":
+        if percent is None or not 0 <= percent <= 100:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Foiz 0 dan 100 gacha bo'lsin.")
+        return method, percent, None
+    if fixed is None or fixed < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Qat'iy oylik summasi manfiy bo'lmasin.")
+    return method, None, int(fixed)
+
+
+def _rule_json(row) -> dict:
+    return {
+        "salary_method": row["salary_method"],
+        "salary_percent": None if row["salary_percent"] is None else float(row["salary_percent"]),
+        "salary_fixed": row["salary_fixed"],
+    }
+
+
+async def set_teacher_rule(conn, teacher_id: int, method: str | None, percent, fixed, user_id: int | None) -> None:
+    """How this teacher is paid: a percent, a fixed monthly amount, or (None)
+    not by the center's rules at all. Groups may override it."""
+    method, percent, fixed = _check_rule(method, percent, fixed)
+    async with conn.transaction():
+        before = await conn.fetchrow(
+            "select salary_method, salary_percent, salary_fixed from teachers where id = $1", teacher_id
+        )
+        if before is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "O'qituvchi topilmadi.")
+        await conn.execute(
+            "update teachers set salary_method = $2, salary_percent = $3, salary_fixed = $4 where id = $1",
+            teacher_id, method, percent, fixed,
+        )
+        await audit(
+            conn, user_id, "teacher", teacher_id, "set_salary_rule", before=_rule_json(before),
+            after={"salary_method": method, "salary_percent": percent, "salary_fixed": fixed},
+        )
+
+
+async def set_group_rule(conn, group_id: int, method: str | None, percent, fixed, user_id: int | None) -> None:
+    """This group's own pay rule, which wins over its teacher's; None goes
+    back to following the teacher."""
+    method, percent, fixed = _check_rule(method, percent, fixed)
+    async with conn.transaction():
+        before = await conn.fetchrow(
+            "select salary_method, salary_percent, salary_fixed from groups where id = $1", group_id
+        )
+        if before is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
+        await conn.execute(
+            "update groups set salary_method = $2, salary_percent = $3, salary_fixed = $4 where id = $1",
+            group_id, method, percent, fixed,
+        )
+        await audit(
+            conn, user_id, "group", group_id, "set_salary_rule", before=_rule_json(before),
+            after={"salary_method": method, "salary_percent": percent, "salary_fixed": fixed},
+        )
 
 
 async def set_teacher_percent(conn, teacher_id: int, percent, user_id: int | None) -> None:
-    _check_percent(percent)
-    async with conn.transaction():
-        before = await conn.fetchval("select salary_percent from teachers where id = $1", teacher_id)
-        if not await conn.fetchval("select 1 from teachers where id = $1", teacher_id):
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "O'qituvchi topilmadi.")
-        await conn.execute("update teachers set salary_percent = $2 where id = $1", teacher_id, percent)
-        await audit(conn, user_id, "teacher", teacher_id, "set_salary_percent", before={"percent": before}, after={"percent": percent})
+    """Shortcut for the common case: a percent (None = no rule)."""
+    await set_teacher_rule(conn, teacher_id, None if percent is None else "percent", percent, None, user_id)
 
 
 async def set_group_percent(conn, group_id: int, percent, user_id: int | None) -> None:
-    _check_percent(percent)
-    async with conn.transaction():
-        if not await conn.fetchval("select 1 from groups where id = $1", group_id):
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
-        before = await conn.fetchval("select salary_percent from groups where id = $1", group_id)
-        await conn.execute("update groups set salary_percent = $2 where id = $1", group_id, percent)
-        await audit(conn, user_id, "group", group_id, "set_salary_percent", before={"percent": before}, after={"percent": percent})
+    await set_group_rule(conn, group_id, None if percent is None else "percent", percent, None, user_id)
 
 
-def _check_percent(percent) -> None:
-    if percent is not None and not 0 <= percent <= 100:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Foiz 0 dan 100 gacha bo'lsin.")
+def _effective_rule(row) -> tuple[str | None, object, int | None]:
+    """The rule that applies to a group's money: the group's own if it has
+    one, else its teacher's."""
+    if row["g_method"] is not None:
+        return row["g_method"], row["g_percent"], row["g_fixed"]
+    return row["t_method"], row["t_percent"], row["t_fixed"]
 
 
 async def _live_lines(conn, month: date) -> list[dict]:
+    """The month's pay lines, worked out now: a share of each student's
+    payments where the rule is a percent, and the fixed amounts. Fixed pay
+    accrues for the month whether or not anyone paid, from the month the
+    teacher (or group) existed -- never for months still to come."""
     rows = await conn.fetch(
         """
         select a.teacher_id, e.student_id, s.full_name as student_name, a.group_id, g.name as group_name,
-               sum(a.amount)::bigint as collected, coalesce(g.salary_percent, t.salary_percent) as percent
+               sum(a.amount)::bigint as collected,
+               g.salary_method as g_method, g.salary_percent as g_percent, g.salary_fixed as g_fixed,
+               t.salary_method as t_method, t.salary_percent as t_percent, t.salary_fixed as t_fixed
         from payment_allocations a
         join charges c on c.id = a.charge_id
         join enrollments e on e.id = c.enrollment_id
@@ -468,23 +579,62 @@ async def _live_lines(conn, month: date) -> list[dict]:
         join groups g on g.id = a.group_id
         join teachers t on t.id = a.teacher_id
         where a.counts_in_month = $1
-        group by a.teacher_id, e.student_id, s.full_name, a.group_id, g.name, g.salary_percent, t.salary_percent
+        group by a.teacher_id, e.student_id, s.full_name, a.group_id, g.name,
+                 g.salary_method, g.salary_percent, g.salary_fixed,
+                 t.salary_method, t.salary_percent, t.salary_fixed
         having sum(a.amount) <> 0
         order by s.full_name, g.name
         """,
         month,
     )
-    return [
-        {**dict(r), "percent": None if r["percent"] is None else float(r["percent"]),
-         "share": rules.salary_share(r["collected"], r["percent"])}
-        for r in rows
-    ]
+    lines = []
+    for r in rows:
+        method, percent, _ = _effective_rule(r)
+        used = float(percent) if method == "percent" and percent is not None else None
+        lines.append({
+            "teacher_id": r["teacher_id"], "student_id": r["student_id"], "student_name": r["student_name"],
+            "group_id": r["group_id"], "group_name": r["group_name"], "collected": r["collected"],
+            "percent": used, "method": "percent",
+            "share": rules.salary_share(r["collected"], percent) if method == "percent" else 0,
+        })
+
+    if month <= rules.month_start(clock.today()):
+        month_end = rules.next_month(month)
+        # A teacher paid a fixed amount: once a month, whatever their groups.
+        for t in await conn.fetch(
+            """
+            select id, salary_fixed from teachers
+            where salary_method = 'fixed' and salary_fixed is not null and is_active
+              and (created_at at time zone $2)::date < $1
+            """,
+            month_end, app_config.center_timezone,
+        ):
+            lines.append({
+                "teacher_id": t["id"], "student_id": None, "student_name": FIXED_SALARY_LABEL,
+                "group_id": None, "group_name": "", "collected": 0, "percent": None,
+                "method": "fixed", "share": t["salary_fixed"],
+            })
+        # A group paid a fixed amount of its own, to the group's teacher.
+        for g in await conn.fetch(
+            """
+            select id, name, teacher_id, salary_fixed from groups
+            where salary_method = 'fixed' and salary_fixed is not null and is_active and teacher_id is not null
+              and (created_at at time zone $2)::date < $1
+            """,
+            month_end, app_config.center_timezone,
+        ):
+            lines.append({
+                "teacher_id": g["teacher_id"], "student_id": None, "student_name": FIXED_SALARY_LABEL,
+                "group_id": g["id"], "group_name": g["name"], "collected": 0, "percent": None,
+                "method": "fixed", "share": g["salary_fixed"],
+            })
+    return lines
 
 
 async def salary_month(conn, month: date) -> dict:
-    """Every teacher's pay for a month: per-student lines, what they earned,
-    what has been paid out and what remains. A closed month comes from its
-    frozen snapshot; an open one is worked out now."""
+    """Every teacher's pay for a month: lines, what they earned, what has
+    been paid out and what remains. A closed month comes from its frozen
+    snapshot; an open one is worked out now."""
     month = rules.month_start(month)
     closed = await conn.fetchval("select closed_at from salary_months where month = $1", month)
     if closed is not None:
@@ -493,9 +643,9 @@ async def salary_month(conn, month: date) -> dict:
             for r in await conn.fetch(
                 """
                 select r.teacher_id, l.student_id, l.student_name, l.group_id, l.group_name, l.collected,
-                       l.percent::float8 as percent, l.share
+                       l.percent::float8 as percent, l.method, l.share
                 from salary_run_lines l join salary_runs r on r.id = l.run_id
-                where r.month = $1 order by l.student_name, l.group_name
+                where r.month = $1 order by l.method, l.student_name, l.group_name
                 """,
                 month,
             )
@@ -513,7 +663,8 @@ async def salary_month(conn, month: date) -> dict:
         )
     }
     teachers = await conn.fetch(
-        "select id, full_name, is_active, salary_percent from teachers where is_active or id = any($1::bigint[]) order by full_name",
+        "select id, full_name, is_active, salary_method, salary_percent, salary_fixed from teachers "
+        "where is_active or id = any($1::bigint[]) order by full_name",
         list({l["teacher_id"] for l in lines} | set(paid) | runs),
     )
     result = []
@@ -525,7 +676,9 @@ async def salary_month(conn, month: date) -> dict:
             "teacher_id": teacher["id"],
             "full_name": teacher["full_name"],
             "is_active": teacher["is_active"],
+            "salary_method": teacher["salary_method"],
             "salary_percent": None if teacher["salary_percent"] is None else float(teacher["salary_percent"]),
+            "salary_fixed": teacher["salary_fixed"],
             "collected": sum(l["collected"] for l in own),
             "earned": earned,
             "paid": taken,
@@ -543,9 +696,9 @@ async def salary_month(conn, month: date) -> dict:
 
 
 async def close_month(conn, month: date, user_id: int | None) -> dict:
-    """"Oyni yopish": freezes the month's salary figures. After this the
-    month is read from the snapshot, and money that would land in it counts
-    in the next open month instead."""
+    """"Oyni yopish": freezes the month's pay figures -- every line, with
+    the rule it used. After this the month is read from the snapshot, and
+    money that would land in it counts in the next open month instead."""
     month = rules.month_start(month)
     if month > rules.month_start(clock.today()):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Kelajak oyini yopib bo'lmaydi.")
@@ -564,10 +717,10 @@ async def close_month(conn, month: date, user_id: int | None) -> dict:
             )
             for line in teacher["lines"]:
                 await conn.execute(
-                    "insert into salary_run_lines (run_id, student_id, student_name, group_id, group_name, collected, percent, share) "
-                    "values ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    "insert into salary_run_lines (run_id, student_id, student_name, group_id, group_name, collected, "
+                    "percent, method, share) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
                     run_id, line["student_id"], line["student_name"], line["group_id"], line["group_name"],
-                    line["collected"], line["percent"], line["share"],
+                    line["collected"], line["percent"], line["method"], line["share"],
                 )
         await audit(conn, user_id, "salary_month", None, "close", after={"month": month, "earned": report["total_earned"]})
     return await salary_month(conn, month)

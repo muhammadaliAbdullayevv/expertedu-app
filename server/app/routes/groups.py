@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from .. import db, schedule
 from ..deps import CurrentUser, get_current_user
+from ..money import rules, service as money
 from ..schemas import CreateGroupRequest, Group, GroupListItem, RosterEntry, ScheduleSlot, UpdateGroupRequest
 
 router = APIRouter(prefix="/groups", tags=["groups"], dependencies=[Depends(get_current_user)])
@@ -19,24 +20,38 @@ _REQUIRED_LABELS = {
     "subject_id": "Fan",
     "name": "Guruh nomi",
     "fee_amount": "Narx",
-    "due_day": "To'lov kuni",
+    "billing_mode": "To'lov turi",
+    "prorate_first_period": "Birinchi davrni hisoblash",
     "is_active": "Holat",
 }
+
+
+def _billing(mode: str, billing_day: int | None, due_day: int | None = None) -> tuple[str, int | None]:
+    """(mode, day) to store. fixed_day needs a day from 1 to 28 (older
+    builds send due_day, which is capped at 28); a student_anniversary
+    group has no day -- each enrollment bills on its own start day."""
+    if mode not in rules.BILLING_MODES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "To'lov turi noto'g'ri.")
+    if mode == "student_anniversary":
+        return mode, None
+    day = billing_day if billing_day is not None else (None if due_day is None else min(due_day, 28))
+    if day is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "To'lov kunini kiriting.")
+    if not 1 <= day <= 28:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "To'lov kuni 1 dan 28 gacha bo'lishi kerak.")
+    return mode, day
 
 
 def _validate(
     *,
     name: str | None = None,
     fee_amount: int | None = None,
-    due_day: int | None = None,
     capacity: int | None = None,
 ) -> None:
     if name is not None and not name.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Guruh nomi kiritilishi shart.")
     if fee_amount is not None and fee_amount <= 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Narx musbat bo'lishi kerak.")
-    if due_day is not None and not 1 <= due_day <= 31:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "To'lov kuni 1 dan 31 gacha bo'lishi kerak.")
     if capacity is not None and capacity <= 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sig'im musbat son bo'lishi kerak.")
 
@@ -104,7 +119,8 @@ async def list_groups(include_inactive: bool = False):
 
 @router.post("", response_model=Group, status_code=status.HTTP_201_CREATED)
 async def create_group(payload: CreateGroupRequest, user: CurrentUser = Depends(get_current_user)):
-    _validate(name=payload.name, fee_amount=payload.fee_amount, due_day=payload.due_day, capacity=payload.capacity)
+    _validate(name=payload.name, fee_amount=payload.fee_amount, capacity=payload.capacity)
+    billing_mode, billing_day = _billing(payload.billing_mode, payload.billing_day, payload.due_day)
     await _require_subject(payload.subject_id)
 
     teacher_id = payload.teacher_id
@@ -115,15 +131,18 @@ async def create_group(payload: CreateGroupRequest, user: CurrentUser = Depends(
 
     group_id = await db.pool().fetchval(
         """
-        insert into groups (subject_id, name, teacher_id, fee_amount, due_day, capacity, note, created_by)
-        values ($1, $2, $3, $4, $5, $6, $7, $8)
+        insert into groups (subject_id, name, teacher_id, fee_amount, billing_mode, billing_day,
+                            prorate_first_period, capacity, note, created_by)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         returning id
         """,
         payload.subject_id,
         payload.name.strip(),
         teacher_id,
         payload.fee_amount,
-        payload.due_day,
+        billing_mode,
+        billing_day,
+        payload.prorate_first_period,
         payload.capacity,
         payload.note,
         user.id,
@@ -152,9 +171,27 @@ async def update_group(group_id: int, payload: UpdateGroupRequest):
     _validate(
         name=updates.get("name"),
         fee_amount=updates.get("fee_amount"),
-        due_day=updates.get("due_day"),
         capacity=updates.get("capacity"),
     )
+    legacy_due_day = updates.pop("due_day", None)
+    if {"billing_mode", "billing_day"} & updates.keys() or legacy_due_day is not None:
+        mode, day = _billing(
+            updates.get("billing_mode") or existing.billing_mode,
+            updates.get("billing_day", None if "billing_mode" in updates else existing.billing_day),
+            legacy_due_day,
+        )
+        if (mode, day) != (existing.billing_mode, existing.billing_day):
+            charged = await db.pool().fetchval(
+                "select 1 from charges c join enrollments e on e.id = c.enrollment_id "
+                "where e.group_id = $1 limit 1",
+                group_id,
+            )
+            if charged:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "Bu guruhda to'lov talablari bor: to'lov turi yoki kunini o'zgartirib bo'lmaydi.",
+                )
+        updates["billing_mode"], updates["billing_day"] = mode, day
     if "name" in updates:
         updates["name"] = updates["name"].strip()
     if updates.get("subject_id") is not None:
@@ -193,4 +230,5 @@ async def get_roster(group_id: int, include_withdrawn: bool = False):
         """,
         group_id,
     )
-    return [RosterEntry(**row) for row in rows]
+    due = await money.next_due_dates(db.pool(), [row["enrollment_id"] for row in rows])
+    return [RosterEntry(**row, next_due_date=due.get(row["enrollment_id"])) for row in rows]

@@ -18,13 +18,13 @@ async def seed(api) -> dict:
     dilnoza = await pool.fetchval("insert into teachers (full_name) values ('Dilnoza') returning id")
     jasur = await pool.fetchval("insert into teachers (full_name) values ('Jasur') returning id")
     ielts = await pool.fetchval(
-        "insert into groups (subject_id, name, teacher_id, fee_amount, due_day) "
+        "insert into groups (subject_id, name, teacher_id, fee_amount, billing_day) "
         "values ($1, 'IELTS', $2, 400000, 5) returning id",
         subject,
         dilnoza,
     )
     kids = await pool.fetchval(
-        "insert into groups (subject_id, name, teacher_id, fee_amount, due_day) "
+        "insert into groups (subject_id, name, teacher_id, fee_amount, billing_day) "
         "values ($1, 'Kids', $2, 300000, 5) returning id",
         subject,
         jasur,

@@ -1,8 +1,25 @@
 -- Teacher salary: an optional percent per group, month closings that
 -- freeze what was earned, and payouts.
 
+-- How a teacher is paid -- never hard-coded, set per teacher and optionally
+-- overridden per group (the group's rule wins):
+--   percent: a share of the payments received in the month
+--   fixed:   a fixed amount for the month
+-- A teacher's own rule: salary_method with salary_percent (0011) or salary_fixed.
+alter table teachers add column salary_method text check (salary_method in ('percent', 'fixed'));
+alter table teachers add column salary_fixed bigint check (salary_fixed is null or salary_fixed >= 0);
+update teachers set salary_method = 'percent' where salary_percent is not null;
+
+-- A group's own rule; null salary_method = follow the teacher's.
+alter table groups add column salary_method text check (salary_method in ('percent', 'fixed'));
 alter table groups add column salary_percent numeric(5, 2)
   check (salary_percent is null or salary_percent between 0 and 100);
+alter table groups add column salary_fixed bigint check (salary_fixed is null or salary_fixed >= 0);
+alter table groups add constraint groups_salary_rule check (
+  salary_method is null
+  or (salary_method = 'percent' and salary_percent is not null)
+  or (salary_method = 'fixed' and salary_fixed is not null)
+);
 
 -- A closed month ("Oyni yopish"): never recomputed, whatever changes later.
 create table salary_months (
@@ -31,6 +48,8 @@ create table salary_run_lines (
   group_name text not null,
   collected bigint not null,
   percent numeric(5, 2),
+  -- 'fixed' lines are the fixed monthly amount, not a share of payments.
+  method text not null default 'percent' check (method in ('percent', 'fixed')),
   share bigint not null
 );
 create index idx_salary_run_lines_run on salary_run_lines (run_id);

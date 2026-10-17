@@ -1,12 +1,10 @@
 -- Center-wide settings (one row) and the audit log. Phase 1 of the V2 money rework.
 
 -- Missing row = these defaults (see app/money/service.py get_settings).
+-- Billing is per group, not here (0015).
 create table app_settings (
   id boolean primary key default true check (id),
-  -- Day of the month new monthly charges are created. Capped at 28 so every month has it.
-  billing_day smallint not null default 1 check (billing_day between 1 and 28),
-  -- How a student joining mid-month is charged for that first month.
-  first_month_mode text not null default 'prorated' check (first_month_mode in ('prorated', 'full')),
+  -- Free trial lessons one person may have; only the owner can allow more.
   trial_limit_per_person smallint not null default 1 check (trial_limit_per_person >= 1),
   updated_by bigint references users(id),
   updated_at timestamptz not null default now()

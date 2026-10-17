@@ -4,12 +4,14 @@
 create table charges (
   id bigserial primary key,
   enrollment_id bigint not null references enrollments(id),
-  -- First day of the month this charge is for.
-  period_month date not null check (extract(day from period_month) = 1),
+  -- The billing period this charge pays for: [period_start, period_end).
+  -- Charged on its first day, so due_date is period_start.
+  period_start date not null,
+  period_end date not null,
   due_date date not null,
   amount bigint not null check (amount >= 0),
   -- What the amount was made of: the group's fee at the time, less the
-  -- enrollment's discount (a first prorated month is smaller than both).
+  -- enrollment's discount (a prorated first period is smaller than both).
   base_fee bigint not null check (base_fee >= 0),
   discount_amount bigint not null default 0 check (discount_amount >= 0),
   is_prorated boolean not null default false,
@@ -20,12 +22,14 @@ create table charges (
   cancel_reason text,
   created_by bigint references users(id),
   created_at timestamptz not null default now(),
+  constraint charges_period_order check (period_end > period_start),
+  constraint charges_due_on_start check (due_date = period_start),
   constraint charges_cancel_fields check (
     (status = 'cancelled') = (cancelled_at is not null and cancel_reason is not null)
   )
 );
--- One live charge per enrollment per month: generating twice is harmless.
-create unique index uq_charges_enrollment_month on charges (enrollment_id, period_month) where status = 'active';
+-- One live charge per enrollment per billing period: generating twice is harmless.
+create unique index uq_charges_enrollment_period on charges (enrollment_id, period_start) where status = 'active';
 create index idx_charges_enrollment on charges (enrollment_id);
 
 -- A payment, or the reversal that cancels one. Cancelling never deletes:
@@ -101,31 +105,31 @@ create trigger payment_allocations_append_only before update or delete on paymen
 
 -- Backfill from `transactions` -----------------------------------------------
 
--- Charges. Two legacy charges in one month (a first prorated charge and the
--- group's due day in the same month) become one: amounts added, the first
--- one's dates kept. Every merge is written to the audit log.
-insert into audit_log (entity, entity_id, action, reason, after)
-select 'charge', enrollment_id, 'migrated_merge',
-       'Bir oyda ikkita to''lov talabi bitta qilindi (0013)',
-       jsonb_build_object('month', month, 'charges', n, 'amount', total)
+-- Charges map one to one: each legacy charge covers the days from its due
+-- date to the enrollment's next charge -- or, for the latest one, to the
+-- group's next due day (clamped to short months, as the old job did).
+insert into charges (enrollment_id, period_start, period_end, due_date, amount, base_fee, is_prorated, created_by, created_at)
+select l.enrollment_id, l.due_date,
+       coalesce(
+         l.next_charge,
+         case when l.this_due > l.due_date then l.this_due else l.next_due end
+       ),
+       l.due_date, l.amount, l.amount, l.is_prorated, l.created_by, l.created_at
 from (
-  select enrollment_id, date_trunc('month', due_date)::date as month, count(*) as n, sum(amount) as total
-  from transactions where kind = 'charge' group by 1, 2 having count(*) > 1
-) merged;
-
-insert into charges (enrollment_id, period_month, due_date, amount, base_fee, is_prorated, created_by, created_at)
-select enrollment_id,
-       date_trunc('month', due_date)::date,
-       min(due_date),
-       sum(amount),
-       sum(amount),
-       bool_or(is_prorated),
-       min(created_by),
-       min(created_at)
-from transactions
-where kind = 'charge'
-group by enrollment_id, date_trunc('month', due_date)::date
-order by min(due_date), enrollment_id;
+  select t.enrollment_id, t.due_date, t.amount, t.is_prorated, t.created_by, t.created_at,
+         lead(t.due_date) over (partition by t.enrollment_id order by t.due_date, t.id) as next_charge,
+         (date_trunc('month', t.due_date)
+            + (least(g.due_day, extract(day from date_trunc('month', t.due_date) + interval '1 month - 1 day')::int) - 1)
+              * interval '1 day')::date as this_due,
+         (date_trunc('month', t.due_date) + interval '1 month'
+            + (least(g.due_day, extract(day from date_trunc('month', t.due_date) + interval '2 month - 1 day')::int) - 1)
+              * interval '1 day')::date as next_due
+  from transactions t
+  join enrollments e on e.id = t.enrollment_id
+  join groups g on g.id = e.group_id
+  where t.kind = 'charge'
+) l
+order by l.due_date, l.enrollment_id;
 
 -- Payments, with receipt numbers in their original order.
 insert into payments (student_id, enrollment_id, amount, method, received_by, received_at, receipt_no, note, created_at)
@@ -157,14 +161,14 @@ join (
          sum(c.amount) over w - c.amount as lo, sum(c.amount) over w as hi
   from charges c join enrollments e on e.id = c.enrollment_id
   where c.status = 'active' and c.amount > 0
-  window w as (partition by e.student_id order by c.period_month, c.id)
+  window w as (partition by e.student_id order by c.period_start, c.id)
 ) c on c.student_id = p.student_id and least(c.hi, p.hi) > greatest(c.lo, p.lo)
 join groups g on g.id = c.group_id;
 
 -- One definition of "how much is owed", used by every screen and report.
 -- What each charge has been paid so far, and what's left of it.
 create view charge_balances as
-select c.id as charge_id, c.enrollment_id, e.student_id, e.group_id, c.period_month, c.due_date,
+select c.id as charge_id, c.enrollment_id, e.student_id, e.group_id, c.period_start, c.period_end, c.due_date,
        c.status, c.amount,
        coalesce(a.paid, 0)::bigint as paid,
        (c.amount - coalesce(a.paid, 0))::bigint as owed
