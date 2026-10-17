@@ -15,6 +15,10 @@ class Settings:
 
     public_base_url: str = os.environ.get("PUBLIC_BASE_URL", "https://expertedu-api.ai-student-helper.site")
 
+    # Whose calendar "today" means for due dates, withdrawals and monthly
+    # totals -- the center's, not the server's (which may well run in UTC).
+    center_timezone: str = os.environ.get("CENTER_TIMEZONE", "Asia/Tashkent")
+
     @property
     def sms_configured(self) -> bool:
         return bool(self.eskiz_email and self.eskiz_password)

@@ -1,9 +1,11 @@
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from .. import db
 from ..deps import CurrentUser, get_current_user
 from ..phone import normalize
 from ..schemas import CreateInquiryRequest, Inquiry, Student, UpdateInquiryRequest
+from .students import duplicate_phone_error, phone_owner
 
 router = APIRouter(prefix="/inquiries", tags=["inquiries"], dependencies=[Depends(get_current_user)])
 
@@ -74,16 +76,20 @@ async def convert_inquiry(inquiry_id: int):
         raise HTTPException(status.HTTP_409_CONFLICT, "Bu so'rov allaqachon talabaga aylantirilgan.")
 
     async with db.pool().acquire() as conn:
-        async with conn.transaction():
-            student = await conn.fetchrow(
-                "insert into students (full_name, phone, note) values ($1, $2, $3) returning *",
-                inquiry["full_name"],
-                inquiry["phone"],
-                inquiry["note"],
-            )
-            await conn.execute(
-                "update inquiries set status = 'converted', converted_student_id = $2 where id = $1",
-                inquiry_id,
-                student["id"],
-            )
+        try:
+            async with conn.transaction():
+                student = await conn.fetchrow(
+                    "insert into students (full_name, phone, note) values ($1, $2, $3) returning *",
+                    inquiry["full_name"],
+                    inquiry["phone"],
+                    inquiry["note"],
+                )
+                await conn.execute(
+                    "update inquiries set status = 'converted', converted_student_id = $2 where id = $1",
+                    inquiry_id,
+                    student["id"],
+                )
+        except asyncpg.UniqueViolationError:
+            # One student per phone (uq_students_phone): the caller already is one.
+            raise duplicate_phone_error(await phone_owner(conn, inquiry["phone"]))
     return Student(**student)

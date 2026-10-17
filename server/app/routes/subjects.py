@@ -36,11 +36,13 @@ async def create_subject(payload: CreateSubjectRequest):
 async def list_groups_for_subject(subject_id: int):
     rows = await db.pool().fetch(
         """
-        select g.*, count(e.id) filter (where e.status = 'active') as student_count
+        select g.*, t.full_name as teacher_name,
+               count(e.id) filter (where e.status = 'active') as student_count
         from groups g
+        left join teachers t on t.id = g.teacher_id
         left join enrollments e on e.group_id = g.id
         where g.subject_id = $1 and g.is_active
-        group by g.id
+        group by g.id, t.full_name
         order by g.name asc
         """,
         subject_id,

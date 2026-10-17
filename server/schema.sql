@@ -26,13 +26,24 @@ create table if not exists subjects (
   created_at timestamptz not null default now()
 );
 
+create table if not exists teachers (
+  id bigserial primary key,
+  full_name text not null,
+  phone text,
+  note text,
+  is_active boolean not null default true,
+  created_by bigint references users(id),
+  created_at timestamptz not null default now()
+);
+
 create table if not exists groups (
   id bigserial primary key,
   subject_id bigint references subjects(id),
   name text not null,
-  teacher_name text,
+  teacher_id bigint references teachers(id),
   fee_amount bigint not null,
   due_day smallint not null check (due_day between 1 and 31),
+  capacity int check (capacity > 0),
   is_active boolean not null default true,
   note text,
   created_by bigint references users(id),
@@ -45,6 +56,8 @@ create table if not exists students (
   phone text not null,
   telegram_username text,
   note text,
+  parent_phone text,
+  heard_from text check (heard_from in ('instagram','telegram','referral','walk_in','other')),
   created_by bigint references users(id),
   created_at timestamptz not null default now()
 );
@@ -60,10 +73,15 @@ create table if not exists enrollments (
   joined_at date not null,
   status text not null check (status in ('active','withdrawn')) default 'active',
   ended_at date,
+  discount_kind text check (discount_kind in ('amount','percent')),
+  discount_value bigint check (discount_value >= 0),
   created_by bigint references users(id),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  constraint enrollments_discount_pair check ((discount_kind is null) = (discount_value is null)),
+  constraint enrollments_discount_percent_max check (discount_kind is distinct from 'percent' or discount_value <= 100)
 );
 create index if not exists idx_enrollments_group_active on enrollments(group_id) where status = 'active';
+create unique index if not exists uq_students_phone on students (phone);
 create index if not exists idx_enrollments_student on enrollments(student_id);
 
 -- One table for both charges and payments (not two) -- see billing.py.
@@ -80,6 +98,7 @@ create table if not exists transactions (
   is_prorated boolean not null default false,
   source text not null default 'auto_recurring' check (source in ('auto_recurring','manual')),
   note text,
+  method text check (method in ('cash','card','click_payme')),
   occurred_at timestamptz not null default now(),
   created_by bigint references users(id),
   created_at timestamptz not null default now()

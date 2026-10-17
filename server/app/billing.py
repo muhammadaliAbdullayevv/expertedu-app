@@ -1,5 +1,5 @@
 """Billing date math, shared by enrollment creation (first-charge proration)
-and the future daily billing job (full-fee recurring charges).
+and the recurring-charge job (full-fee monthly charges, jobs/recurring_charges.py).
 
 Billing is "in advance": a charge's due_date always equals its
 period_start -- the date payment is expected is the same date the paid-for
@@ -56,3 +56,55 @@ def first_charge_for_enrollment(fee_amount: int, due_day: int, joined_at: date) 
     amount = round(fee_amount * days_remaining / days_in_period)
     is_prorated = joined_at != last_due
     return amount, is_prorated
+
+
+def recurring_due_dates(due_day: int, last_charged: date, as_of: date, ended_at: date | None) -> list[date]:
+    """Every due date after last_charged, up to and including as_of, that
+    still needs its full-fee charge -- usually none or one, but more after
+    the server has been down across a due day.
+
+    Counts from the last charge actually made rather than from joined_at,
+    so a group's due_day changing later never back-fills the old months
+    under the new day. A period starting on or after ended_at isn't
+    charged: a student who withdraws on the due day itself doesn't owe for
+    the month they won't be starting.
+    """
+    dates = []
+    due = next_due_after(due_day, last_charged)
+    while due <= as_of and (ended_at is None or due < ended_at):
+        dates.append(due)
+        due = next_due_after(due_day, due)
+    return dates
+
+
+def oldest_unpaid_due(charges: list[tuple[date, int]], paid: int) -> date | None:
+    """Due date of the oldest charge payments haven't fully covered yet, or
+    None when everything's paid. Payments settle charges oldest-first --
+    the same FIFO rule lib/core/utils/enrollment_ledger_calculator.dart
+    applies on the client. charges must be sorted oldest-first."""
+    remaining = paid
+    for due_date, amount in charges:
+        if remaining < amount:
+            return due_date
+        remaining -= amount
+    return None
+
+
+def discounted_fee(fee_amount: int, discount_kind: str | None, discount_value: int | None) -> int:
+    """An enrollment's monthly fee after its discount: 'amount' takes that
+    many so'm off, 'percent' that whole percent (so it follows the group's
+    fee if that changes later). Never below zero -- an amount discount stays
+    put if the group's fee is later lowered beneath it."""
+    if discount_kind == "amount" and discount_value:
+        return max(fee_amount - discount_value, 0)
+    if discount_kind == "percent" and discount_value:
+        return round(fee_amount * (100 - discount_value) / 100)
+    return fee_amount
+
+
+def first_period(due_day: int, joined_at: date) -> tuple[date, date]:
+    """(start, end) of the billing period joined_at falls in -- the due day
+    on or before it, and the next one after. end is where the second,
+    full-fee charge lands."""
+    start = last_due_on_or_before(due_day, joined_at)
+    return start, next_due_after(due_day, start)
