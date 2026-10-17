@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../platform/android_file_bridge.dart';
+import 'desktop_installer.dart';
 import 'update_checker.dart';
 
 final appUpdateControllerProvider = Provider<AppUpdateController>((ref) {
@@ -12,8 +13,13 @@ final appUpdateControllerProvider = Provider<AppUpdateController>((ref) {
     ref.watch(updateCheckerProvider),
     ref.watch(androidFileBridgeProvider),
   );
+  ref.onDispose(controller.dispose);
   return controller;
 });
+
+bool get _isDesktop =>
+    defaultTargetPlatform == TargetPlatform.windows ||
+    defaultTargetPlatform == TargetPlatform.linux;
 
 class AppUpdateController extends ChangeNotifier {
   AppUpdateController(this._checker, this._bridge) {
@@ -22,6 +28,15 @@ class AppUpdateController extends ChangeNotifier {
 
   final UpdateChecker _checker;
   final AndroidFileBridge _bridge;
+  final DesktopInstaller _desktop = const DesktopInstaller();
+
+  /// The desktop stays open all day in the office -- check again now and
+  /// then, not only at start.
+  static const Duration _desktopRecheck = Duration(hours: 4);
+  Timer? _recheck;
+
+  /// Desktop only: the downloaded release is being installed.
+  bool installing = false;
 
   String currentVersionName = '';
   int _currentVersionCode = 0;
@@ -45,23 +60,31 @@ class AppUpdateController extends ChangeNotifier {
     _currentVersionCode = int.tryParse(info.buildNumber) ?? 0;
     notifyListeners();
     await checkNow();
+    if (_isDesktop && DesktopInstaller.canSelfUpdate) {
+      _recheck = Timer.periodic(_desktopRecheck, (_) => checkNow());
+    }
   }
 
   Future<void> checkNow() async {
-    // version.json only ever points at an APK, installed through an
-    // Android-only method channel -- desktop builds would otherwise offer
-    // every new Android release as an "update" they can't actually install.
-    if (defaultTargetPlatform != TargetPlatform.android) {
-      return;
-    }
+    // Android reads /uploads/app/version.json (an APK); Windows and the
+    // Fedora RPM read /uploads/desktop/version.json. Anything else -- and a
+    // desktop build that isn't the installed copy -- has nothing to update.
+    final desktop = _isDesktop;
+    if (desktop && !DesktopInstaller.canSelfUpdate) return;
+    if (!desktop && defaultTargetPlatform != TargetPlatform.android) return;
+    if (downloadProgress != null || installing) return;
 
     checking = true;
     error = null;
     notifyListeners();
 
     try {
-      final update = await _checker.checkForUpdate();
-      available = update.versionCode > _currentVersionCode ? update : null;
+      final update = desktop
+          ? await _checker.checkForDesktopUpdate()
+          : await _checker.checkForUpdate();
+      available = update != null && update.versionCode > _currentVersionCode
+          ? update
+          : null;
     } catch (e) {
       available = null;
       error = e.toString();
@@ -92,11 +115,24 @@ class AppUpdateController extends ChangeNotifier {
       downloadProgress = null;
       notifyListeners();
 
-      await _bridge.installApk(path);
+      if (_isDesktop) {
+        installing = true;
+        notifyListeners();
+        await _desktop.install(path);
+      } else {
+        await _bridge.installApk(path);
+      }
     } catch (e) {
       downloadProgress = null;
+      installing = false;
       error = e.toString();
       notifyListeners();
     }
+  }
+
+  @override
+  void dispose() {
+    _recheck?.cancel();
+    super.dispose();
   }
 }

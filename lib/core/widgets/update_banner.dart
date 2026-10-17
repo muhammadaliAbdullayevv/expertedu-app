@@ -19,7 +19,8 @@ class UpdateBanner extends ConsumerWidget {
         if (update == null) return const SizedBox.shrink();
 
         final progress = controller.downloadProgress;
-        final busy = progress != null;
+        final busy = progress != null || controller.installing;
+        final error = controller.error;
 
         return Material(
           color: context.colors.primary,
@@ -37,9 +38,12 @@ class UpdateBanner extends ConsumerWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      busy
+                      controller.installing
+                          ? 'O\'rnatilmoqda...'
+                          : progress != null
                           ? '${context.strings.downloadingUpdate} ${(progress * 100).toStringAsFixed(0)}%'
-                          : '${context.strings.updateAvailable}: v${update.versionName}',
+                          : error ??
+                                '${context.strings.updateAvailable}: v${update.versionName}',
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w700,

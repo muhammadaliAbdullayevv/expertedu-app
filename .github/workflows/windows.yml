@@ -1,9 +1,11 @@
 name: Windows build
 
 # Windows apps can only be built on Windows, so CI does it: every push that
-# touches the app, or on demand from the Actions tab. Download the result
-# from the run's "expert-edu-center-windows" artifact and ship the whole
-# folder -- the .exe needs the DLLs and data/ beside it.
+# touches the app, or on demand from the Actions tab. The run's
+# "expert-edu-center-windows-setup" artifact is the installer staff use;
+# "expert-edu-center-windows" is the bare app folder (the .exe needs the
+# DLLs and data/ beside it). tools/publish-desktop.sh puts the installer on
+# the server for the app's self-update.
 on:
   push:
     branches: [master]
@@ -32,6 +34,25 @@ jobs:
       - run: flutter pub get
       - run: flutter test
       - run: flutter build windows --release
+
+      # The installer (windows/installer/expert_edu_center.iss) -- what
+      # staff install, and what the app downloads to update itself.
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $line = (Select-String -Path pubspec.yaml -Pattern '^version:\s*(\S+)').Matches[0].Groups[1].Value
+          $version, $build = $line.Split('+')
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            choco install innosetup -y --no-progress
+            $env:Path += ";${env:ProgramFiles(x86)}\Inno Setup 6"
+          }
+          iscc /DAppVersion=$version /DBuildNumber=$build windows\installer\expert_edu_center.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: expert-edu-center-windows-setup
+          path: build/windows/installer/*.exe
+          retention-days: 30
 
       - uses: actions/upload-artifact@v4
         with:

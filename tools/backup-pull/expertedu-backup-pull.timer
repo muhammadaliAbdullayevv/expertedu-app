@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily copy of Expert Edu database backups
+
+[Timer]
+# Once a day; if the PC was off at that time, soon after it's next on.
+OnCalendar=*-*-* 10:00:00
+Persistent=true
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target
