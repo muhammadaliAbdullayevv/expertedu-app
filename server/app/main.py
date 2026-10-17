@@ -10,6 +10,7 @@ from .jobs import housekeeping, recurring_charges
 from .routes import (
     admissions_report,
     auth,
+    counts,
     dashboard,
     debtors,
     enrollments,
@@ -60,6 +61,7 @@ app.include_router(groups.router)
 app.include_router(students.router)
 app.include_router(enrollments.router)
 app.include_router(transactions.router)
+app.include_router(counts.router)
 app.include_router(inquiries.router)
 app.include_router(dashboard.router)
 app.include_router(debtors.router)

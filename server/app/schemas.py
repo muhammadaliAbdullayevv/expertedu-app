@@ -55,6 +55,8 @@ class CreateGroupRequest(BaseModel):
     billing_day: int | None = None
     # Prorate a first period that starts between billing days.
     prorate_first_period: bool = True
+    level: str | None = None
+    start_date: date | None = None
     # Older builds send due_day instead of billing_day.
     due_day: int | None = None
     capacity: int | None = None
@@ -69,6 +71,8 @@ class UpdateGroupRequest(BaseModel):
     billing_mode: str | None = None
     billing_day: int | None = None
     prorate_first_period: bool | None = None
+    level: str | None = None
+    start_date: date | None = None
     due_day: int | None = None
     # Null clears it (no seat limit).
     capacity: int | None = None
@@ -86,6 +90,8 @@ class Group(BaseModel):
     billing_mode: str
     billing_day: int | None
     prorate_first_period: bool
+    level: str | None = None
+    start_date: date | None = None
     # Pay rule of this group alone (null method = follows its teacher's);
     # shown to the owner and admin on the salary pages.
     salary_method: str | None = None
@@ -429,6 +435,11 @@ class CreateLeadRequest(BaseModel):
     # Defaults to whoever creates the lead.
     assigned_to: int | None = None
     preferred_trial_date: date | None = None
+    # What the client asked for -- the days they can come (ISO weekdays, 1 =
+    # Monday), the part of the day ('morning' | 'afternoon' | 'evening') and level.
+    desired_weekdays: list[int] | None = None
+    desired_time_of_day: str | None = None
+    level: str | None = None
     # 'reject': 409 if this phone already has an open lead for the course.
     # 'merge': add this inquiry to that lead's timeline instead and return
     # it -- what the offline outbox sends, since nobody is there to decide.
@@ -446,6 +457,9 @@ class UpdateLeadRequest(BaseModel):
     note: str | None = None
     assigned_to: int | None = None
     preferred_trial_date: date | None = None
+    desired_weekdays: list[int] | None = None
+    desired_time_of_day: str | None = None
+    level: str | None = None
 
 
 class ChangeLeadStageRequest(BaseModel):
@@ -475,6 +489,9 @@ class Lead(BaseModel):
     enrolled_at: datetime | None
     closed_at: datetime | None
     preferred_trial_date: date | None
+    desired_weekdays: list[int] | None = None
+    desired_time_of_day: str | None = None
+    level: str | None = None
     next_trial_at: datetime | None = None
     next_trial_booking_id: int | None = None
     next_task_due_at: datetime | None = None
@@ -606,6 +623,9 @@ class CreateTrialBookingRequest(BaseModel):
     # An existing session, or a new one created together with the booking.
     session_id: int | None = None
     session: CreateTrialSessionRequest | None = None
+    # Leave a task to remind the client the day before (reminder messages
+    # themselves aren't sent by the app yet).
+    remind: bool = False
 
 
 class RescheduleTrialBookingRequest(BaseModel):
@@ -959,3 +979,114 @@ class FinanceSummary(BaseModel):
 
     months: list[FinanceMonth]
     salaries_unpaid_this_month: int
+
+
+# --- Qabul board and shared counts (see app/funnel.py) ----------------------------------------------------
+
+
+class BoardLead(BaseModel):
+    id: int
+    full_name: str
+    phone: str
+    stage: str
+    v2_stage: str
+    source: str | None
+    lost_reason: str | None
+    subject_name: str | None
+    assigned_to_name: str | None
+    created_at: datetime
+    enrolled_at: datetime | None
+    closed_at: datetime | None
+    stage_changed_at: datetime
+    next_trial_at: datetime | None
+    last_trial_at: datetime | None
+    group_name: str | None
+
+
+class BoardColumn(BaseModel):
+    key: str
+    label: str
+    count: int
+    leads: list[BoardLead]
+
+
+class FunnelKpi(BaseModel):
+    """Period figures; every number is defined in app/funnel.py."""
+
+    date_from: date
+    date_to: date
+    leads: int
+    trial_people: int
+    joined: int
+    rejected: int
+    cohort_size: int
+    cohort_joined: int
+    conversion_rate: float | None
+
+
+class AdmissionsBoard(BaseModel):
+    date_from: date
+    date_to: date
+    kpi: FunnelKpi
+    columns: list[BoardColumn]
+
+
+class ShellCounts(BaseModel):
+    open_leads: int
+    active_students: int
+    active_groups: int
+    active_teachers: int
+
+
+class StudentSummary(BaseModel):
+    active_students: int
+    total_students: int
+    new_students_this_month: int
+    students_with_debt: int
+
+
+# --- Kurs qidirish and the trial date picker ---------------------------------------------------------------------
+
+
+class GroupMatch(BaseModel):
+    group_id: int
+    name: str
+    subject_name: str | None
+    level: str | None
+    teacher_name: str | None
+    fee_amount: int
+    billing_mode: str
+    billing_day: int | None
+    prorate_first_period: bool
+    start_date: date | None
+    capacity: int | None
+    enrolled: int
+    # Null = no seat limit.
+    free_seats: int | None
+    slots: list["ScheduleSlot"]
+    weekdays: list[int]
+    # How many of the group's lesson days the client can come on.
+    matched_days: int
+    total_days: int
+
+
+class GroupSearchResult(BaseModel):
+    exact: list[GroupMatch]
+    near: list[GroupMatch]
+
+
+class TrialDate(BaseModel):
+    """One upcoming lesson of a group a guest could attend as a trial."""
+
+    starts_at: datetime
+    ends_at: datetime
+    room: str | None
+    # An existing guest session for that lesson, if someone is already booked.
+    trial_session_id: int | None
+    guests_booked: int
+    # A guest session exists for this lesson and has no seat left.
+    session_full: bool = False
+    # Seats left in the group (null = no limit) and the guest seats to open
+    # if the session doesn't exist yet.
+    free_seats: int | None
+    suggested_capacity: int

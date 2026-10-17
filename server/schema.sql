@@ -64,6 +64,9 @@ create table if not exists groups (
   -- enrollment on its own start day.
   billing_mode text not null default 'fixed_day' check (billing_mode in ('fixed_day', 'student_anniversary')),
   billing_day smallint check (billing_day between 1 and 28),
+  -- What the course finder searches on (0016).
+  level text,
+  start_date date,
   prorate_first_period boolean not null default true,
   -- This group's own pay rule; null salary_method = the teacher's (0014).
   salary_method text check (salary_method in ('percent', 'fixed')),
@@ -179,6 +182,11 @@ create table if not exists leads (
   created_by bigint references users(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  -- What the client asked for (0016): days they can come (ISO weekdays), part of the day, level.
+  desired_weekdays smallint[]
+    check (desired_weekdays is null or desired_weekdays <@ array[1, 2, 3, 4, 5, 6, 7]::smallint[]),
+  desired_time_of_day text check (desired_time_of_day in ('morning', 'afternoon', 'evening')),
+  level text,
   constraint leads_stage_check check (stage in (
     'new','contacted','trial_scheduled','trial_completed','decision_pending','follow_up_later',
     'enrolled','not_interested','unreachable'

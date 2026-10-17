@@ -1,9 +1,21 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from .. import db, schedule
+from datetime import datetime, timedelta
+
+from .. import course_finder, db, schedule
 from ..deps import CurrentUser, get_current_user
 from ..money import rules, service as money
-from ..schemas import CreateGroupRequest, Group, GroupListItem, RosterEntry, ScheduleSlot, UpdateGroupRequest
+from ..schemas import (
+    CreateGroupRequest,
+    Group,
+    GroupListItem,
+    GroupMatch,
+    GroupSearchResult,
+    RosterEntry,
+    ScheduleSlot,
+    TrialDate,
+    UpdateGroupRequest,
+)
 
 router = APIRouter(prefix="/groups", tags=["groups"], dependencies=[Depends(get_current_user)])
 
@@ -132,8 +144,8 @@ async def create_group(payload: CreateGroupRequest, user: CurrentUser = Depends(
     group_id = await db.pool().fetchval(
         """
         insert into groups (subject_id, name, teacher_id, fee_amount, billing_mode, billing_day,
-                            prorate_first_period, capacity, note, created_by)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                            prorate_first_period, capacity, note, created_by, level, start_date)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         returning id
         """,
         payload.subject_id,
@@ -146,8 +158,109 @@ async def create_group(payload: CreateGroupRequest, user: CurrentUser = Depends(
         payload.capacity,
         payload.note,
         user.id,
+        (payload.level or "").strip() or None,
+        payload.start_date,
     )
     return await _fetch_group(group_id)
+
+
+# The two routes below are declared before "/{group_id}" so "search" and
+# "levels" aren't read as ids.
+@router.get("/search", response_model=GroupSearchResult)
+async def search_groups(
+    subject_id: int | None = None,
+    level: str | None = None,
+    weekdays: str | None = None,
+    time_of_day: str | None = None,
+):
+    """Kurs qidirish: groups that fit what a client asked for -- exact
+    matches (all the group's days suit them) and near ones (some do). See
+    app/course_finder.py."""
+    wanted = None
+    if weekdays:
+        try:
+            wanted = {int(d) for d in weekdays.split(",") if d}
+        except ValueError:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Hafta kunlari noto'g'ri.")
+        if any(not 1 <= d <= 7 for d in wanted):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Hafta kunlari 1 dan 7 gacha bo'lishi kerak.")
+    if time_of_day is not None and time_of_day not in course_finder.TIME_OF_DAY:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Vaqt noto'g'ri.")
+    async with db.pool().acquire() as conn:
+        found = await course_finder.search(
+            conn, subject_id=subject_id, level=level, weekdays=wanted, time_of_day=time_of_day
+        )
+    return GroupSearchResult(
+        exact=[GroupMatch(**item) for item in found["exact"]],
+        near=[GroupMatch(**item) for item in found["near"]],
+    )
+
+
+@router.get("/levels", response_model=list[str])
+async def group_levels(subject_id: int | None = None):
+    """The levels the active groups of a subject have, for the finder's chips."""
+    rows = await db.pool().fetch(
+        "select distinct level from groups where is_active and level is not null "
+        "and ($1::bigint is null or subject_id = $1) order by level",
+        subject_id,
+    )
+    return [row["level"] for row in rows]
+
+
+@router.get("/{group_id}/trial-dates", response_model=list[TrialDate])
+async def trial_dates(group_id: int, count: int = 3):
+    """The group's next lessons a guest could come to as a trial (cancelled
+    lessons left out), with the guest session already opened for each."""
+    if not 1 <= count <= 10:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Soni 1 dan 10 gacha bo'lsin.")
+    async with db.pool().acquire() as conn:
+        group = await conn.fetchrow("select * from groups where id = $1", group_id)
+        if group is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
+        slots = await schedule.load_slots(conn, group_ids=[group_id])
+        now = datetime.now(schedule.center_tz())
+        cancelled = {
+            row["starts_at"]
+            for row in await conn.fetch(
+                "select starts_at from lessons where group_id = $1 and status = 'cancelled' and starts_at > now()",
+                group_id,
+            )
+        }
+        upcoming = [
+            o
+            for o in schedule.occurrences(slots, now.date(), now.date() + timedelta(days=60))
+            if o.starts_at > now and o.starts_at not in cancelled
+        ][:count]
+        enrolled = await conn.fetchval(
+            "select count(*) from enrollments where group_id = $1 and status = 'active'", group_id
+        )
+        free = None if group["capacity"] is None else max(group["capacity"] - enrolled, 0)
+        result = []
+        for o in upcoming:
+            session = await conn.fetchrow(
+                """
+                select ts.id, ts.capacity,
+                       (select count(*) from trial_bookings b where b.session_id = ts.id
+                          and b.status in ('scheduled', 'attended', 'absent')) as booked
+                from trial_sessions ts
+                where ts.group_id = $1 and ts.starts_at = $2 and ts.status = 'scheduled'
+                """,
+                group_id,
+                o.starts_at,
+            )
+            result.append(
+                TrialDate(
+                    starts_at=o.starts_at,
+                    ends_at=o.ends_at,
+                    room=o.slot.room,
+                    trial_session_id=session["id"] if session and session["booked"] < session["capacity"] else None,
+                    guests_booked=session["booked"] if session else 0,
+                    session_full=bool(session and session["booked"] >= session["capacity"]),
+                    free_seats=free,
+                    suggested_capacity=max(1, free if free is not None else 3),
+                )
+            )
+    return result
 
 
 @router.get("/{group_id}", response_model=Group)
@@ -194,6 +307,8 @@ async def update_group(group_id: int, payload: UpdateGroupRequest):
         updates["billing_mode"], updates["billing_day"] = mode, day
     if "name" in updates:
         updates["name"] = updates["name"].strip()
+    if "level" in updates:
+        updates["level"] = (updates["level"] or "").strip() or None
     if updates.get("subject_id") is not None:
         await _require_subject(updates["subject_id"])
     if updates.get("teacher_id") is not None:

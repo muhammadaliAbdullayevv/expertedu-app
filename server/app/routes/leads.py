@@ -42,6 +42,9 @@ _FIELD_LABELS = {
     "note": "Izoh",
     "assigned_to": "Mas'ul",
     "preferred_trial_date": "Sinov uchun qulay sana",
+    "desired_weekdays": "Qulay kunlar",
+    "desired_time_of_day": "Qulay vaqt",
+    "level": "Daraja",
 }
 
 
@@ -50,6 +53,20 @@ async def fetch_lead(conn, lead_id: int, *, merged: bool = False) -> Lead:
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "So'rov topilmadi.")
     return Lead(**row, merged=merged)
+
+
+TIMES_OF_DAY = ("morning", "afternoon", "evening")
+
+
+def _desired(weekdays: list[int] | None, time_of_day: str | None, level: str | None):
+    """The cleaned (weekdays, time of day, level) a client asked for."""
+    if weekdays is not None:
+        if any(not 1 <= day <= 7 for day in weekdays):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Hafta kunlari 1 dan 7 gacha bo'lishi kerak.")
+        weekdays = sorted(set(weekdays)) or None
+    if time_of_day is not None and time_of_day not in TIMES_OF_DAY:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Qulay vaqt noto'g'ri.")
+    return weekdays, time_of_day, (level or "").strip() or None
 
 
 def _source(value: str | None) -> str | None:
@@ -184,6 +201,7 @@ async def create_lead(conn, payload: CreateLeadRequest, user: CurrentUser) -> Le
     await _require_subject(conn, payload.subject_id)
     assigned_to = payload.assigned_to if payload.assigned_to is not None else user.id
     await _require_user(conn, assigned_to)
+    weekdays, time_of_day, level = _desired(payload.desired_weekdays, payload.desired_time_of_day, payload.level)
 
     if payload.client_id is not None:
         existing_id = await conn.fetchval("select id from leads where client_id = $1", payload.client_id)
@@ -209,8 +227,8 @@ async def create_lead(conn, payload: CreateLeadRequest, user: CurrentUser) -> Le
                 """
                 insert into leads
                     (client_id, full_name, phone, parent_phone, subject_id, source, note, assigned_to,
-                     preferred_trial_date, student_id, created_by)
-                values (coalesce($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                     preferred_trial_date, student_id, created_by, desired_weekdays, desired_time_of_day, level)
+                values (coalesce($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
                 returning id
                 """,
                 payload.client_id,
@@ -224,6 +242,9 @@ async def create_lead(conn, payload: CreateLeadRequest, user: CurrentUser) -> Le
                 payload.preferred_trial_date,
                 student_id,
                 user.id,
+                weekdays,
+                time_of_day,
+                level,
             )
     except asyncpg.UniqueViolationError:
         # The phone lock above should make this unreachable; the index is
@@ -297,6 +318,15 @@ async def update_lead(lead_id: int, payload: UpdateLeadRequest, user: CurrentUse
                 await _require_subject(conn, changes["subject_id"])
             if "assigned_to" in changes:
                 await _require_user(conn, changes["assigned_to"])
+            if {"desired_weekdays", "desired_time_of_day", "level"} & changes.keys():
+                days, time_of_day, level = _desired(
+                    changes.get("desired_weekdays", lead["desired_weekdays"]),
+                    changes.get("desired_time_of_day", lead["desired_time_of_day"]),
+                    changes.get("level", lead["level"]),
+                )
+                for field, value in (("desired_weekdays", days), ("desired_time_of_day", time_of_day), ("level", level)):
+                    if field in changes:
+                        changes[field] = value
 
             changes = {field: value for field, value in changes.items() if value != lead[field]}
             if not changes:

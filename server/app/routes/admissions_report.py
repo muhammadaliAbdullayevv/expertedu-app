@@ -2,16 +2,36 @@ from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from .. import admissions, clock, db
+from .. import admissions, clock, db, funnel
 from ..config import settings
 from ..deps import get_current_user
-from ..schemas import AdmissionsReport, CountByKey
+from ..schemas import AdmissionsBoard, AdmissionsReport, CountByKey
 
 router = APIRouter(prefix="/admissions", tags=["admissions"], dependencies=[Depends(get_current_user)])
 
 
 def _rate(part: int, whole: int) -> float | None:
     return round(part / whole, 4) if whole else None
+
+
+def _range(date_from: date | None, date_to: date | None) -> tuple[date, date]:
+    today = clock.today()
+    date_from = date_from or today.replace(day=1)
+    date_to = date_to or today
+    if date_to < date_from:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sana oralig'i noto'g'ri.")
+    if date_to - date_from > timedelta(days=366):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Oraliq bir yildan oshmasin.")
+    return date_from, date_to
+
+
+@router.get("/board", response_model=AdmissionsBoard)
+async def admissions_board(date_from: date | None = None, date_to: date | None = None):
+    """Qabul: the KPI strip and a column per V2 stage, all from app/funnel.py
+    -- the same numbers Bugun and O'quvchilar show."""
+    date_from, date_to = _range(date_from, date_to)
+    async with db.pool().acquire() as conn:
+        return AdmissionsBoard(**await funnel.board(conn, date_from, date_to))
 
 
 @router.get("/report", response_model=AdmissionsReport)
@@ -21,29 +41,14 @@ async def admissions_report(date_from: date | None = None, date_to: date | None 
     enrollment -- enrollments are leads that went through the explicit
     enroll step."""
     today = clock.today()
-    date_from = date_from or today.replace(day=1)
-    date_to = date_to or today
-    if date_to < date_from:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sana oralig'i noto'g'ri.")
-    if date_to - date_from > timedelta(days=366):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Oraliq bir yildan oshmasin.")
+    date_from, date_to = _range(date_from, date_to)
     tz = settings.center_timezone
     open_stages = list(admissions.OPEN_STAGES)
 
     async with db.pool().acquire() as conn:
-        leads = await conn.fetchrow(
-            """
-            select
-              count(*) filter (where (created_at at time zone $1)::date between $2 and $3) as new_inquiries,
-              count(*) filter (where (created_at at time zone $1)::date between $2 and $3
-                                 and stage = 'enrolled') as cohort_enrolled,
-              count(*) filter (where (enrolled_at at time zone $1)::date between $2 and $3) as enrollments
-            from leads
-            """,
-            tz,
-            date_from,
-            date_to,
-        )
+        # People and enrollments come from app/funnel.py -- the same figures as
+        # the Qabul board, Bugun and O'quvchilar.
+        period = await funnel.period_counts(conn, date_from, date_to)
         trials = await conn.fetchrow(
             """
             select
@@ -98,16 +103,16 @@ async def admissions_report(date_from: date | None = None, date_to: date | None 
     return AdmissionsReport(
         date_from=date_from,
         date_to=date_to,
-        new_inquiries=leads["new_inquiries"],
+        new_inquiries=period["leads"],
         trials_booked=trials["trials_booked"],
         trials_attended=trials["trials_attended"],
         trials_absent=trials["trials_absent"],
         trials_cancelled=trials["trials_cancelled"],
         show_rate=_rate(trials["trials_attended"], trials["trials_attended"] + trials["trials_absent"]),
-        enrollments=leads["enrollments"],
-        cohort_size=leads["new_inquiries"],
-        cohort_enrolled=leads["cohort_enrolled"],
-        lead_conversion_rate=_rate(leads["cohort_enrolled"], leads["new_inquiries"]),
+        enrollments=period["joined"],
+        cohort_size=period["cohort_size"],
+        cohort_enrolled=period["cohort_joined"],
+        lead_conversion_rate=period["conversion_rate"],
         trial_cohort_size=trials["trial_cohort_size"],
         trial_cohort_enrolled=trials["trial_cohort_enrolled"],
         trial_conversion_rate=_rate(trials["trial_cohort_enrolled"], trials["trial_cohort_size"]),

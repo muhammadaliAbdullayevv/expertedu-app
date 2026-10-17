@@ -1,7 +1,7 @@
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from .. import db
+from .. import db, funnel
 from ..deps import CurrentUser, get_current_user
 from ..phone import is_valid_uzbek_phone, normalize
 from ..schemas import (
@@ -10,6 +10,7 @@ from ..schemas import (
     PhoneCheck,
     PhoneOwner,
     Student,
+    StudentSummary,
     StudentEnrolled,
     StudentListItem,
     UpdateStudentRequest,
@@ -101,6 +102,14 @@ async def list_students(q: str | None = None):
 
 
 # Declared before "/{student_id}" so the path isn't read as a student id.
+@router.get("/summary", response_model=StudentSummary)
+async def students_summary():
+    """The O'quvchilar header, from app/funnel.py -- leads, trials included,
+    are not students."""
+    async with db.pool().acquire() as conn:
+        return StudentSummary(**await funnel.student_counts(conn))
+
+
 @router.get("/phone-check", response_model=PhoneCheck)
 async def check_phone(phone: str):
     """Live duplicate check while the number is being typed. Anything that

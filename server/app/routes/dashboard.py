@@ -1,8 +1,8 @@
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends
 
-from .. import admissions, clock, db
+from .. import clock, db, funnel
 from ..money import service as money
 from ..config import settings
 from ..deps import get_current_user
@@ -36,8 +36,6 @@ async def get_dashboard():
         counts = await conn.fetchrow(
             """
             select
-              (select count(distinct student_id) from enrollments where status = 'active') as active_students,
-              (select count(*) from students where (created_at at time zone $1)::date >= $2) as new_students_this_month,
               (select count(*) from groups where is_active) as active_groups,
               (select coalesce(sum(case when kind = 'payment' then amount else -amount end), 0) from payments
                 where (received_at at time zone $1)::date >= $2) as collected_this_month
@@ -54,17 +52,20 @@ async def get_dashboard():
         )
         monthly_plan = await money.monthly_plan(conn, month_start)
 
-        leads = await conn.fetchrow(
-            """
-            select
-              count(*) filter (where created_at >= now() - interval '7 days') as new_leads_this_week,
-              count(*) filter (where stage = any($1::text[])) as open_leads,
-              count(*) filter (where stage = 'new' and created_at < now() - interval '24 hours')
-                as unanswered_leads
-            from leads
-            """,
-            list(admissions.OPEN_STAGES),
-        )
+        # Every lead and student number comes from app/funnel.py -- the same
+        # definitions Qabul and O'quvchilar use.
+        lead_numbers = await funnel.lead_counts(conn)
+        week = await funnel.period_counts(conn, today - timedelta(days=6), today)
+        student_numbers = await funnel.student_counts(conn, today)
+        leads = {
+            "new_leads_this_week": week["leads"],
+            "open_leads": lead_numbers["open_leads"],
+            "unanswered_leads": lead_numbers["unanswered_leads"],
+        }
+        students = {
+            "active_students": student_numbers["active_students"],
+            "new_students_this_month": student_numbers["new_students_this_month"],
+        }
 
         # Students whose next charge falls due today (a student joining today
         # isn't a due day, it's a new student).
@@ -129,6 +130,7 @@ async def get_dashboard():
     return DashboardSummary(
         today=today,
         **counts,
+        **students,
         monthly_plan=monthly_plan,
         **debt,
         **leads,

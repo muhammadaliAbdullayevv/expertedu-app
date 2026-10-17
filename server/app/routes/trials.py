@@ -481,6 +481,18 @@ async def create_trial_booking(
         booking_id = await book(
             conn, lead_id=payload.lead_id, session_id=session_id, user_id=user.id, is_owner=user.role == "owner"
         )
+        if payload.remind:
+            # A task for the evening before the lesson (or right away if that has passed).
+            starts_at = await conn.fetchval("select starts_at from trial_sessions where id = $1", session_id)
+            evening_before = (
+                datetime.combine((starts_at.astimezone(ZoneInfo(settings.center_timezone)) - timedelta(days=1)).date(),
+                                 datetime.min.time().replace(hour=18), ZoneInfo(settings.center_timezone))
+            )
+            due_at = max(evening_before, datetime.now(ZoneInfo(settings.center_timezone)))
+            lead = await conn.fetchrow("select * from leads where id = $1", payload.lead_id)
+            await admissions.add_task(
+                conn, lead, "Sinov darsi haqida eslatish", due_at, user_id=user.id,
+            )
         return await fetch_booking(conn, booking_id)
 
     return await idempotency.run(
