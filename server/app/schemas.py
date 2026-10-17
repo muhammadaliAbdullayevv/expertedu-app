@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -89,6 +89,8 @@ class GroupListItem(GroupWithStudentCount):
     which lists every group across all subjects."""
 
     subject_name: str | None
+    # The weekly lesson slots (defined further down).
+    schedule: list["ScheduleSlot"] = []
 
 
 class CreateTeacherRequest(BaseModel):
@@ -709,3 +711,112 @@ class UpdateStaffRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     password: str
+
+
+# Schedule and attendance ---------------------------------------------------
+
+
+class ScheduleSlot(BaseModel):
+    weekday: int
+    starts_at: time
+    ends_at: time
+    room: str | None = None
+
+
+class GroupSchedule(BaseModel):
+    group_id: int
+    slots: list[ScheduleSlot]
+
+
+class SetGroupScheduleRequest(BaseModel):
+    slots: list[ScheduleSlot]
+
+
+class TimetableLesson(BaseModel):
+    """One lesson in the timetable -- from the group's weekly schedule,
+    or an extra one. lesson_id is set once it has a row (attendance marked,
+    cancelled, or extra)."""
+
+    group_id: int
+    group_name: str
+    subject_name: str | None
+    teacher_id: int | None
+    teacher_name: str | None
+    room: str | None
+    starts_at: datetime
+    ends_at: datetime
+    lesson_id: int | None = None
+    # 'scheduled' | 'cancelled'
+    status: str = "scheduled"
+    cancel_reason: str | None = None
+    is_extra: bool = False
+    student_count: int = 0
+    marked_count: int = 0
+    present_count: int = 0
+
+
+class SheetStudent(BaseModel):
+    enrollment_id: int
+    student_id: int
+    full_name: str
+    phone: str
+    status: str | None = None
+    note: str | None = None
+
+
+class SheetTrialGuest(BaseModel):
+    booking_id: int
+    lead_id: int
+    full_name: str
+    status: str
+
+
+class AttendanceSheet(BaseModel):
+    lesson: TimetableLesson
+    students: list[SheetStudent]
+    trial_guests: list[SheetTrialGuest]
+
+
+class AttendanceMark(BaseModel):
+    enrollment_id: int
+    status: str
+    note: str | None = None
+
+
+class MarkAttendanceRequest(BaseModel):
+    group_id: int
+    starts_at: datetime
+    marks: list[AttendanceMark]
+
+
+class LessonRef(BaseModel):
+    group_id: int
+    starts_at: datetime
+    reason: str | None = None
+
+
+class CreateExtraLessonRequest(BaseModel):
+    group_id: int
+    starts_at: datetime
+    ends_at: datetime
+    room: str | None = None
+    note: str | None = None
+
+
+class AttendanceReportRow(BaseModel):
+    enrollment_id: int
+    student_id: int
+    full_name: str
+    phone: str
+    group_id: int
+    group_name: str
+    lessons: int
+    present: int
+    late: int
+    absent: int
+    excused: int
+    # (present + late) / lessons; null with no marked lessons.
+    rate: float | None
+
+
+GroupListItem.model_rebuild()

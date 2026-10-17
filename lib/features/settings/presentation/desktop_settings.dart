@@ -11,6 +11,8 @@ import '../../../core/widgets/table_card.dart';
 import '../../auth/application/session_controller.dart';
 import '../../groups/data/groups_repository.dart';
 import '../../staff/presentation/staff_tab.dart';
+import '../../timetable/data/timetable_models.dart';
+import '../../timetable/presentation/group_schedule_dialog.dart';
 import '../../groups/presentation/group_form_dialog.dart';
 import '../../teachers/data/teachers_repository.dart';
 import '../../teachers/presentation/teacher_form_dialog.dart';
@@ -168,14 +170,20 @@ class _GroupsTabState extends ConsumerState<_GroupsTab> {
     if (saved == true) _reload();
   }
 
+  Future<void> _openSchedule(Group group) async {
+    final saved = await showGroupScheduleDialog(context, group);
+    if (saved == true) _reload();
+  }
+
   static const _columns = <TableColumn>[
     TableColumn('Guruh', flex: 3),
     TableColumn('Fan', flex: 2),
     TableColumn('O\'qituvchi', flex: 2),
+    TableColumn('Dars jadvali', flex: 3),
     TableColumn('Oylik narx', flex: 2, alignEnd: true),
     TableColumn('To\'lov kuni', flex: 2, alignEnd: true),
     TableColumn('O\'quvchilar', flex: 2, alignEnd: true),
-    TableColumn('', width: 56),
+    TableColumn('', width: 96),
   ];
 
   @override
@@ -246,13 +254,38 @@ class _GroupsTabState extends ConsumerState<_GroupsTab> {
                           group.teacherName!,
                           overflow: TextOverflow.ellipsis,
                         ),
-                3 => Text(CurrencyFormatter.format(group.feeAmount)),
-                4 => Text('har oy ${group.dueDay}-sana'),
-                5 => Text('${group.studentCount ?? 0}'),
-                _ => IconButton(
-                  tooltip: 'Tahrirlash',
-                  onPressed: () => _openForm(group),
-                  icon: const Icon(Icons.edit_outlined, size: 20),
+                3 => Tooltip(
+                  message: 'Dars jadvalini o\'zgartirish',
+                  child: InkWell(
+                    onTap: () => _openSchedule(group),
+                    child: group.schedule.isEmpty
+                        ? Text(
+                            'Jadval qo\'shish',
+                            style: TextStyle(color: context.colors.primary),
+                          )
+                        : Text(
+                            scheduleSummary(group.schedule),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                  ),
+                ),
+                4 => Text(CurrencyFormatter.format(group.feeAmount)),
+                5 => Text('har oy ${group.dueDay}-sana'),
+                6 => Text('${group.studentCount ?? 0}'),
+                _ => Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    IconButton(
+                      tooltip: 'Dars jadvali',
+                      onPressed: () => _openSchedule(group),
+                      icon: const Icon(Icons.calendar_month_outlined, size: 20),
+                    ),
+                    IconButton(
+                      tooltip: 'Tahrirlash',
+                      onPressed: () => _openForm(group),
+                      icon: const Icon(Icons.edit_outlined, size: 20),
+                    ),
+                  ],
                 ),
               };
             },

@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 
-from .. import admissions, db, idempotency
+from .. import admissions, db, idempotency, schedule
 from ..config import settings
 from ..deps import CurrentUser, get_current_user
 from ..schemas import (
@@ -140,6 +140,17 @@ async def _check_conflicts(
         exclude_id,
     )
     if clash is None:
+        # Regular group lessons take teachers and rooms too.
+        message = await schedule.regular_lesson_clash(
+            conn,
+            starts_at=starts_at,
+            ends_at=ends_at,
+            teacher_id=teacher_id,
+            room=room,
+            exclude_group_id=group_id,
+        )
+        if message:
+            raise HTTPException(status.HTTP_409_CONFLICT, message)
         return
     when = describe_time(clash["starts_at"], clash["ends_at"])
     if clash["same_teacher"]:

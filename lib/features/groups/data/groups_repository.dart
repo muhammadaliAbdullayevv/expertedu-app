@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../services/api/api_client.dart';
+import '../../timetable/data/timetable_models.dart';
 
 final groupsRepositoryProvider = Provider<GroupsRepository>((ref) {
   return GroupsRepository(ref.watch(apiClientProvider));
@@ -20,6 +21,7 @@ class Group {
     this.note,
     this.studentCount,
     this.subjectName,
+    this.schedule = const <ScheduleSlot>[],
   });
 
   final int id;
@@ -44,6 +46,9 @@ class Group {
   /// Only populated by [GroupsRepository.list].
   final String? subjectName;
 
+  /// The weekly lesson slots -- only populated by [GroupsRepository.list].
+  final List<ScheduleSlot> schedule;
+
   factory Group.fromJson(Map<String, dynamic> json) => Group(
     id: json['id'] as int,
     subjectId: json['subject_id'] as int?,
@@ -57,6 +62,9 @@ class Group {
     note: json['note'] as String?,
     studentCount: json['student_count'] as int?,
     subjectName: json['subject_name'] as String?,
+    schedule: (json['schedule'] as List<dynamic>? ?? const <dynamic>[])
+        .map((e) => ScheduleSlot.fromJson(e as Map<String, dynamic>))
+        .toList(),
   );
 }
 

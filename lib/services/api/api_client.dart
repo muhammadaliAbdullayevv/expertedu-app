@@ -89,6 +89,19 @@ class ApiClient {
     });
   }
 
+  Future<dynamic> put(String path, {Object? body}) {
+    return _guarded(() async {
+      final response = await _http
+          .put(
+            _uri(path),
+            headers: await _headers(),
+            body: body == null ? null : jsonEncode(body),
+          )
+          .timeout(_timeout);
+      return _decode(response);
+    });
+  }
+
   Future<dynamic> patch(String path, {Object? body}) {
     return _guarded(() async {
       final response = await _http

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/layout/breakpoints.dart';
 import '../../../services/sync/sync_engine.dart';
 import '../../admissions/presentation/admissions_screen.dart';
+import '../../timetable/presentation/timetable_screen.dart';
 import '../../debtors/presentation/debtors_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../../stats/presentation/stats_screen.dart';
@@ -19,6 +20,12 @@ enum _Tab {
     Icons.how_to_reg_outlined,
     Icons.how_to_reg_rounded,
     'Qabul',
+    desktopOnly: true,
+  ),
+  timetable(
+    Icons.calendar_month_outlined,
+    Icons.calendar_month_rounded,
+    'Jadval',
     desktopOnly: true,
   ),
   subjects(Icons.menu_book_outlined, Icons.menu_book_rounded, 'Fanlar'),
@@ -75,6 +82,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   final _studentsKey = GlobalKey<StudentsListScreenState>();
   final _debtorsKey = GlobalKey<DebtorsScreenState>();
   final _admissionsKey = GlobalKey<AdmissionsScreenState>();
+  final _timetableKey = GlobalKey<TimetableScreenState>();
 
   // Resizing a desktop window across the wide-layout breakpoint moves the
   // content Scaffold to a different spot in the tree -- this key carries it
@@ -91,6 +99,7 @@ class _HomeShellState extends ConsumerState<HomeShell> {
       onOpenAdmissions: () => _selectTab(_Tab.admissions),
     ),
     _Tab.admissions: AdmissionsScreen(key: _admissionsKey),
+    _Tab.timetable: TimetableScreen(key: _timetableKey),
     _Tab.subjects: SubjectsListScreen(key: _subjectsKey),
     _Tab.students: StudentsListScreen(key: _studentsKey),
     _Tab.debtors: DebtorsScreen(key: _debtorsKey),
@@ -160,13 +169,17 @@ class _HomeShellState extends ConsumerState<HomeShell> {
           if (useRail &&
               (tab == _Tab.home ||
                   tab == _Tab.debtors ||
-                  tab == _Tab.admissions))
+                  tab == _Tab.admissions ||
+                  tab == _Tab.timetable))
             IconButton(
-              tooltip: tab == _Tab.admissions ? 'Yangilash (F5)' : 'Yangilash',
+              tooltip: tab == _Tab.admissions || tab == _Tab.timetable
+                  ? 'Yangilash (F5)'
+                  : 'Yangilash',
               icon: const Icon(Icons.refresh_rounded),
               onPressed: () => switch (tab) {
                 _Tab.home => _dashboardKey.currentState?.reload(),
                 _Tab.admissions => _admissionsKey.currentState?.reload(),
+                _Tab.timetable => _timetableKey.currentState?.reload(),
                 _ => _debtorsKey.currentState?.reload(),
               },
             ),

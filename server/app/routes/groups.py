@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from .. import db
+from .. import db, schedule
 from ..deps import CurrentUser, get_current_user
-from ..schemas import CreateGroupRequest, Group, GroupListItem, RosterEntry, UpdateGroupRequest
+from ..schemas import CreateGroupRequest, Group, GroupListItem, RosterEntry, ScheduleSlot, UpdateGroupRequest
 
 router = APIRouter(prefix="/groups", tags=["groups"], dependencies=[Depends(get_current_user)])
 
@@ -92,7 +92,14 @@ async def list_groups(include_inactive: bool = False):
         order by g.name asc
         """
     )
-    return [GroupListItem(**row) for row in rows]
+    async with db.pool().acquire() as conn:
+        slots = await schedule.load_slots(conn, group_ids=[row["id"] for row in rows], active_only=False)
+    by_group: dict[int, list[ScheduleSlot]] = {}
+    for slot in slots:
+        by_group.setdefault(slot.group_id, []).append(
+            ScheduleSlot(weekday=slot.weekday, starts_at=slot.starts_at, ends_at=slot.ends_at, room=slot.room)
+        )
+    return [GroupListItem(**row, schedule=by_group.get(row["id"], [])) for row in rows]
 
 
 @router.post("", response_model=Group, status_code=status.HTTP_201_CREATED)
@@ -158,7 +165,16 @@ async def update_group(group_id: int, payload: UpdateGroupRequest):
     fields = list(updates.keys())
     values = list(updates.values())
     set_clause = ", ".join(f"{field} = ${i + 2}" for i, field in enumerate(fields))
-    await db.pool().execute(f"update groups set {set_clause} where id = $1", group_id, *values)
+    async with db.pool().acquire() as conn:
+        async with conn.transaction():
+            # A new teacher, or the group back in use, must still fit the
+            # timetable: no teacher or room taken twice at once.
+            teacher_id = updates.get("teacher_id", existing.teacher_id)
+            is_active = updates.get("is_active", existing.is_active)
+            if is_active and (teacher_id != existing.teacher_id or not existing.is_active):
+                slots = await schedule.load_slots(conn, group_ids=[group_id], active_only=False)
+                await schedule.check_clashes(conn, group_id=group_id, teacher_id=teacher_id, slots=slots)
+            await conn.execute(f"update groups set {set_clause} where id = $1", group_id, *values)
     return await _fetch_group(group_id)
 
 

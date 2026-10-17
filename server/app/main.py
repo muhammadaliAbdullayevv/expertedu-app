@@ -21,6 +21,7 @@ from .routes import (
     staff,
     students,
     subjects,
+    timetable,
     teachers,
     transactions,
     trials,
@@ -68,3 +69,4 @@ app.include_router(follow_ups.router)
 app.include_router(admissions_report.router)
 app.include_router(users.router)
 app.include_router(staff.router)
+app.include_router(timetable.router)
