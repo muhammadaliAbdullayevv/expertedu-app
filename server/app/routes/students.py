@@ -346,7 +346,7 @@ async def student_profile(student_id: int):
         )
         marks = await conn.fetch(
             """
-            select a.enrollment_id, a.status, l.starts_at as at, g.name as group_name
+            select a.enrollment_id, a.status, l.starts_at as at, g.name as group_name, g.id as group_id
             from attendance a join lessons l on l.id = a.lesson_id
             join enrollments e on e.id = a.enrollment_id
             join groups g on g.id = e.group_id
@@ -364,9 +364,17 @@ async def student_profile(student_id: int):
             "select min(due_date) from charge_balances where student_id = $1 and status = 'active' and owed > 0",
             student_id,
         )
+        debt_since_by_enrollment = {
+            r["enrollment_id"]: r["since"]
+            for r in await conn.fetch(
+                "select enrollment_id, min(due_date) as since from charge_balances "
+                "where student_id = $1 and status = 'active' and owed > 0 group by enrollment_id",
+                student_id,
+            )
+        }
         charges = await conn.fetch(
             """
-            select c.created_at as at, c.amount, c.period_start, g.name as group_name
+            select c.created_at as at, c.amount, c.period_start, g.name as group_name, g.id as group_id
             from charges c join enrollments e on e.id = c.enrollment_id join groups g on g.id = e.group_id
             where e.student_id = $1 and c.status = 'active'
             order by c.created_at desc limit 10
@@ -375,7 +383,7 @@ async def student_profile(student_id: int):
         )
         missed = await conn.fetch(
             """
-            select l.starts_at as at, a.status, g.name as group_name
+            select l.starts_at as at, a.status, g.name as group_name, g.id as group_id
             from attendance a join lessons l on l.id = a.lesson_id
             join enrollments e on e.id = a.enrollment_id join groups g on g.id = e.group_id
             where e.student_id = $1 and a.status in ('absent', 'late')
@@ -385,7 +393,7 @@ async def student_profile(student_id: int):
         )
         payments = await conn.fetch(
             """
-            select p.id, p.enrollment_id, g.name as group_name, p.amount, p.method, p.received_at,
+            select p.id, p.enrollment_id, g.id as group_id, g.name as group_name, p.amount, p.method, p.received_at,
                    u.full_name as received_by_name, p.receipt_no, p.note, p.status, p.cancel_reason
             from payments p
             left join enrollments e on e.id = p.enrollment_id
@@ -404,6 +412,7 @@ async def student_profile(student_id: int):
         ProfileGroup(
             **e,
             next_due_date=due.get(e["enrollment_id"]),
+            debt_since=debt_since_by_enrollment.get(e["enrollment_id"]),
             schedule=[
                 ScheduleSlot(weekday=sl.weekday, starts_at=sl.starts_at, ends_at=sl.ends_at, room=sl.room)
                 for sl in slots
@@ -424,7 +433,7 @@ async def student_profile(student_id: int):
         debt_since=debt_since,
         overdue_days=max((today - debt_since).days, 0) if debt_since else 0,
         activity=activity,
-        marks=[ProfileMark(at=m["at"], group_name=m["group_name"], status=m["status"]) for m in reversed(marks)][:30],
+        marks=[ProfileMark(at=m["at"], group_id=m["group_id"], group_name=m["group_name"], status=m["status"]) for m in reversed(marks)][:30],
     )
 
 
@@ -438,11 +447,15 @@ def _activity(enrollments, charges, missed, payments) -> list[ActivityItem]:
                 kind="joined",
                 title="Guruhga qo'shildi",
                 detail=e["group_name"],
+                group_id=e["group_id"],
             )
         )
     for c in charges:
         items.append(
-            ActivityItem(at=c["at"], kind="charge", title="Hisob chiqdi", detail=c["group_name"], amount=c["amount"])
+            ActivityItem(
+                at=c["at"], kind="charge", title="Hisob chiqdi", detail=c["group_name"],
+                amount=c["amount"], group_id=c["group_id"],
+            )
         )
     for m in missed:
         items.append(
@@ -451,6 +464,7 @@ def _activity(enrollments, charges, missed, payments) -> list[ActivityItem]:
                 kind=m["status"],
                 title="Darsga kelmadi" if m["status"] == "absent" else "Darsga kechikdi",
                 detail=m["group_name"],
+                group_id=m["group_id"],
             )
         )
     for p in payments[:10]:
@@ -462,6 +476,7 @@ def _activity(enrollments, charges, missed, payments) -> list[ActivityItem]:
                 title="To'lov bekor qilindi" if cancelled else "To'lov qabul qilindi",
                 detail=p["group_name"],
                 amount=p["amount"],
+                group_id=p["group_id"],
             )
         )
     items.sort(key=lambda i: i.at, reverse=True)

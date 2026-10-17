@@ -1164,6 +1164,7 @@ class ProfileAttendance(BaseModel):
 
 class ProfileMark(BaseModel):
     at: datetime
+    group_id: int | None = None
     group_name: str
     status: str
 
@@ -1180,6 +1181,8 @@ class ProfileGroup(BaseModel):
     # > 0: the student owes this much on this group (money.enrollment_balances).
     balance: int
     next_due_date: date | None = None
+    # The oldest charge on this group that is still unpaid (null = none overdue).
+    debt_since: date | None = None
     schedule: list["ScheduleSlot"] = []
     attendance: ProfileAttendance
 
@@ -1187,6 +1190,7 @@ class ProfileGroup(BaseModel):
 class ProfilePayment(BaseModel):
     id: int
     enrollment_id: int | None
+    group_id: int | None = None
     group_name: str | None
     amount: int
     method: str | None
@@ -1238,6 +1242,8 @@ class ActivityItem(BaseModel):
     title: str
     detail: str | None = None
     amount: int | None = None
+    # Which group it was about, so a group's page can show only its own.
+    group_id: int | None = None
 
 
 class AddToGroupRequest(BaseModel):

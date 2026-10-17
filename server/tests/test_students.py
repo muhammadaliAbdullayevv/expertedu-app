@@ -386,3 +386,27 @@ async def test_if_the_payment_step_fails_the_seat_and_the_bill_are_undone_too(sc
     assert await school.pool.fetchval("select count(*) from enrollments") == 0
     assert await school.pool.fetchval("select count(*) from charges") == 0
     assert await school.pool.fetchval("select count(*) from audit_log where action = 'add_to_group'") == 0
+
+
+async def test_everything_on_the_profile_says_which_group_it_is_about(school):
+    """A group's page shows only its own part of a student, so every line of the
+    profile (lessons, payments, activity, debt age) carries its group."""
+    s = await school.student()
+    e1 = await school.join(s, school.g1, joined=date.today() - timedelta(days=40))
+    e2 = await school.join(s, school.g2)
+    await school.mark(e1, school.g1, ["present", "absent"])
+    await school.mark(e2, school.g2, ["late"])
+    await school.pay(e2, 1000)
+    p = await school.profile(s)
+
+    assert {m["group_id"] for m in p["marks"]} == {school.g1, school.g2}
+    by_group = {g: [m["status"] for m in p["marks"] if m["group_id"] == g] for g in (school.g1, school.g2)}
+    assert sorted(by_group[school.g1]) == ["absent", "present"] and by_group[school.g2] == ["late"]
+    assert [(x["group_id"], x["enrollment_id"]) for x in p["payments"]] == [(school.g2, e2)]
+    assert {i["group_id"] for i in p["activity"]} == {school.g1, school.g2}
+    for item in p["activity"]:
+        assert item["group_id"] in (school.g1, school.g2), item
+    # Each group knows how long its own debt has been due: the older group has the older date.
+    debt = {g["group_id"]: g["debt_since"] for g in p["groups"]}
+    assert debt[school.g1] is not None and debt[school.g2] is not None
+    assert date.fromisoformat(debt[school.g1]) < date.fromisoformat(debt[school.g2])
