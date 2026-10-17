@@ -22,7 +22,12 @@ final syncEngineProvider = Provider<SyncEngine>((ref) {
     send: (path, body, headers) => api.post(path, body: body, headers: headers),
     linkChanges: ref.watch(connectivityServiceProvider).onLinkChanged,
   );
-  ref.onDispose(engine.dispose);
+  api.onReachability = (up) =>
+      up ? engine.reportOnline() : engine.reportOffline();
+  ref.onDispose(() {
+    api.onReachability = null;
+    engine.dispose();
+  });
   return engine;
 });
 

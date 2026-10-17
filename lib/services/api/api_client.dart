@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
@@ -23,12 +25,18 @@ class ApiException implements Exception {
 /// Thin JSON/JWT wrapper around [http.Client]. Set [onUnauthorized] once a
 /// session controller exists so a 401 from any call can force a sign-out.
 class ApiClient {
-  ApiClient(this._tokenStorage);
+  ApiClient(this._tokenStorage, [http.Client? client])
+    : _http = client ?? http.Client();
 
   final TokenStorage _tokenStorage;
-  final http.Client _http = http.Client();
+  final http.Client _http;
 
   void Function()? onUnauthorized;
+
+  /// Told after every call whether the server could be reached: true when
+  /// it answered (with anything), false only for a real network failure.
+  /// The sync engine shows "Oflayn" from this, so it is never stale.
+  void Function(bool reachable)? onReachability;
 
   // Set the instant any single call gets a 401. Without this, every
   // other poller already in flight at that moment -- dashboard, search,
@@ -154,15 +162,32 @@ class ApiClient {
       throw ApiException(401, 'Sessiya tugadi, qayta kiring.');
     }
     try {
-      return await action();
-    } on ApiException {
+      final result = await action();
+      onReachability?.call(true);
+      return result;
+    } on ApiException catch (e) {
+      // An error answer is still an answer: the server is there.
+      if (e.statusCode != 0) onReachability?.call(true);
       rethrow;
+    } on SocketException {
+      throw _unreachable();
+    } on TimeoutException {
+      throw _unreachable();
+    } on http.ClientException {
+      throw _unreachable();
+    } on HandshakeException {
+      throw _unreachable();
     } catch (_) {
-      throw ApiException(
-        0,
-        'Serverga ulanib bo\'lmadi. Internetni tekshiring.',
-      );
+      // Something else went wrong on this side (an answer we could not
+      // read...): not a sign that the internet is down.
+      onReachability?.call(true);
+      throw ApiException(500, 'Kutilmagan xatolik yuz berdi.');
     }
+  }
+
+  ApiException _unreachable() {
+    onReachability?.call(false);
+    return ApiException(0, 'Serverga ulanib bo\'lmadi. Internetni tekshiring.');
   }
 
   Uri _uri(String path, [Map<String, String>? query]) {

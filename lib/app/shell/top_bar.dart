@@ -29,13 +29,17 @@ class AppTopBar extends StatelessWidget {
       ),
       child: Row(
         children: <Widget>[
-          Flexible(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 520),
-              child: CommandBarButton(onPressed: onOpenCommandBar),
+          // The search takes the room up to its cap and the "+ Yangi" button
+          // always sits at the right edge, whatever the window width.
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: CommandBarButton(onPressed: onOpenCommandBar),
+              ),
             ),
           ),
-          const Spacer(),
           if (newMenuItems.isNotEmpty) NewMenuButton(items: newMenuItems),
         ],
       ),

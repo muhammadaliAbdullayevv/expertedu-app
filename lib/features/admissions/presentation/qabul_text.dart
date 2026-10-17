@@ -135,3 +135,8 @@ String groupTitle(GroupMatch g) {
   }
   return '$subject, ${g.name}';
 }
+
+/// The seats chip of the picker: free seats when the group has a capacity,
+/// otherwise how many students it has ("14 o'quvchi") -- never "Cheklanmagan".
+String studentsOrSeats(GroupMatch g) =>
+    g.freeSeats == null ? '${g.enrolled} o\'quvchi' : seatsLabel(g.freeSeats);

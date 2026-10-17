@@ -243,6 +243,29 @@ void main() {
       expect(chosen, 'lead');
     });
 
+    testWidgets('+ Yangi sits at the right edge at any window width', (
+      tester,
+    ) async {
+      for (final width in [1100.0, 1440.0, 1920.0, 2560.0]) {
+        tester.view.physicalSize = Size(width, 800);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        await tester.pumpWidget(
+          host(
+            AppTopBar(
+              onOpenCommandBar: () {},
+              newMenuItems: [NewMenuItem('Yangi so\'rov', Icons.phone, () {})],
+            ),
+          ),
+        );
+        final button = tester.getRect(find.text('Yangi'));
+        final bar = tester.getRect(find.byType(AppTopBar));
+        // The page content ends 32 px from the right; the button's own
+        // padding sits inside that, so its text ends a little before.
+        expect(bar.right - button.right, lessThan(32 + 24), reason: '$width');
+      }
+    });
+
     testWidgets('no actions, no + Yangi button', (tester) async {
       await tester.pumpWidget(
         host(AppTopBar(onOpenCommandBar: () {}, newMenuItems: const [])),

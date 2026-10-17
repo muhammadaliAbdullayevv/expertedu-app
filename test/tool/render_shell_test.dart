@@ -32,6 +32,8 @@ import '../helpers/load_fonts.dart';
 
 const _out = String.fromEnvironment('RENDER_OUT');
 const _only = String.fromEnvironment('RENDER_ONLY');
+const _w = int.fromEnvironment('RENDER_W', defaultValue: 1440);
+const _h = int.fromEnvironment('RENDER_H', defaultValue: 900);
 const _phone = String.fromEnvironment(
   'RENDER_PHONE',
   defaultValue: '998900000001',
@@ -195,7 +197,7 @@ void main() {
       );
     }
 
-    await mount(const Size(1440, 900));
+    await mount(Size(_w.toDouble(), _h.toDouble()));
     await shot(tester, 'desktop-bugun');
 
     if (_only == 'qabul') {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -209,20 +211,62 @@ class _Segment extends StatelessWidget {
 }
 
 /// "Oflayn" and "N ta yuborilmagan" -- tap to see what's waiting. Shown only
-/// when something is waiting or the internet is down.
-class _SyncStatus extends StatelessWidget {
+/// when the app really cannot reach the server (a call just failed to
+/// connect) or something has been waiting to be sent for a few seconds; a
+/// save that is simply on its way never flashes it.
+class _SyncStatus extends StatefulWidget {
   const _SyncStatus({required this.sync});
 
   final SyncEngine sync;
 
   @override
+  State<_SyncStatus> createState() => _SyncStatusState();
+}
+
+class _SyncStatusState extends State<_SyncStatus> {
+  static const _grace = Duration(seconds: 5);
+
+  Timer? _timer;
+  bool _waitedLong = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.sync.pendingCount.addListener(_pendingChanged);
+    _pendingChanged();
+  }
+
+  @override
+  void dispose() {
+    widget.sync.pendingCount.removeListener(_pendingChanged);
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  void _pendingChanged() {
+    if (widget.sync.pendingCount.value == 0) {
+      _timer?.cancel();
+      _timer = null;
+      if (_waitedLong) setState(() => _waitedLong = false);
+    } else {
+      _timer ??= Timer(_grace, () {
+        if (mounted && widget.sync.pendingCount.value > 0) {
+          setState(() => _waitedLong = true);
+        }
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final sync = widget.sync;
     return ValueListenableBuilder<bool>(
       valueListenable: sync.online,
       builder: (context, online, _) => ValueListenableBuilder<int>(
         valueListenable: sync.pendingCount,
         builder: (context, pending, _) {
-          if (online && pending == 0) return const SizedBox.shrink();
+          final showPending = pending > 0 && (_waitedLong || !online);
+          if (online && !showPending) return const SizedBox.shrink();
           return TextButton.icon(
             onPressed: () => showPendingChangesDialog(context),
             icon: Icon(
@@ -233,7 +277,7 @@ class _SyncStatus extends StatelessWidget {
             label: Text(
               <String>[
                 if (!online) 'Oflayn',
-                if (pending > 0) '$pending ta yuborilmagan',
+                if (showPending) '$pending ta yuborilmagan',
               ].join(' · '),
             ),
           );

@@ -25,27 +25,54 @@ final qabulGroupsProvider = FutureProvider.autoDispose<List<GroupMatch>>((
   return <GroupMatch>[...found.exact, ...found.near];
 });
 
-/// The day patterns offered as quick filters.
-const List<(String, Set<int>)> dayPatterns = <(String, Set<int>)>[
-  ('Du Chor Ju', {1, 3, 5}),
-  ('Se Pay Sha', {2, 4, 6}),
+/// How many groups the picker shows at first, and how many more each
+/// "Yana ko'rsatish" adds.
+const int groupPageSize = 5;
+
+const List<String> dayToggles = <String>[
+  'Du',
+  'Se',
+  'Chor',
+  'Pay',
+  'Ju',
+  'Sha',
+  'Yak',
 ];
 
-/// The groups left after the subject and day-pattern filters. Nothing picked
-/// = no filter; a pattern keeps the groups that meet only on its days.
-List<GroupMatch> filterGroups(
+/// The groups the picker lists, best first. [query] keeps the groups whose
+/// subject or name contains it. [days] (ISO weekdays the client can come)
+/// only orders: an exact match -- every day of the group is one of them --
+/// comes first, then the rest by how many days fit, then groups with no
+/// schedule entered (they cannot be judged, so they are never hidden).
+List<GroupMatch> rankGroups(
   List<GroupMatch> all, {
-  String? subject,
-  Set<int> patterns = const {},
+  String query = '',
+  Set<int> days = const {},
 }) {
-  final days = <int>{for (final i in patterns) ...dayPatterns[i].$2};
-  return <GroupMatch>[
+  final q = query.trim().toLowerCase();
+  final kept = <GroupMatch>[
     for (final g in all)
-      if ((subject == null || g.subjectName == subject) &&
-          (days.isEmpty ||
-              (g.weekdays.isNotEmpty && g.weekdays.every(days.contains))))
+      if (q.isEmpty ||
+          g.name.toLowerCase().contains(q) ||
+          (g.subjectName ?? '').toLowerCase().contains(q))
         g,
   ];
+  if (days.isEmpty) return kept;
+  int rank(GroupMatch g) {
+    final own = g.weekdays;
+    if (own.isEmpty) return 2;
+    return own.every(days.contains) ? 0 : 1;
+  }
+
+  int fit(GroupMatch g) => g.weekdays.where(days.contains).length;
+  final indexed = kept.indexed.toList();
+  indexed.sort((a, b) {
+    final byRank = rank(a.$2).compareTo(rank(b.$2));
+    if (byRank != 0) return byRank;
+    final byFit = fit(b.$2).compareTo(fit(a.$2));
+    return byFit != 0 ? byFit : a.$1.compareTo(b.$1);
+  });
+  return <GroupMatch>[for (final e in indexed) e.$2];
 }
 
 /// "Yangi qo'shish": the fast form. Saves a new person in a few keystrokes
@@ -103,10 +130,16 @@ class QabulFormState extends ConsumerState<QabulForm> {
   final _trialFocus = FocusNode(debugLabel: 'qabul-trial');
   final _noteFocus = FocusNode(debugLabel: 'qabul-note');
   final _saveFocus = FocusNode(debugLabel: 'qabul-save');
-  final _groupScroll = ScrollController();
+  final _search = TextEditingController();
+  final _searchFocus = FocusNode(
+    debugLabel: 'qabul-group-search',
+    skipTraversal: true,
+  );
 
-  String? _subject;
-  final Set<int> _patterns = {};
+  final Set<int> _days = {};
+  int _shown = groupPageSize;
+  bool _noneChosen = false;
+  bool _trialOpen = false;
   GroupMatch? _group;
   Future<List<TrialDate>>? _dates;
   TrialDate? _trial;
@@ -149,7 +182,8 @@ class QabulFormState extends ConsumerState<QabulForm> {
     ]) {
       f.dispose();
     }
-    _groupScroll.dispose();
+    _search.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
@@ -158,29 +192,26 @@ class QabulFormState extends ConsumerState<QabulForm> {
   void _pickGroup(GroupMatch? group) {
     setState(() {
       _group = group;
+      _noneChosen = group == null;
       _trial = null;
+      _trialOpen = false;
       _dates = group == null
           ? null
           : ref.read(qabulRepositoryProvider).trialDates(group.groupId);
     });
   }
 
-  void _moveGroup(List<GroupMatch> visible, int step) {
-    final options = <GroupMatch?>[null, ...visible];
-    final at = options.indexWhere((g) => g?.groupId == _group?.groupId);
+  /// Up/Down walk the listed groups and then "Guruhsiz" (the last row);
+  /// from nothing chosen, Down picks the first group.
+  void _moveGroup(List<GroupMatch> shown, int step) {
+    final options = <GroupMatch?>[...shown, null];
+    final at = _noneChosen
+        ? options.length - 1
+        : _group == null
+        ? -1
+        : options.indexWhere((g) => g?.groupId == _group!.groupId);
     final next = (at + step).clamp(0, options.length - 1);
-    if (next == at) return;
-    _pickGroup(options[next]);
-    // The list scrolls to keep the choice in view; "guruhsiz" is the first row.
-    if (_groupScroll.hasClients) {
-      final max = _groupScroll.position.maxScrollExtent;
-      final target = next * 64.0;
-      _groupScroll.animateTo(
-        target.clamp(0.0, max),
-        duration: const Duration(milliseconds: 120),
-        curve: Curves.easeOut,
-      );
-    }
+    if (next != at) _pickGroup(options[next]);
   }
 
   void _moveTrial(List<TrialDate> dates, int step) {
@@ -270,8 +301,13 @@ class QabulFormState extends ConsumerState<QabulForm> {
     _nameError = null;
     _phoneError = null;
     _group = null;
+    _noneChosen = false;
     _trial = null;
+    _trialOpen = false;
     _dates = null;
+    _search.clear();
+    _days.clear();
+    _shown = groupPageSize;
   }
 
   void _scheduleNoticeHide(Duration after) {
@@ -353,7 +389,7 @@ class QabulFormState extends ConsumerState<QabulForm> {
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
       child: Align(
-        alignment: Alignment.topLeft,
+        alignment: Alignment.topCenter,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 780),
           child: Column(
@@ -482,13 +518,11 @@ class QabulFormState extends ConsumerState<QabulForm> {
 
   Widget _groupSection(AsyncValue<List<GroupMatch>> groups) {
     final all = groups.value ?? const <GroupMatch>[];
-    final subjects = <String>{
-      for (final g in all)
-        if (g.subjectName != null) g.subjectName!,
-    }.toList();
-    final visible = filterGroups(all, subject: _subject, patterns: _patterns);
-    // A choice that a filter has hidden is dropped, never kept invisibly.
-    if (_group != null && !visible.any((g) => g.groupId == _group!.groupId)) {
+    final ranked = rankGroups(all, query: _search.text, days: _days);
+    final shown = ranked.take(_shown).toList();
+    // A choice that the search has pushed out of the list is dropped, never
+    // kept invisibly.
+    if (_group != null && !ranked.any((g) => g.groupId == _group!.groupId)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _pickGroup(null);
       });
@@ -497,47 +531,39 @@ class QabulFormState extends ConsumerState<QabulForm> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
+        const FieldCaption('Guruh'),
         Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
-            const Padding(
-              padding: EdgeInsets.only(top: 10, right: 16),
-              child: Text(
-                'Guruh',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.inkMuted,
+            SizedBox(
+              width: 260,
+              child: TextField(
+                key: const ValueKey('qabul-group-search'),
+                controller: _search,
+                focusNode: _searchFocus,
+                decoration: const InputDecoration(
+                  isDense: true,
+                  prefixIcon: Icon(Icons.search, size: 18),
+                  hintText: 'Fan yoki guruh nomi',
                 ),
+                onChanged: (_) => setState(() => _shown = groupPageSize),
               ),
             ),
+            const SizedBox(width: 14),
             Expanded(
               child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 6,
+                runSpacing: 6,
                 children: <Widget>[
-                  for (final subject in subjects)
+                  for (final (i, label) in dayToggles.indexed)
                     OptionPill(
-                      subject,
+                      label,
                       focusable: false,
-                      selected: _subject == subject,
-                      onTap: () => setState(
-                        () => _subject = _subject == subject ? null : subject,
-                      ),
-                    ),
-                  if (subjects.isNotEmpty)
-                    Container(width: 1, height: 28, color: AppColors.border),
-                  for (final (i, pattern) in dayPatterns.indexed)
-                    OptionPill(
-                      pattern.$1,
-                      focusable: false,
-                      selected: _patterns.contains(i),
-                      onTap: () => setState(
-                        () => _patterns.contains(i)
-                            ? _patterns.remove(i)
-                            : _patterns.add(i),
-                      ),
+                      selected: _days.contains(i + 1),
+                      onTap: () => setState(() {
+                        _shown = groupPageSize;
+                        if (!_days.remove(i + 1)) _days.add(i + 1);
+                      }),
                     ),
                 ],
               ),
@@ -560,16 +586,21 @@ class QabulFormState extends ConsumerState<QabulForm> {
               ),
             ],
           ),
+        if (groups.isLoading)
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator()),
+          ),
         Focus(
           focusNode: _groupFocus,
           onKeyEvent: (node, event) {
             if (event is KeyUpEvent) return KeyEventResult.ignored;
             if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-              _moveGroup(visible, 1);
+              _moveGroup(shown, 1);
               return KeyEventResult.handled;
             }
             if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-              _moveGroup(visible, -1);
+              _moveGroup(shown, -1);
               return KeyEventResult.handled;
             }
             return KeyEventResult.ignored;
@@ -583,49 +614,60 @@ class QabulFormState extends ConsumerState<QabulForm> {
               ),
             ),
             padding: const EdgeInsets.all(2),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 230),
-              child: ListView(
-                controller: _groupScroll,
-                shrinkWrap: true,
-                children: <Widget>[
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                for (final g in shown)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: ChoiceCard(
-                      key: const ValueKey('group-none'),
+                      key: ValueKey('group-${g.groupId}'),
                       focusable: false,
-                      title: 'Mos guruh yo\'q: guruhsiz ro\'yxat',
-                      subtitle: 'Fan va kunlar izohga yoziladi',
-                      selected: _group == null,
+                      title: groupTitle(g),
+                      subtitle: g.teacherName,
+                      selected: _group?.groupId == g.groupId,
                       onTap: () {
-                        _pickGroup(null);
+                        _pickGroup(g);
                         _groupFocus.requestFocus();
                       },
+                      trailing: _GroupFacts(group: g),
                     ),
                   ),
-                  if (groups.isLoading)
-                    const Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Center(child: CircularProgressIndicator()),
-                    ),
-                  for (final g in visible)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: ChoiceCard(
-                        key: ValueKey('group-${g.groupId}'),
-                        focusable: false,
-                        title: groupTitle(g),
-                        subtitle: g.teacherName,
-                        selected: _group?.groupId == g.groupId,
-                        onTap: () {
-                          _pickGroup(g);
-                          _groupFocus.requestFocus();
-                        },
-                        trailing: _GroupFacts(group: g),
+                if (ranked.length > shown.length)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: ExcludeFocus(
+                        child: TextButton(
+                          key: const ValueKey('group-more'),
+                          onPressed: () =>
+                              setState(() => _shown += groupPageSize),
+                          child: const Text('Yana ko\'rsatish'),
+                        ),
                       ),
                     ),
-                ],
-              ),
+                  ),
+                if (all.isNotEmpty && ranked.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 10, left: 4),
+                    child: Text(
+                      'Mos guruh topilmadi.',
+                      style: TextStyle(color: AppColors.inkMuted),
+                    ),
+                  ),
+                ChoiceCard(
+                  key: const ValueKey('group-none'),
+                  focusable: false,
+                  title: 'Mos guruh yo\'q: guruhsiz ro\'yxat',
+                  subtitle: 'Fan va kunlar izohga yoziladi',
+                  selected: _noneChosen,
+                  onTap: () {
+                    _pickGroup(null);
+                    _groupFocus.requestFocus();
+                  },
+                ),
+              ],
             ),
           ),
         ),
@@ -633,105 +675,150 @@ class QabulFormState extends ConsumerState<QabulForm> {
     );
   }
 
+  /// Hidden until a group is chosen; then one link that opens the dates.
   Widget _trialSection() {
     final group = _group;
+    if (group == null) return const SizedBox.shrink();
     final focused = _trialFocus.hasFocus;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        const FieldCaption('Bepul sinov darsi (ixtiyoriy)'),
-        if (group == null)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 8),
-            child: Text(
-              'Guruh tanlansa, sinov darsi sanalari shu yerda chiqadi.',
-              style: TextStyle(color: AppColors.inkMuted),
-            ),
-          )
-        else
-          FutureBuilder<List<TrialDate>>(
-            key: ValueKey('trial-${group.groupId}'),
-            future: _dates,
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  child: Text(
-                    'Sanalar yuklanmadi — sinovsiz saqlanadi.',
-                    style: TextStyle(color: AppColors.inkMuted),
+    return Padding(
+      padding: const EdgeInsets.only(top: 22),
+      child: FutureBuilder<List<TrialDate>>(
+        key: ValueKey('trial-${group.groupId}'),
+        future: _dates,
+        builder: (context, snapshot) {
+          final dates = snapshot.data;
+          final failed = snapshot.hasError;
+          Widget body;
+          if (!_trialOpen) {
+            body = const SizedBox.shrink();
+          } else if (failed) {
+            body = const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                'Sanalar yuklanmadi — sinovsiz saqlanadi.',
+                style: TextStyle(color: AppColors.inkMuted),
+              ),
+            );
+          } else if (dates == null) {
+            body = const Padding(
+              padding: EdgeInsets.only(top: 10),
+              child: SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            );
+          } else if (dates.isEmpty) {
+            body = const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                'Yaqin darslar topilmadi.',
+                style: TextStyle(color: AppColors.inkMuted),
+              ),
+            );
+          } else {
+            body = Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: <Widget>[
+                  OptionPill(
+                    'Sinovsiz',
+                    focusable: false,
+                    selected: _trial == null,
+                    onTap: () => setState(() => _trial = null),
                   ),
-                );
-              }
-              final dates = snapshot.data;
-              if (dates == null) {
-                return const SizedBox(
-                  height: 40,
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                  for (final d in dates)
+                    OptionPill(
+                      '${weekdayDate(d.startsAt)} ${clock(d.startsAt)}'
+                      '${d.sessionFull ? ' · to\'lgan' : ''}',
+                      focusable: false,
+                      selected: _trial?.startsAt == d.startsAt,
+                      onTap: d.sessionFull
+                          ? () {}
+                          : () => setState(() => _trial = d),
                     ),
-                  ),
-                );
+                ],
+              ),
+            );
+          }
+          return Focus(
+            focusNode: _trialFocus,
+            onKeyEvent: (node, event) {
+              if (event is KeyUpEvent) return KeyEventResult.ignored;
+              final key = event.logicalKey;
+              if (key == LogicalKeyboardKey.space ||
+                  key == LogicalKeyboardKey.arrowDown) {
+                if (!_trialOpen) {
+                  setState(() => _trialOpen = true);
+                  return KeyEventResult.handled;
+                }
               }
-              return Focus(
-                focusNode: _trialFocus,
-                onKeyEvent: (node, event) {
-                  if (event is KeyUpEvent) return KeyEventResult.ignored;
-                  if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-                    _moveTrial(dates, 1);
-                    return KeyEventResult.handled;
-                  }
-                  if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-                    _moveTrial(dates, -1);
-                    return KeyEventResult.handled;
-                  }
-                  return KeyEventResult.ignored;
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(3),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: focused ? AppColors.accent : Colors.transparent,
-                      width: 2,
-                    ),
-                  ),
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: <Widget>[
-                      OptionPill(
-                        'Sinovsiz',
-                        focusable: false,
-                        selected: _trial == null,
-                        onTap: () {
-                          setState(() => _trial = null);
-                          _trialFocus.requestFocus();
-                        },
-                      ),
-                      for (final d in dates)
-                        OptionPill(
-                          '${weekdayDate(d.startsAt)} ${clock(d.startsAt)}'
-                          '${d.sessionFull ? ' · to\'lgan' : ''}',
-                          focusable: false,
-                          selected: _trial?.startsAt == d.startsAt,
-                          onTap: d.sessionFull
-                              ? () {}
-                              : () {
-                                  setState(() => _trial = d);
-                                  _trialFocus.requestFocus();
-                                },
-                        ),
-                    ],
-                  ),
-                ),
-              );
+              if (_trialOpen && dates != null) {
+                if (key == LogicalKeyboardKey.arrowRight) {
+                  _moveTrial(dates, 1);
+                  return KeyEventResult.handled;
+                }
+                if (key == LogicalKeyboardKey.arrowLeft) {
+                  _moveTrial(dates, -1);
+                  return KeyEventResult.handled;
+                }
+              }
+              return KeyEventResult.ignored;
             },
-          ),
-      ],
+            child: Container(
+              padding: const EdgeInsets.all(3),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: focused ? AppColors.accent : Colors.transparent,
+                  width: 2,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  InkWell(
+                    key: const ValueKey('trial-link'),
+                    canRequestFocus: false,
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () {
+                      setState(() => _trialOpen = !_trialOpen);
+                      _trialFocus.requestFocus();
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: <Widget>[
+                          Icon(
+                            _trialOpen ? Icons.remove : Icons.add,
+                            size: 18,
+                            color: AppColors.accentText,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _trial == null
+                                ? 'Sinov darsi qo\'shish'
+                                : 'Sinov darsi: ${weekdayDate(_trial!.startsAt)} ${clock(_trial!.startsAt)}',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.accentText,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  body,
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -774,7 +861,8 @@ class QabulFormState extends ConsumerState<QabulForm> {
   }
 }
 
-/// Days, time and seats of a group in the picker.
+/// Days, time and seats of a group in the picker. A group whose schedule has
+/// not been entered says so, instead of seven grey pills.
 class _GroupFacts extends StatelessWidget {
   const _GroupFacts({required this.group});
 
@@ -783,27 +871,32 @@ class _GroupFacts extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final days = group.weekdays.toSet();
+    final seats = group.freeSeats;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        for (var d = 1; d <= 7; d++)
-          Padding(
-            padding: const EdgeInsets.only(right: 3),
-            child: DayPill(
-              weekdayAbbr[d],
-              inGroup: days.contains(d),
-              wanted: days.contains(d),
+        if (days.isEmpty)
+          const StatusChip('Jadval kiritilmagan', tone: StatusTone.warning)
+        else ...<Widget>[
+          for (var d = 1; d <= 7; d++)
+            Padding(
+              padding: const EdgeInsets.only(right: 3),
+              child: DayPill(
+                weekdayAbbr[d],
+                inGroup: days.contains(d),
+                wanted: days.contains(d),
+              ),
             ),
+          const SizedBox(width: 12),
+          Text(
+            firstTimeRange(group.slots).replaceAll(' – ', '–'),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
           ),
-        const SizedBox(width: 12),
-        Text(
-          firstTimeRange(group.slots).replaceAll(' – ', '–'),
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-        ),
+        ],
         const SizedBox(width: 12),
         StatusChip(
-          seatsLabel(group.freeSeats),
-          tone: (group.freeSeats ?? 1) > 0 ? StatusTone.ok : StatusTone.warning,
+          studentsOrSeats(group),
+          tone: (seats ?? 1) > 0 ? StatusTone.ok : StatusTone.warning,
         ),
       ],
     );
