@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -53,6 +55,20 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Expert Edu Center API", lifespan=lifespan)
+
+_slow = logging.getLogger("expertedu.slow")
+
+
+@app.middleware("http")
+async def log_slow_requests(request, call_next):
+    """Says in the journal which requests took over two seconds, so a "server
+    did not answer" report can be matched with what the server was doing."""
+    started = time.monotonic()
+    response = await call_next(request)
+    took = time.monotonic() - started
+    if took > 2:
+        _slow.warning("SLOW %s %s took %.1fs -> %s", request.method, request.url.path, took, response.status_code)
+    return response
 
 _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(_UPLOADS_DIR)), name="uploads")

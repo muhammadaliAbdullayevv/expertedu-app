@@ -57,4 +57,64 @@ void main() {
     expect(r.told, [true]);
     expect((r.error as ApiException).statusCode, isNot(0));
   });
+
+  test('a read that fails once is asked again quietly', () async {
+    var calls = 0;
+    final api = ApiClient(
+      _NoTokens(),
+      MockClient((_) async {
+        calls++;
+        if (calls == 1) throw http.ClientException('Connection closed');
+        return http.Response('{"ok":true}', 200);
+      }),
+    );
+    final told = <bool>[];
+    api.onReachability = told.add;
+    expect(await api.get('/groups'), {'ok': true});
+    expect(calls, 2);
+    expect(told, [true]);
+  });
+
+  test('a read that fails twice says so, naming what failed', () async {
+    var calls = 0;
+    final api = ApiClient(
+      _NoTokens(),
+      MockClient((_) async {
+        calls++;
+        throw const SocketException('Connection reset by peer');
+      }),
+    );
+    final error = await api
+        .get('/groups')
+        .then<Object?>((_) => null)
+        .catchError((e) => e);
+    expect(calls, 2);
+    final e = error as ApiException;
+    expect(e.statusCode, 0);
+    expect(e.message, contains('Serverga ulanib bo\'lmadi'));
+    expect(e.message, contains('Connection reset by peer'));
+  });
+
+  test(
+    'a write is never sent again on its own: it may have been saved',
+    () async {
+      var calls = 0;
+      final api = ApiClient(
+        _NoTokens(),
+        MockClient((_) async {
+          calls++;
+          throw TimeoutException('slow');
+        }),
+      );
+      final error = await api
+          .post('/groups', body: {'name': 'IELTS'})
+          .then<Object?>((_) => null)
+          .catchError((e) => e);
+      expect(calls, 1);
+      final e = error as ApiException;
+      expect(e.statusCode, 0);
+      expect(e.message, contains('Saqlangan bo\'lishi mumkin'));
+      expect(e.message, contains('TimeoutException'));
+    },
+  );
 }

@@ -51,3 +51,21 @@ async def test_another_branchs_group_is_not_found_and_stays(world):
     assert (await world.a1.delete(f"/groups/{world.g2}")).status_code == 404
     assert (await world.a2.get(f"/groups/{world.g2}")).status_code == 200
     assert (await world.a1.delete("/groups/999999")).status_code == 404
+
+
+async def test_the_same_group_cannot_be_made_twice_by_a_double_click(world):
+    again = await world.a1.post(
+        "/groups",
+        json={"subject_id": world.subject, "name": " beginner a ", "teacher_id": world.t1, "fee_amount": 300000, "billing_day": 1},
+    )
+    assert again.status_code == 409 and "allaqachon bor" in again.json()["detail"]
+    # Another subject, another branch, or an archived group may reuse the name.
+    other_branch = await world.group(world.a2, "Beginner A", world.t2, 100000)
+    assert other_branch
+    await world.pool.execute("update groups set is_active = false where id = $1", world.g1)
+    assert (
+        await world.a1.post(
+            "/groups",
+            json={"subject_id": world.subject, "name": "Beginner A", "teacher_id": world.t1, "fee_amount": 1, "billing_day": 1},
+        )
+    ).status_code == 201

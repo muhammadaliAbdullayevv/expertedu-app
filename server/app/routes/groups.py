@@ -160,6 +160,15 @@ async def create_group(
     elif payload.teacher_name:
         teacher_id = await _teacher_id_for_name(payload.teacher_name, user.id, branch_id)
 
+    # A second click (or a retry after a lost answer) must not make a twin.
+    if await db.pool().fetchval(
+        "select 1 from groups where branch_id = $1 and subject_id = $2 and is_active and lower(name) = lower($3)",
+        branch_id,
+        payload.subject_id,
+        payload.name.strip(),
+    ):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Bu filialda shu fanda bunday nomli guruh allaqachon bor.")
+
     group_id = await db.pool().fetchval(
         """
         insert into groups (subject_id, name, teacher_id, fee_amount, billing_mode, billing_day,

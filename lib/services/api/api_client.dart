@@ -68,13 +68,17 @@ class ApiClient {
 
   static const Duration _timeout = Duration(seconds: 15);
 
+  /// Writes get longer: the server may have to do real work, and giving up on
+  /// one that then succeeds only invites a second click.
+  static const Duration _writeTimeout = Duration(seconds: 30);
+
   Future<dynamic> get(
     String path, {
     Map<String, String>? query,
     Duration? timeout,
     Map<String, String>? headers,
   }) {
-    return _guarded(() async {
+    return _guarded(retry: true, () async {
       final response = await _http
           .get(
             _uri(path, query),
@@ -94,7 +98,7 @@ class ApiClient {
     Duration? timeout,
     Map<String, String>? headers,
   }) {
-    return _guarded(() async {
+    return _guarded(write: true, () async {
       final response = await _http
           .post(
             _uri(path),
@@ -104,14 +108,14 @@ class ApiClient {
             },
             body: body == null ? null : jsonEncode(body),
           )
-          .timeout(timeout ?? _timeout);
+          .timeout(timeout ?? _writeTimeout);
       return _decode(response);
     });
   }
 
   /// A file the server serves behind login (a profile photo): its bytes.
   Future<Uint8List> getBytes(String path) {
-    return _guarded(() async {
+    return _guarded(retry: true, () async {
       final headers = await _headers();
       headers.remove('Content-Type');
       final response = await _http
@@ -128,7 +132,7 @@ class ApiClient {
     required List<int> bytes,
     String contentType = 'image/png',
   }) {
-    return _guarded(() async {
+    return _guarded(write: true, () async {
       final headers = await _headers();
       headers['Content-Type'] = contentType;
       final response = await _http
@@ -139,36 +143,36 @@ class ApiClient {
   }
 
   Future<dynamic> put(String path, {Object? body}) {
-    return _guarded(() async {
+    return _guarded(write: true, () async {
       final response = await _http
           .put(
             _uri(path),
             headers: await _headers(),
             body: body == null ? null : jsonEncode(body),
           )
-          .timeout(_timeout);
+          .timeout(_writeTimeout);
       return _decode(response);
     });
   }
 
   Future<dynamic> patch(String path, {Object? body}) {
-    return _guarded(() async {
+    return _guarded(write: true, () async {
       final response = await _http
           .patch(
             _uri(path),
             headers: await _headers(),
             body: body == null ? null : jsonEncode(body),
           )
-          .timeout(_timeout);
+          .timeout(_writeTimeout);
       return _decode(response);
     });
   }
 
   Future<void> delete(String path, {Map<String, String>? query}) {
-    return _guarded(() async {
+    return _guarded(write: true, () async {
       final response = await _http
           .delete(_uri(path, query), headers: await _headers())
-          .timeout(_timeout);
+          .timeout(_writeTimeout);
       _decode(response);
     });
   }
@@ -179,7 +183,7 @@ class ApiClient {
     required List<int> bytes,
     required String filename,
   }) {
-    return _guarded(() async {
+    return _guarded(write: true, () async {
       final headers = await _headers();
       headers.remove('Content-Type');
       final request = http.MultipartRequest('POST', _uri(path))
@@ -198,37 +202,61 @@ class ApiClient {
   /// Runs an HTTP call and converts any failure (timeout, DNS, TLS, socket
   /// errors) into an [ApiException] so every call site can rely on catching
   /// just that one type instead of silently hanging or crashing unhandled.
-  Future<T> _guarded<T>(Future<T> Function() action) async {
+  Future<T> _guarded<T>(
+    Future<T> Function() action, {
+    bool write = false,
+    bool retry = false,
+  }) async {
     if (_blockedUntilReauth) {
       throw ApiException(401, 'Sessiya tugadi, qayta kiring.');
     }
-    try {
-      final result = await action();
-      onReachability?.call(true);
-      return result;
-    } on ApiException catch (e) {
-      // An error answer is still an answer: the server is there.
-      if (e.statusCode != 0) onReachability?.call(true);
-      rethrow;
-    } on SocketException {
-      throw _unreachable();
-    } on TimeoutException {
-      throw _unreachable();
-    } on http.ClientException {
-      throw _unreachable();
-    } on HandshakeException {
-      throw _unreachable();
-    } catch (_) {
-      // Something else went wrong on this side (an answer we could not
-      // read...): not a sign that the internet is down.
-      onReachability?.call(true);
-      throw ApiException(500, 'Kutilmagan xatolik yuz berdi.');
+    for (var attempt = 0; ; attempt++) {
+      try {
+        final result = await action();
+        onReachability?.call(true);
+        return result;
+      } on ApiException catch (e) {
+        // An error answer is still an answer: the server is there.
+        if (e.statusCode != 0) onReachability?.call(true);
+        rethrow;
+      } on Object catch (e) {
+        if (!_isConnectionFailure(e)) {
+          // Something else went wrong on this side (an answer we could not
+          // read...): not a sign that the internet is down.
+          onReachability?.call(true);
+          throw ApiException(500, 'Kutilmagan xatolik yuz berdi.');
+        }
+        // A read is safe to ask again; one quiet second try hides a dropped
+        // connection. A write is never repeated on its own: it may have been
+        // saved already.
+        if (retry && attempt == 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+          continue;
+        }
+        throw _unreachable(e, write: write);
+      }
     }
   }
 
-  ApiException _unreachable() {
+  bool _isConnectionFailure(Object e) =>
+      e is SocketException ||
+      e is TimeoutException ||
+      e is http.ClientException ||
+      e is HandshakeException;
+
+  /// [error] names what actually failed, in brackets, so a report of this
+  /// message says whether it was a timeout, a reset or a failed handshake.
+  ApiException _unreachable(Object error, {required bool write}) {
     onReachability?.call(false);
-    return ApiException(0, 'Serverga ulanib bo\'lmadi. Internetni tekshiring.');
+    var detail = error.toString().replaceAll(RegExp(r'\s+'), ' ');
+    if (detail.length > 90) detail = '${detail.substring(0, 90)}...';
+    return ApiException(
+      0,
+      write
+          ? 'Serverdan javob kelmadi. Saqlangan bo\'lishi mumkin: qayta saqlashdan '
+                'oldin ro\'yxatni yangilab tekshiring. [$detail]'
+          : 'Serverga ulanib bo\'lmadi. Internetni tekshiring. [$detail]',
+    );
   }
 
   Uri _uri(String path, [Map<String, String>? query]) {
