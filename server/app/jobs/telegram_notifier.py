@@ -6,6 +6,7 @@ What a linked student hears about:
   - a payment due tomorrow, due today, and a reminder each week while it is overdue
   - a payment received (a receipt)
   - a lesson they were marked absent from
+  - "welcome, you are a student now" for someone who asked through the bot and was then put into a group
   - on Sunday evening, how the week went: lessons attended out of those expected
 
 Nothing is queued at night (before 08:00 or from 21:00 in the center's time):
@@ -56,6 +57,8 @@ async def generate(conn, now: datetime) -> int:
         return 0
     today = local.date()
     made = 0
+
+    made += await _welcome(conn)
 
     # Payments due tomorrow / today / overdue.
     charges = await conn.fetch(
@@ -141,6 +144,48 @@ async def generate(conn, now: datetime) -> int:
     # Sunday evening: how the week went.
     if local.isoweekday() == 7 and local.hour >= 18:
         made += await _weekly(conn, now, iso)
+    return made
+
+
+async def _welcome(conn) -> int:
+    """People who asked through the bot and have since been put into a group: link
+    their chat and congratulate them. (A phone that is a student with no group yet
+    keeps waiting.)"""
+    rows = await conn.fetch(
+        """
+        select p.chat_id, p.language, s.id as student_id, s.full_name,
+               array_agg(distinct g.name) as groups
+        from telegram_pending p
+        join students s on s.phone = p.phone
+        join enrollments e on e.student_id = s.id and e.status = 'active'
+        join groups g on g.id = e.group_id
+        group by p.chat_id, p.language, s.id, s.full_name
+        """
+    )
+    made = 0
+    for r in rows:
+        async with conn.transaction():
+            await conn.execute(
+                """
+                insert into telegram_links (chat_id, student_id, phone, language)
+                select p.chat_id, $2, p.phone, p.language from telegram_pending p where p.chat_id = $1
+                on conflict (chat_id) do update
+                  set student_id = excluded.student_id, phone = excluded.phone, language = excluded.language, stopped = false
+                """,
+                r["chat_id"],
+                r["student_id"],
+            )
+            await conn.execute("delete from telegram_pending where chat_id = $1", r["chat_id"])
+            made += await _queue(
+                conn,
+                [
+                    (
+                        r["chat_id"], r["student_id"], "welcome",
+                        {"student_name": r["full_name"], "groups": sorted(r["groups"])},
+                        f"welcome:{r['student_id']}:{r['chat_id']}",
+                    )
+                ],
+            )
     return made
 
 

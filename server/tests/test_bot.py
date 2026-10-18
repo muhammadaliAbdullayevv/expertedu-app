@@ -192,6 +192,53 @@ async def test_linking_again_from_another_chat_works_and_a_new_phone_moves_the_c
     assert await world.pool.fetchval("select student_id from telegram_links where chat_id = 2") == world.s2
 
 
+# --- someone who is not a student yet ------------------------------------------------------------------------
+
+
+async def test_a_stranger_waits_and_is_welcomed_when_put_into_a_group(world, bot):
+    new_phone = "+998 90 555 00 00"
+    assert (await link(bot, chat_id=777, phone=new_phone, language="en"))["linked"] is False
+    assert await world.pool.fetchval("select phone from telegram_pending where chat_id = 777") == "998905550000"
+    assert (await bot.get("/bot/me/777")).status_code == 404
+    assert await run_job(world, at(date.today())) == 0
+
+    # The center registers them but has not given them a group: still waiting.
+    r = await world.a1.post("/students", json={"full_name": "Sardor Yusupov", "phone": "998905550000"})
+    assert r.status_code == 201, r.text
+    student = r.json()["id"]
+    assert await run_job(world, at(date.today())) == 0
+    assert await world.pool.fetchval("select count(*) from telegram_pending") == 1
+
+    added = await world.a1.post(f"/students/{student}/add-to-group", json={"group_id": world.g1, "joined_at": str(date.today())})
+    assert added.status_code in (200, 201), added.text
+    await run_job(world, at(date.today()))
+    assert await world.pool.fetchval("select count(*) from telegram_pending") == 0
+    me = (await bot.get("/bot/me/777")).json()
+    assert me["student_name"] == "Sardor Yusupov" and me["language"] == "en"
+    (welcome,) = [m for m in await outbox(world) if m["kind"] == "welcome"]
+    assert welcome["kind"] == "welcome" and welcome["chat_id"] == 777
+    assert payload(welcome) == {"student_name": "Sardor Yusupov", "groups": ["Beginner A"]}
+    # The bot can fetch it like any other message, and it is not queued twice.
+    assert "welcome" in [i["kind"] for i in (await bot.get("/bot/outbox")).json()]
+    assert await run_job(world, at(date.today())) == 0
+
+
+async def test_sharing_the_number_of_an_existing_student_links_and_leaves_no_waiting_row(world, bot):
+    await link(bot, chat_id=778, phone="+998 90 555 00 01")
+    assert await world.pool.fetchval("select count(*) from telegram_pending where chat_id = 778") == 1
+    await link(bot, chat_id=778)  # a real student's number
+    assert await world.pool.fetchval("select count(*) from telegram_pending where chat_id = 778") == 0
+
+
+async def test_the_welcome_is_not_sent_at_night(world, bot):
+    await link(bot, chat_id=779, phone="+998 90 555 00 02")
+    await world.student(world.a1, "Madina K", "998905550002", world.g1)
+    assert await run_job(world, at(date.today(), 23)) == 0
+    assert await outbox(world) == []
+    await run_job(world, at(date.today(), 9))
+    assert [m["kind"] for m in await outbox(world)].count("welcome") == 1
+
+
 # --- the messages ------------------------------------------------------------------------------------------
 
 

@@ -765,7 +765,7 @@ create table if not exists telegram_outbox (
   id bigserial primary key,
   chat_id bigint not null,
   student_id bigint not null references students(id),
-  kind text not null check (kind in ('due_tomorrow', 'due_today', 'overdue', 'paid', 'absent', 'weekly')),
+  kind text not null check (kind in ('due_tomorrow', 'due_today', 'overdue', 'paid', 'absent', 'weekly', 'welcome')),
   -- What the message is about, as data; the bot words it in the chat's language.
   payload jsonb not null default '{}',
   -- One message per thing per chat, however often the job runs.
@@ -777,3 +777,12 @@ create table if not exists telegram_outbox (
   sent_at timestamptz
 );
 create index if not exists idx_telegram_outbox_pending on telegram_outbox (id) where status = 'pending';
+
+-- ---- 0024: Telegram, people who are not students yet ----
+create table if not exists telegram_pending (
+  chat_id bigint primary key,
+  phone text not null,
+  language text not null default 'uz' check (language in ('uz', 'en')),
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_telegram_pending_phone on telegram_pending (phone);

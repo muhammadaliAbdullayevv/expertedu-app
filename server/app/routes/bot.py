@@ -220,11 +220,24 @@ class LinkResult(BaseModel):
 @router.post("/link", response_model=LinkResult)
 async def link(payload: LinkRequest):
     """Links this chat to the student who has this phone number. Nothing
-    is revealed when there is none: just linked = false."""
+    is revealed when there is none: just linked = false (and the chat waits
+    in telegram_pending to be welcomed once they are accepted)."""
     phone = normalize(payload.phone)
     row = await db.pool().fetchrow("select id, full_name from students where phone = $1", phone)
     if row is None:
+        # Not a student (yet): remember the chat, so the bot can welcome them
+        # when the center accepts them into a group.
+        await db.pool().execute(
+            """
+            insert into telegram_pending (chat_id, phone, language) values ($1, $2, $3)
+            on conflict (chat_id) do update set phone = excluded.phone, language = excluded.language
+            """,
+            payload.chat_id,
+            phone,
+            payload.language,
+        )
         return LinkResult(linked=False)
+    await db.pool().execute("delete from telegram_pending where chat_id = $1", payload.chat_id)
     await db.pool().execute(
         """
         insert into telegram_links (chat_id, student_id, phone, language)
