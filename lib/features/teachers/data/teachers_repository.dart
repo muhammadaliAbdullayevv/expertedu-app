@@ -198,6 +198,33 @@ class TeacherProfileData {
       );
 }
 
+/// A teacher who might be the person being added.
+class TeacherMatch {
+  const TeacherMatch({
+    required this.teacherId,
+    required this.fullName,
+    required this.branchNames,
+    required this.inScope,
+    required this.samePhone,
+  });
+
+  final int teacherId;
+  final String fullName;
+  final List<String> branchNames;
+
+  /// Already works in this branch.
+  final bool inScope;
+  final bool samePhone;
+
+  factory TeacherMatch.fromJson(Map<String, dynamic> json) => TeacherMatch(
+    teacherId: json['teacher_id'] as int,
+    fullName: json['full_name'] as String,
+    branchNames: (json['branch_names'] as List<dynamic>).cast<String>(),
+    inScope: json['in_scope'] as bool,
+    samePhone: json['same_phone'] as bool,
+  );
+}
+
 class TeachersRepository {
   TeachersRepository(this._api);
 
@@ -237,6 +264,57 @@ class TeachersRepository {
         await _api.put(
               '/teachers/$id/branches',
               body: {'branch_ids': branchIds},
+            )
+            as Map<String, dynamic>;
+    return Teacher.fromJson(json);
+  }
+
+  /// OWNER ONLY: every active teacher of every branch, whatever branch is in
+  /// view (to pick the real record of a duplicate).
+  Future<List<Teacher>> listEverywhere() async {
+    final json =
+        await _api.get('/teachers', headers: {'X-Branch': 'all'})
+            as List<dynamic>;
+    return json
+        .map((e) => Teacher.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Who this might be: teachers with the same number or the same name, in any
+  /// branch (shown while a teacher is being added).
+  Future<List<TeacherMatch>> lookup({String? phone, String? name}) async {
+    final json =
+        await _api.get(
+              '/teachers/lookup',
+              query: {
+                if (phone != null && phone.isNotEmpty) 'phone': phone,
+                if (name != null && name.trim().isNotEmpty) 'name': name.trim(),
+              },
+            )
+            as List<dynamic>;
+    return [
+      for (final m in json) TeacherMatch.fromJson(m as Map<String, dynamic>),
+    ];
+  }
+
+  /// "Shu o'qituvchini mening filialimga qo'shish". An admin must give the
+  /// teacher's number; the owner need not.
+  Future<Teacher> joinBranch(int id, {String? phone}) async {
+    final json =
+        await _api.post(
+              '/teachers/$id/join-branch',
+              body: <String, dynamic>{'phone': phone},
+            )
+            as Map<String, dynamic>;
+    return Teacher.fromJson(json);
+  }
+
+  /// OWNER ONLY: folds the duplicate [id] into [intoId].
+  Future<Teacher> merge(int id, {required int intoId}) async {
+    final json =
+        await _api.post(
+              '/teachers/$id/merge',
+              body: <String, dynamic>{'into_id': intoId},
             )
             as Map<String, dynamic>;
     return Teacher.fromJson(json);

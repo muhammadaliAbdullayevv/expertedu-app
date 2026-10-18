@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/theme/app_theme.dart';
 import '../../../core/widgets/uz_phone_field.dart';
+import '../../auth/application/session_controller.dart';
 import '../data/teachers_repository.dart';
 
 /// Create ([teacher] null) or edit a teacher. Returns true once saved.
@@ -30,9 +34,57 @@ class _TeacherFormDialogState extends ConsumerState<_TeacherFormDialog> {
   late final _note = TextEditingController(text: widget.teacher?.note);
   bool _saving = false;
   String? _error;
+  List<TeacherMatch> _matches = const [];
+  Timer? _lookupTimer;
+
+  bool get _isNew => widget.teacher == null;
+
+  /// One person is one teacher: while a new one is typed, anyone with the same
+  /// number or name (in any branch) is shown, to be joined instead of made again.
+  void _lookupSoon() {
+    if (!_isNew) return;
+    _lookupTimer?.cancel();
+    _lookupTimer = Timer(const Duration(milliseconds: 400), () async {
+      final phone = _phone.text.trim().length == 9
+          ? UzPhoneField.toE164(_phone.text)
+          : null;
+      try {
+        final found = await ref
+            .read(teachersRepositoryProvider)
+            .lookup(phone: phone, name: _name.text);
+        if (mounted) setState(() => _matches = found);
+      } catch (_) {
+        // The server still refuses a twin when saving.
+      }
+    });
+  }
+
+  /// Already here: nothing to add.
+  bool get _blocked => _matches.any((m) => m.inScope);
+
+  Future<void> _join(TeacherMatch m) async {
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      final phone = _phone.text.trim().length == 9
+          ? UzPhoneField.toE164(_phone.text)
+          : null;
+      await ref
+          .read(teachersRepositoryProvider)
+          .joinBranch(m.teacherId, phone: phone);
+      if (mounted) Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   @override
   void dispose() {
+    _lookupTimer?.cancel();
     _name.dispose();
     _phone.dispose();
     _note.dispose();
@@ -93,6 +145,7 @@ class _TeacherFormDialogState extends ConsumerState<_TeacherFormDialog> {
               TextFormField(
                 controller: _name,
                 autofocus: true,
+                onChanged: (_) => _lookupSoon(),
                 decoration: const InputDecoration(labelText: 'F.I.Sh.'),
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Majburiy' : null,
@@ -101,7 +154,15 @@ class _TeacherFormDialogState extends ConsumerState<_TeacherFormDialog> {
               UzPhoneField(
                 controller: _phone,
                 labelText: 'Telefon (ixtiyoriy)',
+                onChanged: (_) => _lookupSoon(),
               ),
+              for (final m in _matches)
+                _MatchTile(
+                  match: m,
+                  owner: ref.read(sessionControllerProvider).isOwner,
+                  busy: _saving,
+                  onJoin: () => _join(m),
+                ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _note,
@@ -126,10 +187,65 @@ class _TeacherFormDialogState extends ConsumerState<_TeacherFormDialog> {
           child: const Text('Bekor qilish'),
         ),
         FilledButton(
-          onPressed: _saving ? null : _save,
+          onPressed: _saving || _blocked ? null : _save,
           child: const Text('Saqlash'),
         ),
       ],
+    );
+  }
+}
+
+/// Someone with this number or name already exists: the same person, in this
+/// branch already or in another.
+class _MatchTile extends StatelessWidget {
+  const _MatchTile({
+    required this.match,
+    required this.owner,
+    required this.busy,
+    required this.onJoin,
+  });
+
+  final TeacherMatch match;
+  final bool owner;
+  final bool busy;
+  final VoidCallback onJoin;
+
+  @override
+  Widget build(BuildContext context) {
+    final m = match;
+    final where = m.branchNames.join(', ');
+    final canJoin = !m.inScope && (m.samePhone || owner);
+    final text = m.inScope
+        ? '"${m.fullName}" bu filialda allaqachon bor.'
+        : m.samePhone
+        ? 'Bu raqam bilan "${m.fullName}" $where filialida ishlaydi. Shu odammi?'
+        : '$where filialida shu ismli o\'qituvchi bor: "${m.fullName}". '
+              '${owner ? 'Shu odammi?' : 'Shu odam bo\'lsa, egasiga ayting; boshqa odam bo\'lsa, saqlayvering.'}';
+    return Container(
+      key: ValueKey('teacher-match-${m.teacherId}'),
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: m.inScope ? AppColors.dangerBg : AppColors.warnBg,
+        borderRadius: BorderRadius.circular(AppRadius.button),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Text(text, style: const TextStyle(fontSize: 13)),
+          if (canJoin)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                key: ValueKey('join-teacher-${m.teacherId}'),
+                onPressed: busy ? null : onJoin,
+                child: const Text(
+                  'Shu o\'qituvchini mening filialimga qo\'shish',
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

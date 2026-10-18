@@ -161,6 +161,27 @@ class SetTeacherBranchesRequest(BaseModel):
     branch_ids: list[int]
 
 
+class TeacherMatch(BaseModel):
+    """A teacher who might be the person being added: same phone or same name."""
+
+    teacher_id: int
+    full_name: str
+    branch_names: list[str]
+    # Already works in a branch of the request.
+    in_scope: bool
+    same_phone: bool
+
+
+class JoinTeacherRequest(BaseModel):
+    # The teacher's number: an admin must know it (the owner need not).
+    phone: str | None = None
+
+
+class MergeTeachersRequest(BaseModel):
+    # The record that stays; the one in the path is folded into it.
+    into_id: int
+
+
 class Teacher(BaseModel):
     id: int
     full_name: str

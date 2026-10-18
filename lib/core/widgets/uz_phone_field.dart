@@ -10,11 +10,13 @@ class UzPhoneField extends StatelessWidget {
     required this.controller,
     required this.labelText,
     this.validator,
+    this.onChanged,
   });
 
   final TextEditingController controller;
   final String labelText;
   final String? Function(String?)? validator;
+  final ValueChanged<String>? onChanged;
 
   /// Builds the full phone value to send to the API from what the user
   /// typed into a field using this widget (just the 9-digit local part).
@@ -47,6 +49,7 @@ class UzPhoneField extends StatelessWidget {
       ],
       decoration: InputDecoration(labelText: labelText, prefixText: '+998 '),
       validator: validator,
+      onChanged: onChanged,
     );
   }
 }

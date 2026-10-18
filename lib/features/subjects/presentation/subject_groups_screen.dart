@@ -1,12 +1,13 @@
 import '../../branches/application/branch_view.dart';
+import '../../branches/presentation/choose_branch.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/formatters/currency_formatter.dart';
-import '../../../core/formatters/thousands_input_formatter.dart';
 import '../../../core/widgets/bordered_list_tile.dart';
 import '../../groups/data/groups_repository.dart';
 import '../../groups/presentation/group_detail_screen.dart';
+import '../../groups/presentation/group_form_dialog.dart';
 import '../../groups/presentation/groups_breadcrumb.dart';
 import '../data/subjects_repository.dart';
 
@@ -159,112 +160,15 @@ class _SubjectGroupsScreenState extends ConsumerState<SubjectGroupsScreen> {
     );
   }
 
+  /// The same full form as Sozlamalar -> Guruhlar, with this course already
+  /// chosen.
   Future<void> _showCreateGroupSheet(BuildContext context) async {
-    final nameController = TextEditingController();
-    final teacherController = TextEditingController();
-    final feeController = TextEditingController();
-    final dueDayController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-
-    final created = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              top: 16,
-              bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
-            ),
-            child: Form(
-              key: formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Text(
-                    'Yangi guruh',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: nameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Nomi (masalan: Beginner)',
-                    ),
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Majburiy' : null,
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: teacherController,
-                    decoration: const InputDecoration(
-                      labelText: 'O\'qituvchi (ixtiyoriy)',
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: feeController,
-                    decoration: const InputDecoration(
-                      labelText: 'Oylik to\'lov (so\'m)',
-                    ),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [ThousandsInputFormatter()],
-                    validator: (v) =>
-                        (v == null || v.trim().isEmpty) ? 'Majburiy' : null,
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: dueDayController,
-                    decoration: const InputDecoration(
-                      labelText: 'To\'lov kuni (1-28)',
-                    ),
-                    keyboardType: TextInputType.number,
-                    validator: (v) {
-                      final n = int.tryParse(v ?? '');
-                      if (n == null || n < 1 || n > 28) {
-                        return '1 dan 28 gacha bo\'lishi kerak';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 20),
-                  FilledButton(
-                    onPressed: () async {
-                      if (!formKey.currentState!.validate()) return;
-                      await ref
-                          .read(groupsRepositoryProvider)
-                          .create(
-                            subjectId: widget.subject.id,
-                            name: nameController.text,
-                            teacherName: teacherController.text.trim().isEmpty
-                                ? null
-                                : teacherController.text.trim(),
-                            feeAmount:
-                                ThousandsInputFormatter.unformat(
-                                  feeController.text,
-                                ) ??
-                                0,
-                            billingMode: BillingMode.fixedDay,
-                            billingDay: int.parse(dueDayController.text),
-                          );
-                      if (context.mounted) Navigator.of(context).pop(true);
-                    },
-                    child: const Text('Yaratish'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
+    if (!await ensureBranchChosen(context, ref)) return;
+    if (!context.mounted) return;
+    final saved = await showGroupFormDialog(
+      context,
+      subjectId: widget.subject.id,
     );
-
-    if (created == true) {
-      _reload();
-    }
+    if (saved == true && mounted) _reload();
   }
 }

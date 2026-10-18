@@ -84,10 +84,10 @@ async def _require_teacher(teacher_id: int, branch_id: int) -> None:
     await scoped_teacher(db.pool(), Scope(None, [branch_id], branch_id), teacher_id)
 
 
-async def _teacher_id_for_name(name: str, user_id: int, branch_id: int) -> int | None:
-    """Matches a typed teacher name (case-insensitively) to an existing
-    teacher, creating one if there's none -- how groups created from older
-    app builds, which only send a name, still end up linked to a record."""
+async def _teacher_id_for_name(name: str, branch_id: int) -> int | None:
+    """Matches a typed teacher name (case-insensitively) to a teacher of this
+    branch. It never makes a teacher: a name nobody has is refused, so a typo
+    cannot quietly create a second record of the same person."""
     name = name.strip()
     if not name:
         return None
@@ -97,15 +97,11 @@ async def _teacher_id_for_name(name: str, user_id: int, branch_id: int) -> int |
         name,
         [branch_id],
     )
-    if existing:
-        return existing
-    async with db.pool().acquire() as conn:
-        async with conn.transaction():
-            teacher_id = await conn.fetchval(
-                "insert into teachers (full_name, created_by) values ($1, $2) returning id", name, user_id
-            )
-            await link_teacher(conn, teacher_id, branch_id)
-    return teacher_id
+    if existing is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, f"\"{name}\" nomli o'qituvchi topilmadi: ro'yxatdan tanlang."
+        )
+    return existing
 
 
 async def _fetch_group(group_id: int, scope: Scope) -> Group:
@@ -158,7 +154,7 @@ async def create_group(
     if teacher_id is not None:
         await _require_teacher(teacher_id, branch_id)
     elif payload.teacher_name:
-        teacher_id = await _teacher_id_for_name(payload.teacher_name, user.id, branch_id)
+        teacher_id = await _teacher_id_for_name(payload.teacher_name, branch_id)
 
     # A second click (or a retry after a lost answer) must not make a twin.
     if await db.pool().fetchval(

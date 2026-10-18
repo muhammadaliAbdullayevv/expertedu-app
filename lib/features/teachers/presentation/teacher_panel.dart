@@ -18,6 +18,7 @@ import '../../timetable/data/timetable_models.dart';
 import '../data/teachers_repository.dart';
 import 'teacher_branches_dialog.dart';
 import 'teacher_form_dialog.dart';
+import 'teacher_merge_dialog.dart';
 import 'teacher_text.dart';
 
 const _caption = TextStyle(
@@ -80,6 +81,17 @@ class _TeacherPanelState extends ConsumerState<TeacherPanel> {
   Future<void> _branches(Teacher teacher) async {
     final saved = await showTeacherBranchesDialog(context, teacher: teacher);
     if (saved == true && mounted) _reload();
+  }
+
+  Future<void> _merge(Teacher teacher) async {
+    final merged = await showTeacherMergeDialog(context, teacher: teacher);
+    if (merged == true && mounted) {
+      _reload();
+      showSnack(
+        context,
+        '${teacher.fullName} birlashtirildi va arxivga olindi.',
+      );
+    }
   }
 
   Future<void> _photo(Teacher teacher, {required bool remove}) async {
@@ -282,6 +294,7 @@ class _TeacherPanelState extends ConsumerState<TeacherPanel> {
             'photo' => _photo(t, remove: false),
             'photo-remove' => _photo(t, remove: true),
             'branches' => _branches(t),
+            'merge' => _merge(t),
             'archive' => _setActive(p, false),
             _ => _setActive(p, true),
           },
@@ -304,6 +317,12 @@ class _TeacherPanelState extends ConsumerState<TeacherPanel> {
                 key: ValueKey('menu-branches'),
                 value: 'branches',
                 child: Text('Filiallarni o\'zgartirish'),
+              ),
+            if (ref.read(sessionControllerProvider).isOwner)
+              const PopupMenuItem(
+                key: ValueKey('menu-merge'),
+                value: 'merge',
+                child: Text('Boshqa o\'qituvchi bilan birlashtirish'),
               ),
             const PopupMenuDivider(),
             PopupMenuItem(

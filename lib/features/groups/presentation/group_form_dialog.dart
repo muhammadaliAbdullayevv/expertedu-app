@@ -11,19 +11,26 @@ import '../../teachers/data/teachers_repository.dart';
 import '../data/groups_repository.dart';
 
 /// Create ([group] null) or edit a group. Returns true once saved.
-Future<bool?> showGroupFormDialog(BuildContext context, {Group? group}) {
+Future<bool?> showGroupFormDialog(
+  BuildContext context, {
+  Group? group,
+  int? subjectId,
+}) {
   return showDialog<bool>(
     context: context,
-    builder: (_) => _GroupFormDialog(group: group),
+    builder: (_) => _GroupFormDialog(group: group, subjectId: subjectId),
   );
 }
 
 typedef _Options = ({List<Subject> subjects, List<Teacher> teachers});
 
 class _GroupFormDialog extends ConsumerStatefulWidget {
-  const _GroupFormDialog({this.group});
+  const _GroupFormDialog({this.group, this.subjectId});
 
   final Group? group;
+
+  /// The course a new group is made under (opened from a course's page).
+  final int? subjectId;
 
   @override
   ConsumerState<_GroupFormDialog> createState() => _GroupFormDialogState();
@@ -41,7 +48,7 @@ class _GroupFormDialogState extends ConsumerState<_GroupFormDialog> {
     text: widget.group?.capacity?.toString(),
   );
   late final _note = TextEditingController(text: widget.group?.note);
-  late int? _subjectId = widget.group?.subjectId;
+  late int? _subjectId = widget.group?.subjectId ?? widget.subjectId;
   late int? _teacherId = widget.group?.teacherId;
   late String _billingMode = widget.group?.billingMode ?? BillingMode.fixedDay;
   late int? _billingDay = widget.group?.billingDay ?? 1;
