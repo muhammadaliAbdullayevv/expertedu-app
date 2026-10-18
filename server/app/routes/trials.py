@@ -16,6 +16,7 @@ from .. import admissions, db, idempotency, schedule
 from ..config import settings
 from ..deps import CurrentUser, get_current_user
 from ..money import service as money
+from ..scope import ambient_ids, branch_filter, current_scope, require_group, teacher_filter
 from ..schemas import (
     CancelRequest,
     CreateTrialBookingRequest,
@@ -60,7 +61,12 @@ def describe_time(starts_at: datetime, ends_at: datetime | None = None) -> str:
 
 
 async def fetch_sessions(conn, where: str, *args) -> list[TrialSession]:
-    rows = await conn.fetch(f"{_SESSION_SELECT} {where} order by ts.starts_at, ts.id", *args)
+    """Sessions in the request's branch scope (`where` must start with "where")."""
+    rows = await conn.fetch(
+        f"{_SESSION_SELECT} {where} and {branch_filter('ts.branch_id', len(args) + 1)} order by ts.starts_at, ts.id",
+        *args,
+        ambient_ids(),
+    )
     if not rows:
         return []
     bookings = await conn.fetch(
@@ -88,7 +94,13 @@ async def fetch_session(conn, session_id: int) -> TrialSession:
 
 
 async def fetch_bookings(conn, where: str, *args) -> list[TrialBooking]:
-    rows = await conn.fetch(f"select * from trial_bookings b {where} order by b.created_at, b.id", *args)
+    """Bookings of leads in the request's branch scope."""
+    rows = await conn.fetch(
+        f"select b.* from trial_bookings b join leads ld_ on ld_.id = b.lead_id {where} "
+        f"and {branch_filter('ld_.branch_id', len(args) + 1)} order by b.created_at, b.id",
+        *args,
+        ambient_ids(),
+    )
     if not rows:
         return []
     sessions = await fetch_sessions(
@@ -177,10 +189,13 @@ def _validate_capacity(capacity: int) -> None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Joylar soni 1 dan 100 gacha bo'lishi kerak.")
 
 
-async def _require_teacher(conn, teacher_id: int | None) -> None:
+async def _require_teacher(conn, teacher_id: int | None, branch_id: int) -> None:
+    """The teacher must work in the session's branch."""
     if teacher_id is None:
         return
-    active = await conn.fetchval("select is_active from teachers where id = $1", teacher_id)
+    active = await conn.fetchval(
+        f"select t.is_active from teachers t where t.id = $1 and {teacher_filter('t', 2)}", teacher_id, [branch_id]
+    )
     if active is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "O'qituvchi topilmadi.")
     if not active:
@@ -196,21 +211,21 @@ async def create_session(conn, payload: CreateTrialSessionRequest, user_id: int)
     room = (payload.room or "").strip() or None
 
     subject_id, teacher_id, group_id = payload.subject_id, payload.teacher_id, None
+    branch_id = current_scope().write_branch()
     if payload.kind == "group_lesson":
         if payload.group_id is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Guruhni tanlang.")
-        group = await conn.fetchrow("select * from groups where id = $1", payload.group_id)
-        if group is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
+        group = await require_group(conn, current_scope(), payload.group_id)
         if not group["is_active"]:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Bu guruh faol emas.")
         group_id = group["id"]
+        branch_id = group["branch_id"]
         # A guest at a group's lesson is taught by that group's teacher.
         subject_id = subject_id or group["subject_id"]
         teacher_id = teacher_id or group["teacher_id"]
     if subject_id is not None and not await conn.fetchval("select 1 from subjects where id = $1", subject_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Fan topilmadi.")
-    await _require_teacher(conn, teacher_id)
+    await _require_teacher(conn, teacher_id, branch_id)
 
     await _check_conflicts(
         conn, starts_at=starts_at, ends_at=ends_at, teacher_id=teacher_id, room=room, group_id=group_id
@@ -218,8 +233,8 @@ async def create_session(conn, payload: CreateTrialSessionRequest, user_id: int)
     return await conn.fetchval(
         """
         insert into trial_sessions
-            (kind, subject_id, group_id, teacher_id, room, starts_at, ends_at, capacity, note, created_by)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            (kind, subject_id, group_id, teacher_id, room, starts_at, ends_at, capacity, note, created_by, branch_id)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         returning id
         """,
         payload.kind,
@@ -232,6 +247,7 @@ async def create_session(conn, payload: CreateTrialSessionRequest, user_id: int)
         payload.capacity,
         (payload.note or "").strip() or None,
         user_id,
+        branch_id,
     )
 
 
@@ -273,15 +289,16 @@ async def book(
     conn, *, lead_id: int, session_id: int, user_id: int, rescheduled_from_id: int | None = None, is_owner: bool = False
 ) -> int:
     # Session before lead -- the same order cancelling a session locks them in.
-    session = await conn.fetchrow("select * from trial_sessions where id = $1 for update", session_id)
-    if session is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Sinov darsi topilmadi.")
+    session = await _lock_session(conn, session_id)
     if session["status"] == "cancelled":
         raise HTTPException(status.HTTP_409_CONFLICT, "Bu sinov darsi bekor qilingan.")
     if session["ends_at"] <= datetime.now(session["ends_at"].tzinfo):
         raise HTTPException(status.HTTP_409_CONFLICT, "Bu sinov darsi allaqachon tugagan.")
 
     lead = await admissions.lock_lead(conn, lead_id)
+    if lead["branch_id"] != session["branch_id"]:
+        # The owner, looking at everything, could pick across branches.
+        raise HTTPException(status.HTTP_409_CONFLICT, "So'rov va sinov darsi turli filiallarda.")
     if lead["stage"] == "enrolled":
         raise HTTPException(status.HTTP_409_CONFLICT, "Bu so'rov bo'yicha o'quvchi allaqachon yozilgan.")
     if lead["stage"] in admissions.CLOSED_STAGES:
@@ -344,8 +361,25 @@ async def add_trial_reminder(conn, lead_id: int, session_id: int, user_id: int) 
     await admissions.add_task(conn, lead, "Sinov darsi haqida eslatish", due_at, user_id=user_id)
 
 
+async def _lock_session(conn, session_id: int) -> dict:
+    """The session, locked -- only if the request's branch scope may see it."""
+    session = await conn.fetchrow(
+        f"select * from trial_sessions ts where ts.id = $1 and {branch_filter('ts.branch_id', 2)} for update",
+        session_id,
+        ambient_ids(),
+    )
+    if session is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Sinov darsi topilmadi.")
+    return session
+
+
 async def _lock_booking(conn, booking_id: int) -> dict:
-    booking = await conn.fetchrow("select * from trial_bookings where id = $1 for update", booking_id)
+    booking = await conn.fetchrow(
+        f"select b.* from trial_bookings b join leads l on l.id = b.lead_id "
+        f"where b.id = $1 and {branch_filter('l.branch_id', 2)} for update of b",
+        booking_id,
+        ambient_ids(),
+    )
     if booking is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Sinov yozuvi topilmadi.")
     return booking
@@ -383,9 +417,7 @@ async def update_trial_session(
 ):
     async with db.pool().acquire() as conn:
         async with conn.transaction():
-            session = await conn.fetchrow("select * from trial_sessions where id = $1 for update", session_id)
-            if session is None:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "Sinov darsi topilmadi.")
+            session = await _lock_session(conn, session_id)
             admissions.check_version(session["version"], payload.version)
             if session["status"] == "cancelled":
                 raise HTTPException(status.HTTP_409_CONFLICT, "Bu sinov darsi bekor qilingan.")
@@ -402,7 +434,7 @@ async def update_trial_session(
             if time_changed:
                 _validate_times(starts_at, ends_at)
             _validate_capacity(capacity)
-            await _require_teacher(conn, teacher_id)
+            await _require_teacher(conn, teacher_id, session["branch_id"])
             taken = await conn.fetchval(
                 "select count(*) from trial_bookings where session_id = $1 and status = any($2::text[])",
                 session_id,
@@ -461,9 +493,7 @@ async def cancel_trial_session(
     reason = (payload.reason or "").strip() or "Sinov darsi bekor qilindi"
     async with db.pool().acquire() as conn:
         async with conn.transaction():
-            session = await conn.fetchrow("select * from trial_sessions where id = $1 for update", session_id)
-            if session is None:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "Sinov darsi topilmadi.")
+            session = await _lock_session(conn, session_id)
             if session["status"] == "scheduled":
                 await conn.execute(
                     "update trial_sessions set status = 'cancelled', version = version + 1, updated_at = now() "

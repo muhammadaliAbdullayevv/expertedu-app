@@ -23,6 +23,23 @@ create table if not exists staff_logins (
   last_login_at timestamptz not null
 );
 
+-- Branches (0022): Bosh ofis (id 1) and the filiallar. Existing data is in 1.
+create table if not exists branches (
+  id bigserial primary key,
+  name text not null unique,
+  is_headquarters boolean not null default false,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now()
+);
+insert into branches (name, is_headquarters) select 'Bosh ofis', true
+where not exists (select 1 from branches);
+
+-- An admin works in exactly one branch; the owner has none (sees all).
+create table if not exists user_branches (
+  user_id bigint primary key references users(id),
+  branch_id bigint not null references branches(id)
+);
+
 -- A subject (e.g. "Ingliz tili") can have several groups under it (e.g.
 -- Beginner/Intermediate cohorts) -- the home screen browses subjects
 -- first, then that subject's groups, then a group's own roster.
@@ -51,6 +68,13 @@ create table if not exists teachers (
   photo text
 );
 
+-- A teacher may work at several branches (0022).
+create table if not exists teacher_branches (
+  teacher_id bigint not null references teachers(id),
+  branch_id bigint not null references branches(id),
+  primary key (teacher_id, branch_id)
+);
+
 create table if not exists groups (
   id bigserial primary key,
   subject_id bigint references subjects(id),
@@ -70,6 +94,8 @@ create table if not exists groups (
   level text,
   start_date date,
   prorate_first_period boolean not null default true,
+  -- The branch it belongs to (0022); the default bridges the move to branches.
+  branch_id bigint not null default 1 references branches(id),
   -- This group's own pay rule; null salary_method = the teacher's (0014).
   salary_method text check (salary_method in ('percent', 'fixed')),
   salary_percent numeric(5, 2) check (salary_percent is null or salary_percent between 0 and 100),
@@ -95,10 +121,21 @@ create table if not exists students (
   -- Where they live, typed by hand (0019).
   address text,
   -- Stored file name of the profile photo; null = none (0020).
-  photo text,
-  -- Set while he is in the archive (0021).
-  archived_at timestamptz
+  photo text
 );
+
+-- A student is one person; a branch sees them only through this link (0022).
+-- The archive is per branch.
+create table if not exists student_branches (
+  student_id bigint not null references students(id),
+  branch_id bigint not null references branches(id),
+  archived_at timestamptz,
+  -- The branch's own note about him; students.note is no longer used.
+  note text,
+  linked_at timestamptz not null default now(),
+  primary key (student_id, branch_id)
+);
+create index if not exists idx_student_branches_branch on student_branches (branch_id);
 
 -- A student can be enrolled in multiple groups at once, each its own
 -- independent billing relationship. Rejoining after a withdrawal creates a
@@ -137,7 +174,9 @@ create table if not exists student_events (
   note text,
   debt bigint,
   created_by bigint references users(id),
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- The branch it happened in (0022).
+  branch_id bigint not null default 1 references branches(id)
 );
 create index if not exists idx_student_events_student on student_events (student_id, created_at desc, id desc);
 
@@ -218,6 +257,8 @@ create table if not exists leads (
   group_id bigint references groups(id),
   -- Where they live, typed by hand (0018).
   address text,
+  -- The branch it belongs to (0022).
+  branch_id bigint not null default 1 references branches(id),
   constraint leads_stage_check check (stage in (
     'new','contacted','trial_scheduled','trial_completed','decision_pending','follow_up_later',
     'enrolled','not_interested','unreachable'
@@ -228,9 +269,10 @@ create table if not exists leads (
   constraint uq_leads_enrollment unique (enrollment_id)
 );
 -- At most one open lead per phone per course.
-create unique index if not exists uq_leads_open_phone_subject on leads (phone, coalesce(subject_id, 0))
+create unique index if not exists uq_leads_open_phone_subject on leads (phone, coalesce(subject_id, 0), branch_id)
   where stage not in ('enrolled','not_interested','unreachable');
 create index if not exists idx_leads_stage on leads (stage);
+create index if not exists idx_leads_branch on leads (branch_id);
 create index if not exists idx_leads_phone on leads (phone);
 create index if not exists idx_leads_created_at on leads (created_at);
 create index if not exists idx_leads_student on leads (student_id) where student_id is not null;
@@ -254,6 +296,8 @@ create table if not exists trial_sessions (
   created_by bigint references users(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  -- The branch it belongs to (0022).
+  branch_id bigint not null default 1 references branches(id),
   constraint trial_sessions_time_order check (ends_at > starts_at),
   constraint trial_sessions_group_kind check ((kind = 'group_lesson') = (group_id is not null))
 );
@@ -414,11 +458,14 @@ create table if not exists expenses (
   voided_at timestamptz,
   voided_by bigint references users(id),
   void_reason text,
+  -- The branch it was paid from (0022).
+  branch_id bigint not null default 1 references branches(id),
   constraint expenses_salary_fields check (
     (category = 'salary') = (teacher_id is not null and salary_month is not null)
   ),
   constraint expenses_salary_month_first check (salary_month is null or extract(day from salary_month) = 1)
 );
+create index if not exists idx_groups_branch on groups (branch_id);
 create index if not exists idx_expenses_spent_on on expenses (spent_on) where voided_at is null;
 create index if not exists idx_expenses_salary on expenses (teacher_id, salary_month) where category = 'salary' and voided_at is null;
 
@@ -532,6 +579,8 @@ create table if not exists payments (
   cancelled_by bigint references users(id),
   cancel_reason text,
   created_at timestamptz not null default now(),
+  -- The branch it was taken in: it only ever pays that branch's charges (0022).
+  branch_id bigint not null default 1 references branches(id),
   constraint payments_receipt_unique unique (receipt_no),
   constraint payments_reverses_once unique (reverses_id),
   constraint payments_reversal_fields check ((kind = 'reversal') = (reverses_id is not null)),
@@ -592,6 +641,23 @@ select c.id as charge_id, c.enrollment_id, e.student_id, e.group_id, c.period_st
 from charges c
 join enrollments e on e.id = c.enrollment_id
 left join (select charge_id, sum(amount) as paid from payment_allocations group by charge_id) a on a.charge_id = c.id;
+
+-- The same, per branch: a student who studies at two branches has a ledger in each (0022).
+create or replace view student_branch_balances as
+select sb.student_id, sb.branch_id,
+       coalesce(p.total, 0)::bigint as paid,
+       coalesce(c.total, 0)::bigint as charged,
+       (coalesce(p.total, 0) - coalesce(c.total, 0))::bigint as balance
+from student_branches sb
+left join (
+  select student_id, branch_id, sum(amount) as total from payments
+  where kind = 'payment' and status = 'valid' group by student_id, branch_id
+) p on p.student_id = sb.student_id and p.branch_id = sb.branch_id
+left join (
+  select e.student_id, g.branch_id, sum(ch.amount) as total
+  from charges ch join enrollments e on e.id = ch.enrollment_id join groups g on g.id = e.group_id
+  where ch.status = 'active' group by e.student_id, g.branch_id
+) c on c.student_id = sb.student_id and c.branch_id = sb.branch_id;
 
 -- Per enrollment: active charges, what was allocated to them, what's owed.
 create or replace view enrollment_balances as
@@ -655,7 +721,9 @@ create table if not exists salary_run_lines (
   percent numeric(5, 2),
   -- 'fixed' lines are the fixed monthly amount, not a share of payments.
   method text not null default 'percent' check (method in ('percent', 'fixed')),
-  share bigint not null
+  share bigint not null,
+  -- The branch the line came from (0022).
+  branch_id bigint not null default 1 references branches(id)
 );
 create index if not exists idx_salary_run_lines_run on salary_run_lines (run_id);
 
@@ -675,6 +743,8 @@ create table if not exists salary_payouts (
   voided_at timestamptz,
   voided_by bigint references users(id),
   void_reason text,
+  -- The branch that paid it (0022).
+  branch_id bigint not null default 1 references branches(id),
   constraint salary_payouts_void_fields check ((voided_at is null) = (void_reason is null))
 );
 create index if not exists idx_salary_payouts_month on salary_payouts (month, teacher_id) where voided_at is null;

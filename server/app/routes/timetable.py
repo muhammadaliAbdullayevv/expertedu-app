@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from .. import admissions, db, schedule
 from ..config import settings
-from ..deps import CurrentUser, get_current_user
+from ..deps import CurrentUser, Scope, get_current_user, get_scope
+from ..scope import branch_filter, require_group
 from ..schemas import (
     AttendanceReportRow,
     AttendanceSheet,
@@ -28,16 +29,18 @@ _STATUSES = ("present", "late", "absent", "excused")
 _MAX_RANGE = timedelta(days=62)
 
 
-async def _group(conn, group_id: int, *, lock: bool = False) -> dict:
+async def _group(conn, scope: Scope, group_id: int, *, lock: bool = False) -> dict:
+    """The group, or 404 when it is not in the scope."""
     row = await conn.fetchrow(
         f"""
         select g.*, s.name as subject_name, t.full_name as teacher_name
         from groups g
         left join subjects s on s.id = g.subject_id
         left join teachers t on t.id = g.teacher_id
-        where g.id = $1 {"for update of g" if lock else ""}
+        where g.id = $1 and {branch_filter('g.branch_id', 2)} {"for update of g" if lock else ""}
         """,
         group_id,
+        scope.ids,
     )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
@@ -48,9 +51,9 @@ async def _group(conn, group_id: int, *, lock: bool = False) -> dict:
 
 
 @router.get("/groups/{group_id}/schedule", response_model=GroupSchedule)
-async def get_group_schedule(group_id: int):
+async def get_group_schedule(group_id: int, scope: Scope = Depends(get_scope)):
     async with db.pool().acquire() as conn:
-        await _group(conn, group_id)
+        await _group(conn, scope, group_id)
         slots = await schedule.load_slots(conn, group_ids=[group_id], active_only=False)
     return GroupSchedule(
         group_id=group_id,
@@ -59,7 +62,7 @@ async def get_group_schedule(group_id: int):
 
 
 @router.put("/groups/{group_id}/schedule", response_model=GroupSchedule)
-async def set_group_schedule(group_id: int, payload: SetGroupScheduleRequest):
+async def set_group_schedule(group_id: int, payload: SetGroupScheduleRequest, scope: Scope = Depends(get_scope)):
     """Replaces the group's weekly slots. Lessons already marked or
     cancelled keep their own times; only the future follows the new ones."""
     slots = []
@@ -72,7 +75,7 @@ async def set_group_schedule(group_id: int, payload: SetGroupScheduleRequest):
 
     async with db.pool().acquire() as conn:
         async with conn.transaction():
-            group = await _group(conn, group_id, lock=True)
+            group = await _group(conn, scope, group_id, lock=True)
             if group["is_active"]:
                 await schedule.check_clashes(conn, group_id=group_id, teacher_id=group["teacher_id"], slots=slots)
             await conn.execute("delete from group_schedules where group_id = $1", group_id)
@@ -86,7 +89,7 @@ async def set_group_schedule(group_id: int, payload: SetGroupScheduleRequest):
                     slot.ends_at,
                     slot.room,
                 )
-    return await get_group_schedule(group_id)
+    return await get_group_schedule(group_id, scope)
 
 
 # --- Timetable -----------------------------------------------------------------
@@ -97,9 +100,20 @@ def _day(value: datetime) -> date:
 
 
 async def _timetable(
-    conn, date_from: date, date_to: date, *, group_id: int | None = None, teacher_id: int | None = None
+    conn,
+    date_from: date,
+    date_to: date,
+    *,
+    group_id: int | None = None,
+    teacher_id: int | None = None,
+    ids: list[int] | None = None,
 ) -> list[TimetableLesson]:
+    """`ids` are the branches in scope (None = all): only their groups' lessons."""
     group_filter = [group_id] if group_id is not None else None
+    in_scope = None
+    if ids is not None:
+        in_scope = [r["id"] for r in await conn.fetch(f"select g.id from groups g where {branch_filter('g.branch_id', 1)}", ids)]
+        group_filter = in_scope if group_id is None else [group_id] if group_id in in_scope else []
     slots = await schedule.load_slots(conn, group_ids=group_filter)
     tz = settings.center_timezone
     lesson_rows = await conn.fetch(
@@ -111,12 +125,14 @@ async def _timetable(
         left join attendance a on a.lesson_id = l.id
         where (l.starts_at at time zone $1)::date between $2 and $3
           and ($4::bigint is null or l.group_id = $4)
+          and ($5::bigint[] is null or l.group_id = any($5::bigint[]))
         group by l.id
         """,
         tz,
         date_from,
         date_to,
         group_id,
+        in_scope,
     )
     by_key = {(row["group_id"], row["starts_at"]): row for row in lesson_rows}
 
@@ -199,12 +215,16 @@ def _check_range(date_from: date, date_to: date) -> None:
 
 @router.get("/timetable", response_model=list[TimetableLesson])
 async def get_timetable(
-    date_from: date, date_to: date, group_id: int | None = None, teacher_id: int | None = None
+    date_from: date,
+    date_to: date,
+    group_id: int | None = None,
+    teacher_id: int | None = None,
+    scope: Scope = Depends(get_scope),
 ):
     """Lessons on date_from..date_to (inclusive, center days)."""
     _check_range(date_from, date_to)
     async with db.pool().acquire() as conn:
-        return await _timetable(conn, date_from, date_to, group_id=group_id, teacher_id=teacher_id)
+        return await _timetable(conn, date_from, date_to, group_id=group_id, teacher_id=teacher_id, ids=scope.ids)
 
 
 async def _find_lesson(conn, group_id: int, starts_at: datetime) -> TimetableLesson:
@@ -240,10 +260,11 @@ async def _ensure_row(conn, lesson: TimetableLesson, user_id: int) -> int:
 
 
 @router.get("/lessons/sheet", response_model=AttendanceSheet)
-async def get_attendance_sheet(group_id: int, starts_at: datetime):
+async def get_attendance_sheet(group_id: int, starts_at: datetime, scope: Scope = Depends(get_scope)):
     """The class list for one lesson, with any marks already made, and the
     trial guests booked into it (their attendance is kept on the trial)."""
     async with db.pool().acquire() as conn:
+        await _group(conn, scope, group_id)
         lesson = await _find_lesson(conn, group_id, starts_at)
         students = {s["enrollment_id"]: s for s in await schedule.roster(conn, group_id, _day(lesson.starts_at))}
         if lesson.lesson_id is not None:
@@ -282,7 +303,9 @@ async def get_attendance_sheet(group_id: int, starts_at: datetime):
 
 
 @router.put("/lessons/attendance", response_model=AttendanceSheet)
-async def mark_attendance(payload: MarkAttendanceRequest, user: CurrentUser = Depends(get_current_user)):
+async def mark_attendance(
+    payload: MarkAttendanceRequest, user: CurrentUser = Depends(get_current_user), scope: Scope = Depends(get_scope)
+):
     """Saves marks for one lesson (creating its row the first time).
     Re-sending the same marks changes nothing; a later mark for the same
     student replaces the earlier one."""
@@ -291,7 +314,7 @@ async def mark_attendance(payload: MarkAttendanceRequest, user: CurrentUser = De
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Davomat holati noto'g'ri.")
     async with db.pool().acquire() as conn:
         async with conn.transaction():
-            await _group(conn, payload.group_id, lock=True)
+            await _group(conn, scope, payload.group_id, lock=True)
             lesson = await _find_lesson(conn, payload.group_id, payload.starts_at)
             if lesson.status == "cancelled":
                 raise HTTPException(status.HTTP_409_CONFLICT, "Bu dars bekor qilingan.")
@@ -320,16 +343,18 @@ async def mark_attendance(payload: MarkAttendanceRequest, user: CurrentUser = De
                     (mark.note or "").strip() or None,
                     user.id,
                 )
-    return await get_attendance_sheet(payload.group_id, lesson.starts_at)
+    return await get_attendance_sheet(payload.group_id, lesson.starts_at, scope)
 
 
 @router.post("/lessons/cancel", response_model=TimetableLesson)
-async def cancel_lesson(payload: LessonRef, user: CurrentUser = Depends(get_current_user)):
+async def cancel_lesson(
+    payload: LessonRef, user: CurrentUser = Depends(get_current_user), scope: Scope = Depends(get_scope)
+):
     """The lesson doesn't take place (holiday, teacher ill). Not allowed
     once attendance has been marked for it."""
     async with db.pool().acquire() as conn:
         async with conn.transaction():
-            await _group(conn, payload.group_id, lock=True)
+            await _group(conn, scope, payload.group_id, lock=True)
             lesson = await _find_lesson(conn, payload.group_id, payload.starts_at)
             if lesson.marked_count:
                 raise HTTPException(status.HTTP_409_CONFLICT, "Davomat belgilangan darsni bekor qilib bo'lmaydi.")
@@ -343,11 +368,11 @@ async def cancel_lesson(payload: LessonRef, user: CurrentUser = Depends(get_curr
 
 
 @router.post("/lessons/restore", response_model=TimetableLesson)
-async def restore_lesson(payload: LessonRef):
+async def restore_lesson(payload: LessonRef, scope: Scope = Depends(get_scope)):
     """Undoes a cancellation."""
     async with db.pool().acquire() as conn:
         async with conn.transaction():
-            await _group(conn, payload.group_id, lock=True)
+            await _group(conn, scope, payload.group_id, lock=True)
             lesson = await _find_lesson(conn, payload.group_id, payload.starts_at)
             if lesson.status == "cancelled":
                 await conn.execute(
@@ -358,7 +383,9 @@ async def restore_lesson(payload: LessonRef):
 
 
 @router.post("/lessons", response_model=TimetableLesson, status_code=status.HTTP_201_CREATED)
-async def create_extra_lesson(payload: CreateExtraLessonRequest, user: CurrentUser = Depends(get_current_user)):
+async def create_extra_lesson(
+    payload: CreateExtraLessonRequest, user: CurrentUser = Depends(get_current_user), scope: Scope = Depends(get_scope)
+):
     """A lesson outside the weekly schedule (a make-up, an exam)."""
     starts_at, ends_at = admissions.aware(payload.starts_at), admissions.aware(payload.ends_at)
     if ends_at <= starts_at or ends_at - starts_at > timedelta(hours=8):
@@ -366,7 +393,7 @@ async def create_extra_lesson(payload: CreateExtraLessonRequest, user: CurrentUs
     room = (payload.room or "").strip() or None
     async with db.pool().acquire() as conn:
         async with conn.transaction():
-            group = await _group(conn, payload.group_id, lock=True)
+            group = await _group(conn, scope, payload.group_id, lock=True)
             if not group["is_active"]:
                 raise HTTPException(status.HTTP_400_BAD_REQUEST, "Bu guruh faol emas.")
             day = _day(starts_at)
@@ -400,7 +427,9 @@ async def create_extra_lesson(payload: CreateExtraLessonRequest, user: CurrentUs
 
 
 @router.get("/attendance/report", response_model=list[AttendanceReportRow])
-async def attendance_report(date_from: date, date_to: date, group_id: int | None = None):
+async def attendance_report(
+    date_from: date, date_to: date, group_id: int | None = None, scope: Scope = Depends(get_scope)
+):
     """Per student and group: marked lessons on date_from..date_to and how
     they went -- most absences first."""
     _check_range(date_from, date_to)
@@ -421,6 +450,7 @@ async def attendance_report(date_from: date, date_to: date, group_id: int | None
         where l.status = 'active'
           and (l.starts_at at time zone $1)::date between $2 and $3
           and ($4::bigint is null or g.id = $4)
+          and ($5::bigint[] is null or g.branch_id = any($5::bigint[]))
         group by e.id, s.id, g.id
         order by count(*) filter (where a.status = 'absent') desc, s.full_name
         """,
@@ -428,6 +458,7 @@ async def attendance_report(date_from: date, date_to: date, group_id: int | None
         date_from,
         date_to,
         group_id,
+        scope.ids,
     )
     return [
         AttendanceReportRow(

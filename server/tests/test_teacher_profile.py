@@ -38,7 +38,7 @@ async def test_groups_show_name_students_days_and_times_and_nothing_else(api):
         (1, "09:00", "10:30"), (3, "09:00", "10:30"), (5, "09:00", "10:30"),
     ]
     # Group stats (attendance, money) belong to the group's own page.
-    assert set(g) == {"group_id", "name", "subject_name", "level", "student_count", "capacity", "schedule"}
+    assert set(g) == {"group_id", "name", "subject_name", "level", "student_count", "capacity", "schedule", "branch_name"}
     assert "attendance" not in p and "week" not in p
     assert p["student_total"] == 3
     # The other teacher's group is not on this page.

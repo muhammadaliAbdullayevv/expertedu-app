@@ -12,7 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from .. import clock, db
 from ..money import service as money
 from ..config import settings
-from ..deps import CurrentUser, get_current_user, require_owner
+from ..deps import CurrentUser, Scope, get_current_user, get_scope, require_owner
+from ..scope import branch_filter
 from ..schemas import (
     CreateExpenseRequest,
     Expense,
@@ -54,7 +55,11 @@ def _next_month(value: date) -> date:
 
 @router.get("/expenses", response_model=list[Expense])
 async def list_expenses(
-    date_from: date, date_to: date, category: str | None = None, include_voided: bool = False
+    date_from: date,
+    date_to: date,
+    category: str | None = None,
+    include_voided: bool = False,
+    scope: Scope = Depends(get_scope),
 ):
     if date_to < date_from:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sana oralig'i noto'g'ri.")
@@ -64,18 +69,22 @@ async def list_expenses(
         where x.spent_on between $1 and $2
           and ($3::text is null or x.category = $3)
           and ($4 or x.voided_at is null)
+          and {branch_filter('x.branch_id', 5)}
         order by x.spent_on desc, x.id desc
         """,
         date_from,
         date_to,
         category,
         include_voided,
+        scope.ids,
     )
     return [Expense(**row) for row in rows]
 
 
 @router.post("/expenses", response_model=Expense, status_code=status.HTTP_201_CREATED)
-async def create_expense(payload: CreateExpenseRequest, user: CurrentUser = Depends(get_current_user)):
+async def create_expense(
+    payload: CreateExpenseRequest, user: CurrentUser = Depends(get_current_user), scope: Scope = Depends(get_scope)
+):
     if payload.category not in CATEGORIES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Xarajat turi noto'g'ri.")
     if payload.amount <= 0:
@@ -96,15 +105,16 @@ async def create_expense(payload: CreateExpenseRequest, user: CurrentUser = Depe
                 await money.record_payout(
                     conn, teacher_id=teacher_id, month=salary_month, amount=payload.amount,
                     paid_on=payload.spent_on, method=payload.method, note=(payload.note or "").strip() or None,
-                    user_id=user.id,
+                    user_id=user.id, branch_id=scope.write_branch(),
                 )
             )["expense_id"]
             row = await conn.fetchrow(f"{_EXPENSE_SELECT} where x.id = $1", expense_id)
             return Expense(**row)
         expense_id = await conn.fetchval(
             """
-            insert into expenses (category, amount, spent_on, note, method, teacher_id, salary_month, created_by)
-            values ($1, $2, $3, $4, $5, $6, $7, $8)
+            insert into expenses (category, amount, spent_on, note, method, teacher_id, salary_month, created_by,
+                                  branch_id)
+            values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             returning id
             """,
             payload.category,
@@ -115,6 +125,7 @@ async def create_expense(payload: CreateExpenseRequest, user: CurrentUser = Depe
             teacher_id,
             salary_month,
             user.id,
+            scope.write_branch(),
         )
         await money.audit(
             conn, user.id, "expense", expense_id, "create",
@@ -125,26 +136,34 @@ async def create_expense(payload: CreateExpenseRequest, user: CurrentUser = Depe
 
 
 @router.post("/expenses/{expense_id}/void", response_model=Expense)
-async def void_expense(expense_id: int, payload: VoidExpenseRequest, user: CurrentUser = Depends(require_owner)):
+async def void_expense(
+    expense_id: int,
+    payload: VoidExpenseRequest,
+    user: CurrentUser = Depends(require_owner),
+    scope: Scope = Depends(get_scope),
+):
     """OWNER ONLY. Cancels a mistaken expense or salary payout. It stays on record, marked void."""
     reason = payload.reason.strip()
     if not reason:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Sababini yozing.")
     async with db.pool().acquire() as conn:
         updated = await conn.fetchval(
-            """
-            update expenses set voided_at = now(), voided_by = $2, void_reason = $3
-            where id = $1 and voided_at is null
-            returning id
+            f"""
+            update expenses x set voided_at = now(), voided_by = $2, void_reason = $3
+            where x.id = $1 and x.voided_at is null and {branch_filter('x.branch_id', 4)}
+            returning x.id
             """,
             expense_id,
             user.id,
             reason,
+            scope.ids,
         )
         if updated is not None:
             await money.void_payout_for_expense(conn, expense_id, reason, user.id)
             await money.audit(conn, user.id, "expense", expense_id, "void", reason=reason)
-        row = await conn.fetchrow(f"{_EXPENSE_SELECT} where x.id = $1", expense_id)
+        row = await conn.fetchrow(
+            f"{_EXPENSE_SELECT} where x.id = $1 and {branch_filter('x.branch_id', 2)}", expense_id, scope.ids
+        )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Xarajat topilmadi.")
     if updated is None and row["voided_at"] is None:
@@ -201,16 +220,17 @@ async def set_group_salary_percent(
         await money.set_group_percent(conn, group_id, _decimal(payload.salary_percent), user.id)
 
 
-async def _salary_month(conn, month: date) -> SalaryMonth:
-    return SalaryMonth(**await money.salary_month(conn, month))
+async def _salary_month(conn, month: date, ids: list[int] | None = None) -> SalaryMonth:
+    return SalaryMonth(**await money.salary_month(conn, month, ids))
 
 
 @router.get("/finance/salaries", response_model=SalaryMonth)
-async def salaries(month: date | None = None):
+async def salaries(month: date | None = None, scope: Scope = Depends(get_scope)):
     """Each teacher's share of what their students paid in the month (any
-    day of it), per student, and what has been paid out for that month."""
+    day of it), per student, and what has been paid out for that month --
+    for the branch in view, or all of them."""
     async with db.pool().acquire() as conn:
-        return await _salary_month(conn, _month_start(month or clock.today()))
+        return await _salary_month(conn, _month_start(month or clock.today()), scope.ids)
 
 
 @router.post("/finance/salaries/close", response_model=SalaryMonth)
@@ -224,7 +244,7 @@ async def close_salary_month(month: date, user: CurrentUser = Depends(require_ow
 
 
 @router.get("/finance/summary", response_model=FinanceSummary)
-async def finance_summary(months: int = Query(default=6, ge=1, le=24)):
+async def finance_summary(months: int = Query(default=6, ge=1, le=24), scope: Scope = Depends(get_scope)):
     current = _month_start(clock.today())
     starts = [current]
     for _ in range(months - 1):
@@ -238,22 +258,24 @@ async def finance_summary(months: int = Query(default=6, ge=1, le=24)):
             select date_trunc('month', received_at at time zone $1)::date as month,
                    sum(case when kind = 'payment' then amount else -amount end)::bigint as amount
             from payments
-            where (received_at at time zone $1)::date >= $2
+            where (received_at at time zone $1)::date >= $2 and ($3::bigint[] is null or branch_id = any($3::bigint[]))
             group by 1
             """,
             tz,
             first,
+            scope.ids,
         )
         expense_rows = await conn.fetch(
             """
             select date_trunc('month', spent_on)::date as month, category, sum(amount) as amount
             from expenses
-            where voided_at is null and spent_on >= $1
+            where voided_at is null and spent_on >= $1 and ($2::bigint[] is null or branch_id = any($2::bigint[]))
             group by 1, 2
             """,
             first,
+            scope.ids,
         )
-        this_month = await _salary_month(conn, current)
+        this_month = await _salary_month(conn, current, scope.ids)
 
     income = {row["month"]: row["amount"] for row in income_rows}
     by_month: dict[date, dict[str, int]] = {}

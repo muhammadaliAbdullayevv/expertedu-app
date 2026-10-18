@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, status
 
 from .. import admissions, db, idempotency
 from ..deps import CurrentUser, get_current_user
+from ..scope import ambient_ids, branch_filter
 from ..schemas import CancelRequest, CreateFollowUpTaskRequest, FollowUpTask, UpdateFollowUpTaskRequest
 
 router = APIRouter(prefix="/follow-up-tasks", tags=["follow-ups"], dependencies=[Depends(get_current_user)])
@@ -19,7 +20,11 @@ left join users u on u.id = t.assigned_to
 
 
 async def fetch_tasks(conn, where: str, *args) -> list[FollowUpTask]:
-    rows = await conn.fetch(f"{_TASK_SELECT} {where} order by t.status = 'open' desc, t.due_at, t.id", *args)
+    """Tasks of leads in the request's branch scope (`where` may be empty)."""
+    where = (where + " and " if where else "where ") + branch_filter("l.branch_id", len(args) + 1)
+    rows = await conn.fetch(
+        f"{_TASK_SELECT} {where} order by t.status = 'open' desc, t.due_at, t.id", *args, ambient_ids()
+    )
     return [FollowUpTask(**row) for row in rows]
 
 
@@ -30,10 +35,21 @@ async def _fetch_task(conn, task_id: int) -> FollowUpTask:
     return tasks[0]
 
 
-async def _lock_open_task(conn, task_id: int, version: int | None = None) -> dict:
-    task = await conn.fetchrow("select * from follow_up_tasks where id = $1 for update", task_id)
+async def _lock_task(conn, task_id: int) -> dict:
+    """The task, locked -- only if its lead is in the request's branch scope."""
+    task = await conn.fetchrow(
+        f"select t.* from follow_up_tasks t join leads l on l.id = t.lead_id "
+        f"where t.id = $1 and {branch_filter('l.branch_id', 2)} for update of t",
+        task_id,
+        ambient_ids(),
+    )
     if task is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Vazifa topilmadi.")
+    return task
+
+
+async def _lock_open_task(conn, task_id: int, version: int | None = None) -> dict:
+    task = await _lock_task(conn, task_id)
     admissions.check_version(task["version"], version)
     if task["status"] != "open":
         raise HTTPException(status.HTTP_409_CONFLICT, "Bu vazifa allaqachon yopilgan.")
@@ -136,9 +152,7 @@ async def update_task(task_id: int, payload: UpdateFollowUpTaskRequest, user: Cu
 async def _close(task_id: int, new_status: str, note: str | None, user: CurrentUser) -> FollowUpTask:
     async with db.pool().acquire() as conn:
         async with conn.transaction():
-            task = await conn.fetchrow("select * from follow_up_tasks where id = $1 for update", task_id)
-            if task is None:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "Vazifa topilmadi.")
+            task = await _lock_task(conn, task_id)
             if task["status"] == new_status:
                 return await _fetch_task(conn, task_id)
             if task["status"] != "open":

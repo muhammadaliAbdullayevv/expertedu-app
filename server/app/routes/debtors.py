@@ -1,14 +1,14 @@
 from fastapi import APIRouter, Depends
 
 from .. import clock, db
-from ..deps import get_current_user
+from ..deps import Scope, get_current_user, get_scope
 from ..money import rules
 from ..schemas import Debtor
 
 router = APIRouter(prefix="/debtors", tags=["debtors"], dependencies=[Depends(get_current_user)])
 
 
-async def list_debtors(limit: int | None = None) -> list[Debtor]:
+async def list_debtors(limit: int | None = None, ids: list[int] | None = None) -> list[Debtor]:
     """Enrollments that still owe money, biggest first. Shared with the
     dashboard's top-debtors panel. Withdrawn enrollments still appear:
     leaving doesn't clear a debt. A student's credit from another group is
@@ -24,11 +24,12 @@ async def list_debtors(limit: int | None = None) -> list[Debtor]:
         join enrollments e on e.id = eb.enrollment_id
         join students s on s.id = e.student_id
         join groups g on g.id = e.group_id
-        where eb.owed > 0
+        where eb.owed > 0 and ($2::bigint[] is null or g.branch_id = any($2::bigint[]))
         order by eb.owed desc, s.full_name asc
         limit $1
         """,
         limit,
+        ids,
     )
     today = clock.today()
     debtors = []
@@ -39,5 +40,5 @@ async def list_debtors(limit: int | None = None) -> list[Debtor]:
 
 
 @router.get("", response_model=list[Debtor])
-async def get_debtors():
-    return await list_debtors()
+async def get_debtors(scope: Scope = Depends(get_scope)):
+    return await list_debtors(ids=scope.ids)

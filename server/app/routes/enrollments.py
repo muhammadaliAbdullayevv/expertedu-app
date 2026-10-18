@@ -3,8 +3,9 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from .. import clock, db, student_events
+from ..scope import branch_filter, link_student, require_enrollment, require_group, require_student
 from ..money import rules, service as money
-from ..deps import CurrentUser, get_current_user
+from ..deps import CurrentUser, Scope, get_current_user, get_scope
 from ..schemas import CreateEnrollmentRequest, Enrollment, FirstChargePreview, StudentEnrollment
 
 router = APIRouter(prefix="/enrollments", tags=["enrollments"], dependencies=[Depends(get_current_user)])
@@ -80,10 +81,10 @@ async def enroll(
     amount = await money.issue_first_charge(conn, dict(row), dict(group), created_by, first_month)
     # Joining a group takes him out of the archive; coming back to a group he
     # had left is "activated", any other is "added".
-    if await conn.fetchval(
-        "update students set archived_at = null where id = $1 and archived_at is not null returning 1", student_id
-    ):
-        await student_events.log(conn, student_id, "unarchived", created_by, note="Guruhga qaytdi")
+    if await link_student(conn, student_id, group["branch_id"]):
+        await student_events.log(
+            conn, student_id, "unarchived", created_by, branch_id=group["branch_id"], note="Guruhga qaytdi"
+        )
     if log_event:
         came_back = await conn.fetchval(
             "select 1 from enrollments where student_id = $1 and group_id = $2 and id <> $3", student_id, group_id, row["id"]
@@ -96,13 +97,15 @@ async def enroll(
 
 
 @router.post("", response_model=Enrollment, status_code=status.HTTP_201_CREATED)
-async def create_enrollment(payload: CreateEnrollmentRequest, user: CurrentUser = Depends(get_current_user)):
-    student = await db.pool().fetchval("select 1 from students where id = $1", payload.student_id)
-    if not student:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "O'quvchi topilmadi.")
-
+async def create_enrollment(
+    payload: CreateEnrollmentRequest,
+    user: CurrentUser = Depends(get_current_user),
+    scope: Scope = Depends(get_scope),
+):
     async with db.pool().acquire() as conn:
         async with conn.transaction():
+            await require_student(conn, scope, payload.student_id)
+            await require_group(conn, scope, payload.group_id)
             row, _ = await enroll(
                 conn,
                 student_id=payload.student_id,
@@ -119,14 +122,13 @@ async def first_charge_preview(
     joined_at: date,
     discount_kind: str | None = None,
     discount_value: int | None = None,
+    scope: Scope = Depends(get_scope),
 ):
     """Both possible first charges for a student starting in a group on
     joined_at -- shown in the dialog before the user chooses."""
-    group = await db.pool().fetchrow(
-        "select fee_amount, billing_mode, billing_day from groups where id = $1", group_id
-    )
-    if group is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
+    # The owner may be looking at a group of another branch than the one in view.
+    lookup = Scope(scope.user, None, scope.write_branch()) if scope.user.is_owner else scope
+    group = await require_group(db.pool(), lookup, group_id)
     kind, value = validate_discount(discount_kind, discount_value, group["fee_amount"])
     fee = rules.discounted_fee(group["fee_amount"], kind, value)
     first = rules.billing_periods(group["billing_mode"], group["billing_day"], joined_at, joined_at)[0]
@@ -161,12 +163,12 @@ async def withdraw(conn, enrollment: dict, user_id: int | None, reason: str) -> 
 
 
 @router.post("/{enrollment_id}/withdraw", response_model=Enrollment)
-async def withdraw_enrollment(enrollment_id: int, user: CurrentUser = Depends(get_current_user)):
+async def withdraw_enrollment(
+    enrollment_id: int, user: CurrentUser = Depends(get_current_user), scope: Scope = Depends(get_scope)
+):
     """Plain withdrawal. The app uses the student's own "remove from group" /
     "archive" (which ask for a comment); this stays for anything else."""
-    existing = await db.pool().fetchrow("select * from enrollments where id = $1", enrollment_id)
-    if existing is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Yozilish topilmadi.")
+    existing = await require_enrollment(db.pool(), scope, enrollment_id)
     if existing["status"] == "withdrawn":
         return Enrollment(**existing)
 
@@ -182,7 +184,7 @@ async def withdraw_enrollment(enrollment_id: int, user: CurrentUser = Depends(ge
 
 
 @router.get("/by-student/{student_id}", response_model=list[StudentEnrollment])
-async def list_student_enrollments(student_id: int):
+async def list_student_enrollments(student_id: int, scope: Scope = Depends(get_scope)):
     """`balance` is what this enrollment still owes (never negative); a
     student's credit lives on the student, see money.student_balance."""
     rows = await db.pool().fetch(
@@ -192,10 +194,11 @@ async def list_student_enrollments(student_id: int):
         from enrollments e
         join groups g on g.id = e.group_id
         join enrollment_balances eb on eb.enrollment_id = e.id
-        where e.student_id = $1
+        where e.student_id = $1 and """ + branch_filter("g.branch_id", 2) + """
         order by e.joined_at desc
         """,
         student_id,
+        scope.ids,
     )
     due = await money.next_due_dates(db.pool(), [row["enrollment_id"] for row in rows])
     return [StudentEnrollment(**row, next_due_date=due.get(row["enrollment_id"])) for row in rows]

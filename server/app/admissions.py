@@ -21,6 +21,7 @@ from fastapi import HTTPException, status
 
 from . import clock
 from .config import settings
+from .scope import ambient_ids
 
 OPEN_STAGES = (
     "new",
@@ -100,7 +101,12 @@ def tomorrow_morning() -> datetime:
 
 
 async def lock_lead(conn, lead_id: int) -> dict:
-    lead = await conn.fetchrow("select * from leads where id = $1 for update", lead_id)
+    """The lead, locked -- only if the request's branch scope may see it."""
+    lead = await conn.fetchrow(
+        "select * from leads l where l.id = $1 and ($2::bigint[] is null or l.branch_id = any($2::bigint[])) for update",
+        lead_id,
+        ambient_ids(),
+    )
     if lead is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "So'rov topilmadi.")
     return lead

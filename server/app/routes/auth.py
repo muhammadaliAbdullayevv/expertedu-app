@@ -19,9 +19,12 @@ async def login(payload: LoginRequest):
     phone = normalize(payload.phone)
     row = await db.pool().fetchrow(
         """
-        select id, full_name, password_hash, role, is_active, token_version,
-               failed_login_attempts, locked_until
-        from users where phone = $1
+        select u.id, u.full_name, u.password_hash, u.role, u.is_active, u.token_version,
+               u.failed_login_attempts, u.locked_until, ub.branch_id, b.name as branch_name
+        from users u
+        left join user_branches ub on ub.user_id = u.id
+        left join branches b on b.id = ub.branch_id
+        where u.phone = $1
         """,
         phone,
     )
@@ -58,6 +61,8 @@ async def login(payload: LoginRequest):
         role=row["role"],
         full_name=row["full_name"],
         phone=phone,
+        branch_id=row["branch_id"],
+        branch_name=row["branch_name"],
     )
 
 
@@ -74,7 +79,13 @@ async def _record_failed_attempt(user_id: int, current_attempts: int) -> None:
 
 @router.get("/me", response_model=MeResponse)
 async def me(user: CurrentUser = Depends(get_current_user)):
-    return MeResponse(user_id=user.id, phone=user.phone, full_name=user.full_name, role=user.role)
+    name = None
+    if user.branch_id is not None:
+        name = await db.pool().fetchval("select name from branches where id = $1", user.branch_id)
+    return MeResponse(
+        user_id=user.id, phone=user.phone, full_name=user.full_name, role=user.role,
+        branch_id=user.branch_id, branch_name=name,
+    )
 
 
 @router.post("/me/revoke-sessions", status_code=status.HTTP_204_NO_CONTENT)

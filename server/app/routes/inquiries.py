@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from .. import admissions, db
 from ..config import settings
 from ..deps import CurrentUser, get_current_user
+from ..scope import ambient_ids, branch_filter
 from ..schemas import CreateInquiryRequest, CreateLeadRequest, Inquiry, UpdateInquiryRequest
 from .leads import duplicate_lead_error, lock_phone, open_lead_for, create_lead, move_to_stage
 
@@ -53,7 +54,9 @@ left join lateral (
 
 
 async def _fetch(conn, lead_id: int) -> Inquiry:
-    row = await conn.fetchrow(f"{_SELECT} where l.id = $2", settings.center_timezone, lead_id)
+    row = await conn.fetchrow(
+        f"{_SELECT} where l.id = $2 and {branch_filter('l.branch_id', 3)}", settings.center_timezone, lead_id, ambient_ids()
+    )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "So'rov topilmadi.")
     return Inquiry(**row)
@@ -66,12 +69,18 @@ async def list_inquiries(status_filter: str | None = None):
             if status_filter not in _LEGACY_STAGES:
                 return []
             rows = await conn.fetch(
-                f"{_SELECT} where l.stage = any($2::text[]) order by l.created_at desc",
+                f"{_SELECT} where l.stage = any($2::text[]) and {branch_filter('l.branch_id', 3)} "
+                "order by l.created_at desc",
                 settings.center_timezone,
                 list(_LEGACY_STAGES[status_filter]),
+                ambient_ids(),
             )
         else:
-            rows = await conn.fetch(f"{_SELECT} order by l.created_at desc", settings.center_timezone)
+            rows = await conn.fetch(
+                f"{_SELECT} where {branch_filter('l.branch_id', 2)} order by l.created_at desc",
+                settings.center_timezone,
+                ambient_ids(),
+            )
     return [Inquiry(**row) for row in rows]
 
 
@@ -112,7 +121,9 @@ async def update_inquiry(inquiry_id: int, payload: UpdateInquiryRequest, user: C
             fields = {field: value for field, value in fields.items() if value != lead[field]}
             if "subject_id" in fields and lead["stage"] in admissions.OPEN_STAGES:
                 await lock_phone(conn, lead["phone"])
-                existing = await open_lead_for(conn, lead["phone"], fields["subject_id"], exclude_id=inquiry_id)
+                existing = await open_lead_for(
+                    conn, lead["phone"], fields["subject_id"], lead["branch_id"], exclude_id=inquiry_id
+                )
                 if existing is not None:
                     raise duplicate_lead_error(existing)
             if fields:

@@ -15,6 +15,8 @@ class LoginResponse(BaseModel):
     role: str
     full_name: str
     phone: str
+    branch_id: int | None = None
+    branch_name: str | None = None
 
 
 class MeResponse(BaseModel):
@@ -22,6 +24,25 @@ class MeResponse(BaseModel):
     phone: str
     full_name: str
     role: str
+    # An admin's branch (the owner has none: they see every branch).
+    branch_id: int | None = None
+    branch_name: str | None = None
+
+
+class Branch(BaseModel):
+    id: int
+    name: str
+    is_headquarters: bool
+    is_active: bool
+
+
+class CreateBranchRequest(BaseModel):
+    name: str
+
+
+class UpdateBranchRequest(BaseModel):
+    name: str | None = None
+    is_active: bool | None = None
 
 
 class CreateSubjectRequest(BaseModel):
@@ -101,6 +122,9 @@ class Group(BaseModel):
     is_active: bool
     note: str | None
     created_at: datetime
+    # The branch it belongs to.
+    branch_id: int = 1
+    branch_name: str | None = None
 
 
 class GroupWithStudentCount(Group):
@@ -129,6 +153,10 @@ class UpdateTeacherRequest(BaseModel):
     is_active: bool | None = None
 
 
+class SetTeacherBranchesRequest(BaseModel):
+    branch_ids: list[int]
+
+
 class Teacher(BaseModel):
     id: int
     full_name: str
@@ -138,6 +166,9 @@ class Teacher(BaseModel):
     created_at: datetime
     # Stored name of the profile photo (fetch it from /photos/file/{name}); null = none.
     photo: str | None = None
+    # The branches they work in (within the scope of the request).
+    branch_ids: list[int] = []
+    branch_names: list[str] = []
 
 
 class TeacherListItem(Teacher):
@@ -207,6 +238,8 @@ class StudentListItem(BaseModel):
     is_at_risk: bool = False
     is_active: bool = False
     is_archived: bool = False
+    # The branches they are in (within the scope), for the Filial label.
+    branches: list[str] = []
 
 
 class CreateEnrollmentRequest(BaseModel):
@@ -419,6 +452,12 @@ class PhoneOwner(BaseModel):
     full_name: str
     phone: str
     group_names: list[str]
+    # The branches they are in. For a student of another branch this is all
+    # that is shown (with their name): no groups, money or notes.
+    branch_names: list[str] = []
+    # False: this student belongs to another branch only -- the app offers
+    # "Shu o'quvchini mening filialimga qo'shish".
+    in_scope: bool = True
 
 
 class PhoneCheck(BaseModel):
@@ -818,17 +857,23 @@ class StaffMember(BaseModel):
     is_active: bool
     created_at: datetime
     last_login_at: datetime | None = None
+    # The branch an admin works in (the owner has none).
+    branch_id: int | None = None
+    branch_name: str | None = None
 
 
 class CreateStaffRequest(BaseModel):
     phone: str
     full_name: str
     password: str
+    # Which branch the admin works in; Bosh ofis when not given.
+    branch_id: int | None = None
 
 
 class UpdateStaffRequest(BaseModel):
     full_name: str | None = None
     is_active: bool | None = None
+    branch_id: int | None = None
 
 
 class ResetPasswordRequest(BaseModel):
@@ -1117,6 +1162,8 @@ class StudentSummary(BaseModel):
 
 class GroupMatch(BaseModel):
     group_id: int
+    branch_id: int = 1
+    branch_name: str | None = None
     name: str
     subject_name: str | None
     level: str | None
@@ -1300,6 +1347,11 @@ class ArchiveRequest(BaseModel):
     note: str
 
 
+class JoinBranchRequest(BaseModel):
+    # The student's phone: knowing an id alone does not let a branch in.
+    phone: str
+
+
 class UnarchiveRequest(BaseModel):
     note: str | None = None
 
@@ -1400,6 +1452,8 @@ class TeacherGroupCard(BaseModel):
     student_count: int
     capacity: int | None = None
     schedule: list[ScheduleSlot] = []
+    # Which branch the group is in (shown to the owner looking at all branches).
+    branch_name: str | None = None
 
 
 class TeacherMonthPoint(BaseModel):

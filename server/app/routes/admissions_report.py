@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from .. import admissions, clock, db, funnel
 from ..config import settings
-from ..deps import get_current_user
+from ..deps import Scope, get_current_user, get_scope
+from ..scope import branch_filter
 from ..schemas import AdmissionsBoard, AdmissionsReport, CountByKey
 
 router = APIRouter(prefix="/admissions", tags=["admissions"], dependencies=[Depends(get_current_user)])
@@ -26,16 +27,20 @@ def _range(date_from: date | None, date_to: date | None) -> tuple[date, date]:
 
 
 @router.get("/board", response_model=AdmissionsBoard)
-async def admissions_board(date_from: date | None = None, date_to: date | None = None):
+async def admissions_board(
+    date_from: date | None = None, date_to: date | None = None, scope: Scope = Depends(get_scope)
+):
     """Qabul: the KPI strip and a column per V2 stage, all from app/funnel.py
     -- the same numbers Bugun and O'quvchilar show."""
     date_from, date_to = _range(date_from, date_to)
     async with db.pool().acquire() as conn:
-        return AdmissionsBoard(**await funnel.board(conn, date_from, date_to))
+        return AdmissionsBoard(**await funnel.board(conn, date_from, date_to, scope.ids))
 
 
 @router.get("/report", response_model=AdmissionsReport)
-async def admissions_report(date_from: date | None = None, date_to: date | None = None):
+async def admissions_report(
+    date_from: date | None = None, date_to: date | None = None, scope: Scope = Depends(get_scope)
+):
     """date_from..date_to, both inclusive, in the center's calendar;
     defaults to this month so far. A booked trial never counts as an
     enrollment -- enrollments are leads that went through the explicit
@@ -48,7 +53,7 @@ async def admissions_report(date_from: date | None = None, date_to: date | None 
     async with db.pool().acquire() as conn:
         # People and enrollments come from app/funnel.py -- the same figures as
         # the Qabul board, Bugun and O'quvchilar.
-        period = await funnel.period_counts(conn, date_from, date_to)
+        period = await funnel.period_counts(conn, date_from, date_to, scope.ids)
         trials = await conn.fetchrow(
             """
             select
@@ -63,27 +68,37 @@ async def admissions_report(date_from: date | None = None, date_to: date | None 
             join trial_sessions ts on ts.id = b.session_id
             join leads l on l.id = b.lead_id
             where (ts.starts_at at time zone $1)::date between $2 and $3
+              and ($4::bigint[] is null or l.branch_id = any($4::bigint[]))
             """,
             tz,
             date_from,
             date_to,
+            scope.ids,
         )
         now = await conn.fetchrow(
             """
             select
               (select count(*) from trial_bookings b join trial_sessions ts on ts.id = b.session_id
                 where b.status = 'scheduled' and ts.starts_at >= now()
-                  and ts.starts_at < now() + interval '7 days') as upcoming_trials,
-              (select count(*) from follow_up_tasks where status = 'open' and due_at < now())
-                as follow_ups_overdue,
-              (select count(*) from follow_up_tasks where status = 'open' and due_at >= now()
-                  and (due_at at time zone $1)::date = $2) as follow_ups_due_today
+                  and ts.starts_at < now() + interval '7 days'
+                  and ($3::bigint[] is null or ts.branch_id = any($3::bigint[]))) as upcoming_trials,
+              (select count(*) from follow_up_tasks t join leads l on l.id = t.lead_id
+                where t.status = 'open' and t.due_at < now()
+                  and ($3::bigint[] is null or l.branch_id = any($3::bigint[]))) as follow_ups_overdue,
+              (select count(*) from follow_up_tasks t join leads l on l.id = t.lead_id
+                where t.status = 'open' and t.due_at >= now()
+                  and (t.due_at at time zone $1)::date = $2
+                  and ($3::bigint[] is null or l.branch_id = any($3::bigint[]))) as follow_ups_due_today
             """,
             tz,
             today,
+            scope.ids,
         )
         by_stage = await conn.fetch(
-            "select stage as key, count(*) from leads where stage = any($1::text[]) group by stage", open_stages
+            "select stage as key, count(*) from leads where stage = any($1::text[]) "
+            "and ($2::bigint[] is null or branch_id = any($2::bigint[])) group by stage",
+            open_stages,
+            scope.ids,
         )
         by_source = await conn.fetch(
             """
@@ -91,12 +106,14 @@ async def admissions_report(date_from: date | None = None, date_to: date | None 
                    count(*) filter (where stage = 'enrolled') as enrolled
             from leads
             where (created_at at time zone $1)::date between $2 and $3
+              and ($4::bigint[] is null or branch_id = any($4::bigint[]))
             group by 1
             order by 2 desc, 1
             """,
             tz,
             date_from,
             date_to,
+            scope.ids,
         )
 
     stage_counts = {row["key"]: row["count"] for row in by_stage}

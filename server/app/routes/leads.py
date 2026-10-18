@@ -9,9 +9,10 @@ import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 from .. import admissions, db, idempotency
-from ..deps import CurrentUser, get_current_user
+from ..deps import CurrentUser, Scope, get_current_user, get_scope
 from ..money import service as money
 from ..phone import is_valid_uzbek_phone, normalize
+from ..scope import ambient_ids, branch_filter, current_scope, link_student, require_group
 from ..schemas import (
     ChangeLeadStageRequest,
     CreateInteractionRequest,
@@ -55,7 +56,10 @@ _FIELD_LABELS = {
 
 
 async def fetch_lead(conn, lead_id: int, *, merged: bool = False) -> Lead:
-    row = await conn.fetchrow(f"{admissions.LEAD_SELECT} where l.id = $1", lead_id)
+    """The lead, if the request's branch scope may see it (else 404)."""
+    row = await conn.fetchrow(
+        f"{admissions.LEAD_SELECT} where l.id = $1 and {branch_filter('l.branch_id', 2)}", lead_id, ambient_ids()
+    )
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "So'rov topilmadi.")
     return Lead(**row, merged=merged)
@@ -100,18 +104,23 @@ async def lock_phone(conn, phone: str) -> None:
     await conn.execute("select pg_advisory_xact_lock(hashtext('lead-phone:' || $1::text))", phone)
 
 
-async def open_lead_for(conn, phone: str, subject_id: int | None, *, exclude_id: int | None = None):
+async def open_lead_for(
+    conn, phone: str, subject_id: int | None, branch_id: int, *, exclude_id: int | None = None
+):
+    """The open lead for this phone and course *in this branch* (a person may
+    ask at two branches)."""
     return await conn.fetchrow(
         """
         select l.*, s.name as subject_name
         from leads l left join subjects s on s.id = l.subject_id
         where l.phone = $1 and coalesce(l.subject_id, 0) = coalesce($2::bigint, 0)
-          and l.stage = any($3::text[]) and l.id is distinct from $4
+          and l.stage = any($3::text[]) and l.id is distinct from $4 and l.branch_id = $5
         """,
         phone,
         subject_id,
         list(admissions.OPEN_STAGES),
         exclude_id,
+        branch_id,
     )
 
 
@@ -136,6 +145,7 @@ async def list_leads(
     archive: bool = False,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    branch: Scope = Depends(get_scope),
 ):
     """scope: 'open' (default), 'closed' (incl. enrolled) or 'all'; an
     explicit stage list overrides it. q matches name or phone digits.
@@ -149,6 +159,8 @@ async def list_leads(
     def arg(value) -> str:
         args.append(value)
         return f"${len(args)}"
+
+    conditions.append(f"({arg(branch.ids)}::bigint[] is null or l.branch_id = any({'$' + str(len(args))}::bigint[]))")
 
     if archive:
         conditions.append(f"l.stage = any({arg(list(admissions.CLOSED_STAGES))}::text[])")
@@ -201,7 +213,7 @@ def _name_key(name: str) -> str:
 
 # Declared before "/{lead_id}" so the path isn't read as an id.
 @router.get("/duplicates", response_model=DuplicateCheck)
-async def check_duplicates(phone: str = "", full_name: str = ""):
+async def check_duplicates(phone: str = "", full_name: str = "", branch: Scope = Depends(get_scope)):
     """The warning under the Qabul form: who already has this phone, or exactly
     this name (a name counts once it has two words). Never blocks anything."""
     normalized = normalize(phone)
@@ -212,9 +224,10 @@ async def check_duplicates(phone: str = "", full_name: str = ""):
         async def open_leads(where: str, *args) -> list[SimilarLead]:
             rows = await conn.fetch(
                 f"{admissions.LEAD_SELECT} where l.stage = any($1::text[]) and {where} "
-                "order by l.created_at desc limit 5",
+                f"and {branch_filter('l.branch_id', len(args) + 2)} order by l.created_at desc limit 5",
                 list(admissions.OPEN_STAGES),
                 *args,
+                branch.ids,
             )
             return [
                 SimilarLead(
@@ -225,7 +238,7 @@ async def check_duplicates(phone: str = "", full_name: str = ""):
             ]
 
         if is_valid_uzbek_phone(normalized):
-            check.phone_student = await phone_owner(conn, normalized)
+            check.phone_student = await phone_owner(conn, normalized, branch)
             check.phone_leads = await open_leads("l.phone = $2", normalized)
         if len(name.split()) >= 2:
             students = await conn.fetch(
@@ -233,7 +246,7 @@ async def check_duplicates(phone: str = "", full_name: str = ""):
                 name,
             )
             for row in students:
-                owner = await phone_owner(conn, row["phone"])
+                owner = await phone_owner(conn, row["phone"], branch)
                 if owner is not None and (check.phone_student is None or owner.student_id != check.phone_student.student_id):
                     check.name_students.append(owner)
             check.name_leads = [
@@ -247,7 +260,7 @@ async def check_duplicates(phone: str = "", full_name: str = ""):
 
 
 @router.get("/lookup", response_model=PhoneLookup)
-async def lookup_phone(phone: str):
+async def lookup_phone(phone: str, branch: Scope = Depends(get_scope)):
     """Step 1 of "Yangi so'rov": who is this number already? An incomplete
     number simply matches nothing."""
     normalized = normalize(phone)
@@ -255,10 +268,13 @@ async def lookup_phone(phone: str):
         return PhoneLookup(phone=normalized, student=None, leads=[])
     async with db.pool().acquire() as conn:
         rows = await conn.fetch(
-            f"{admissions.LEAD_SELECT} where l.phone = $1 order by l.created_at desc", normalized
+            f"{admissions.LEAD_SELECT} where l.phone = $1 and {branch_filter('l.branch_id', 2)} "
+            "order by l.created_at desc",
+            normalized,
+            branch.ids,
         )
         return PhoneLookup(
-            phone=normalized, student=await phone_owner(conn, normalized), leads=[Lead(**row) for row in rows]
+            phone=normalized, student=await phone_owner(conn, normalized, branch), leads=[Lead(**row) for row in rows]
         )
 
 
@@ -274,10 +290,12 @@ async def create_lead(conn, payload: CreateLeadRequest, user: CurrentUser) -> Le
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "on_duplicate noto'g'ri.")
     group = None
     subject_id = payload.subject_id
+    # The lead belongs to the branch of the group it asked about, else to the
+    # branch the request is in.
+    branch_id = current_scope().write_branch()
     if payload.group_id is not None:
-        group = await conn.fetchrow("select id, subject_id, is_active from groups where id = $1", payload.group_id)
-        if group is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
+        group = await require_group(conn, current_scope(), payload.group_id)
+        branch_id = group["branch_id"]
         if not group["is_active"]:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Bu guruh faol emas.")
         subject_id = subject_id or group["subject_id"]
@@ -289,12 +307,16 @@ async def create_lead(conn, payload: CreateLeadRequest, user: CurrentUser) -> Le
     weekdays, time_of_day, level = _desired(payload.desired_weekdays, payload.desired_time_of_day, payload.level)
 
     if payload.client_id is not None:
-        existing_id = await conn.fetchval("select id from leads where client_id = $1", payload.client_id)
+        existing_id = await conn.fetchval(
+            f"select id from leads l where l.client_id = $1 and {branch_filter('l.branch_id', 2)}",
+            payload.client_id,
+            ambient_ids(),
+        )
         if existing_id is not None:
             return await fetch_lead(conn, existing_id)
 
     await lock_phone(conn, phone)
-    existing = await open_lead_for(conn, phone, subject_id)
+    existing = await open_lead_for(conn, phone, subject_id, branch_id)
     if existing is not None:
         if payload.on_duplicate == "reject":
             raise duplicate_lead_error(existing)
@@ -320,8 +342,8 @@ async def create_lead(conn, payload: CreateLeadRequest, user: CurrentUser) -> Le
                 insert into leads
                     (client_id, full_name, phone, parent_phone, subject_id, source, note, assigned_to,
                      preferred_trial_date, student_id, created_by, desired_weekdays, desired_time_of_day, level,
-                     group_id, address)
-                values (coalesce($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                     group_id, address, branch_id)
+                values (coalesce($1, gen_random_uuid()), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
                 returning id
                 """,
                 payload.client_id,
@@ -340,6 +362,7 @@ async def create_lead(conn, payload: CreateLeadRequest, user: CurrentUser) -> Le
                 level,
                 group["id"] if group else None,
                 (payload.address or "").strip() or None,
+                branch_id,
             )
     except asyncpg.UniqueViolationError:
         # The phone lock above should make this unreachable; the index is
@@ -404,7 +427,11 @@ async def undo_lead(payload: UndoLeadRequest, user: CurrentUser = Depends(get_cu
     to undo and that lead is left alone."""
     async with db.pool().acquire() as conn:
         async with conn.transaction():
-            lead_id = await conn.fetchval("select id from leads where client_id = $1", payload.client_id)
+            lead_id = await conn.fetchval(
+                f"select id from leads l where l.client_id = $1 and {branch_filter('l.branch_id', 2)}",
+                payload.client_id,
+                ambient_ids(),
+            )
             if lead_id is None:
                 return UndoLeadResult(undone=False)
             lead = await admissions.lock_lead(conn, lead_id)
@@ -415,7 +442,7 @@ async def undo_lead(payload: UndoLeadRequest, user: CurrentUser = Depends(get_cu
 
 
 @router.get("/{lead_id}", response_model=LeadDetail)
-async def get_lead(lead_id: int):
+async def get_lead(lead_id: int, branch: Scope = Depends(get_scope)):
     """The lead with its whole history -- kept after it's enrolled."""
     async with db.pool().acquire() as conn:
         lead = await fetch_lead(conn, lead_id)
@@ -433,7 +460,7 @@ async def get_lead(lead_id: int):
             interactions=[LeadInteraction(**row) for row in interactions],
             bookings=list(reversed(await fetch_bookings(conn, "where b.lead_id = $1", lead_id))),
             tasks=await fetch_tasks(conn, "where t.lead_id = $1", lead_id),
-            student=await phone_owner(conn, lead.phone),
+            student=await phone_owner(conn, lead.phone, branch),
         )
 
 
@@ -482,7 +509,7 @@ async def update_lead(lead_id: int, payload: UpdateLeadRequest, user: CurrentUse
                 phone = changes.get("phone", lead["phone"])
                 await lock_phone(conn, phone)
                 existing = await open_lead_for(
-                    conn, phone, changes.get("subject_id", lead["subject_id"]), exclude_id=lead_id
+                    conn, phone, changes.get("subject_id", lead["subject_id"]), lead["branch_id"], exclude_id=lead_id
                 )
                 if existing is not None:
                     raise duplicate_lead_error(existing)
@@ -519,7 +546,7 @@ async def move_to_stage(
 
     if lead["stage"] in admissions.CLOSED_STAGES and stage in admissions.OPEN_STAGES:
         await lock_phone(conn, lead["phone"])
-        existing = await open_lead_for(conn, lead["phone"], lead["subject_id"], exclude_id=lead_id)
+        existing = await open_lead_for(conn, lead["phone"], lead["subject_id"], lead["branch_id"], exclude_id=lead_id)
         if existing is not None:
             raise duplicate_lead_error(existing)
 
@@ -633,6 +660,7 @@ async def enroll_lead(
         lead = await admissions.lock_lead(conn, lead_id)
         if lead["stage"] == "enrolled":
             raise HTTPException(status.HTTP_409_CONFLICT, "Bu so'rov bo'yicha o'quvchi allaqachon yozilgan.")
+        group = await require_group(conn, current_scope(), payload.group_id)
 
         phone = valid_phone(payload.phone)
         student = None
@@ -649,17 +677,21 @@ async def enroll_lead(
                 async with conn.transaction():
                     student = await conn.fetchrow(
                         """
-                        insert into students (full_name, phone, note, parent_phone, heard_from, created_by, address)
-                        values ($1, $2, $3, $4, $5, $6, $7)
+                        insert into students (full_name, phone, parent_phone, heard_from, created_by, address)
+                        values ($1, $2, $3, $4, $5, $6)
                         returning *
                         """,
                         full_name,
                         phone,
-                        (payload.note or "").strip() or None,
                         optional_phone(payload.parent_phone or lead["parent_phone"], "Ota-ona telefoni"),
                         heard_from_value(payload.heard_from or lead["source"]),
                         user.id,
                         lead["address"],
+                    )
+                    await link_student(conn, student["id"], group["branch_id"])
+                    await conn.execute(
+                        "update student_branches set note = $3 where student_id = $1 and branch_id = $2",
+                        student["id"], group["branch_id"], (payload.note or "").strip() or None,
                     )
             except asyncpg.UniqueViolationError:
                 # Someone saved a student with this phone a moment ago.

@@ -44,8 +44,12 @@ async def search(
     level: str | None,
     weekdays: set[int] | None,
     time_of_day: str | None,
+    branch_ids: list[int] | None = None,
 ) -> dict[str, list[dict]]:
     where, args = ["g.is_active"], []
+    # Only the branches the request may see (None = all of them).
+    args.append(branch_ids)
+    where.append(f"(${len(args)}::bigint[] is null or g.branch_id = any(${len(args)}::bigint[]))")
     if subject_id is not None:
         args.append(subject_id)
         where.append(f"g.subject_id = ${len(args)}")
@@ -54,12 +58,13 @@ async def search(
         where.append(f"lower(g.level) = ${len(args)}")
     groups = await conn.fetch(
         f"""
-        select g.id, g.name, g.level, g.fee_amount, g.capacity, g.start_date, g.billing_mode, g.billing_day,
+        select g.id, g.branch_id, b.name as branch_name, g.name, g.level, g.fee_amount, g.capacity, g.start_date, g.billing_mode, g.billing_day,
                g.prorate_first_period, g.teacher_id, t.full_name as teacher_name, s.name as subject_name,
                (select count(*) from enrollments e where e.group_id = g.id and e.status = 'active') as enrolled
         from groups g
         left join teachers t on t.id = g.teacher_id
         left join subjects s on s.id = g.subject_id
+        left join branches b on b.id = g.branch_id
         where {' and '.join(where)}
         order by g.name
         """,
@@ -80,6 +85,8 @@ async def search(
         capacity = group["capacity"]
         item = {
             "group_id": group["id"],
+            "branch_id": group["branch_id"],
+            "branch_name": group["branch_name"],
             "name": group["name"],
             "subject_name": group["subject_name"],
             "level": group["level"],

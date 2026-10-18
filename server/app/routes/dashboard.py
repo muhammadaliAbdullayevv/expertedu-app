@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from .. import clock, db, funnel
 from ..money import service as money
 from ..config import settings
-from ..deps import get_current_user
+from ..deps import Scope, get_current_user, get_scope
 from ..schemas import DashboardSummary, MonthlyRevenue, RecentPayment, TrialToday
 from .debtors import list_debtors
 
@@ -24,7 +24,7 @@ def _month_starts(today: date, count: int) -> list[date]:
 
 
 @router.get("", response_model=DashboardSummary)
-async def get_dashboard():
+async def get_dashboard(scope: Scope = Depends(get_scope)):
     today = clock.today()
     month_start = today.replace(day=1)
     months = _month_starts(today, _REVENUE_MONTHS)
@@ -36,27 +36,33 @@ async def get_dashboard():
         counts = await conn.fetchrow(
             """
             select
-              (select count(*) from groups where is_active) as active_groups,
+              (select count(*) from groups where is_active and ($3::bigint[] is null or branch_id = any($3::bigint[])))
+                as active_groups,
               (select coalesce(sum(case when kind = 'payment' then amount else -amount end), 0) from payments
-                where (received_at at time zone $1)::date >= $2) as collected_this_month
+                where (received_at at time zone $1)::date >= $2
+                  and ($3::bigint[] is null or branch_id = any($3::bigint[]))) as collected_this_month
             """,
             tz,
             month_start,
+            scope.ids,
         )
 
         debt = await conn.fetchrow(
             """
-            select coalesce(sum(owed), 0)::bigint as total_debt, count(distinct student_id) as debtor_count
-            from enrollment_balances where owed > 0
-            """
+            select coalesce(sum(eb.owed), 0)::bigint as total_debt, count(distinct eb.student_id) as debtor_count
+            from enrollment_balances eb
+            join enrollments e on e.id = eb.enrollment_id join groups g on g.id = e.group_id
+            where eb.owed > 0 and ($1::bigint[] is null or g.branch_id = any($1::bigint[]))
+            """,
+            scope.ids,
         )
-        monthly_plan = await money.monthly_plan(conn, month_start)
+        monthly_plan = await money.monthly_plan(conn, month_start, scope.ids)
 
         # Every lead and student number comes from app/funnel.py -- the same
         # definitions Qabul and O'quvchilar use.
-        lead_numbers = await funnel.lead_counts(conn)
-        week = await funnel.period_counts(conn, today - timedelta(days=6), today)
-        student_numbers = await funnel.student_counts(conn, today)
+        lead_numbers = await funnel.lead_counts(conn, scope.ids)
+        week = await funnel.period_counts(conn, today - timedelta(days=6), today, scope.ids)
+        student_numbers = await funnel.student_counts(conn, today, scope.ids)
         leads = {
             "new_leads_this_week": week["leads"],
             "open_leads": lead_numbers["open_leads"],
@@ -71,7 +77,15 @@ async def get_dashboard():
         # isn't a due day, it's a new student).
         due = await money.next_due_dates(
             conn,
-            [r["id"] for r in await conn.fetch("select id from enrollments where status = 'active' and joined_at < $1", today)],
+            [
+                r["id"]
+                for r in await conn.fetch(
+                    "select e.id from enrollments e join groups g on g.id = e.group_id "
+                    "where e.status = 'active' and e.joined_at < $1 "
+                    "and ($2::bigint[] is null or g.branch_id = any($2::bigint[]))",
+                    today, scope.ids,
+                )
+            ],
             today,
         )
         due_today_ids = [i for i, d in due.items() if d == today]
@@ -92,10 +106,12 @@ async def get_dashboard():
             join leads l on l.id = b.lead_id
             left join subjects s on s.id = coalesce(ts.subject_id, l.subject_id)
             where b.status = 'scheduled' and (ts.starts_at at time zone $1)::date = $2
+              and ($3::bigint[] is null or ts.branch_id = any($3::bigint[]))
             order by ts.starts_at, l.full_name
             """,
             tz,
             today,
+            scope.ids,
         )
 
         revenue_rows = await conn.fetch(
@@ -104,10 +120,12 @@ async def get_dashboard():
                    sum(case when kind = 'payment' then amount else -amount end)::bigint as amount
             from payments
             where (received_at at time zone $1)::date >= $2
+              and ($3::bigint[] is null or branch_id = any($3::bigint[]))
             group by 1
             """,
             tz,
             months[0],
+            scope.ids,
         )
 
         recent = await conn.fetch(
@@ -120,10 +138,12 @@ async def get_dashboard():
                                                   (select min(id) from enrollments where student_id = p.student_id))
             join groups g on g.id = e.group_id
             where p.kind = 'payment' and p.status = 'valid'
+              and ($2::bigint[] is null or p.branch_id = any($2::bigint[]))
             order by p.received_at desc
             limit $1
             """,
             _RECENT_PAYMENTS,
+            scope.ids,
         )
 
     revenue = {row["month"]: row["amount"] for row in revenue_rows}
@@ -139,5 +159,5 @@ async def get_dashboard():
         # Zero-filled so the chart always shows every month, quiet ones too.
         revenue_by_month=[MonthlyRevenue(month=month, amount=revenue.get(month, 0)) for month in months],
         recent_payments=[RecentPayment(**row) for row in recent],
-        top_debtors=await list_debtors(limit=_TOP_DEBTORS),
+        top_debtors=await list_debtors(limit=_TOP_DEBTORS, ids=scope.ids),
     )

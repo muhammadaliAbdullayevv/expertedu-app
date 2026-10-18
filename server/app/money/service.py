@@ -309,11 +309,15 @@ async def apply_credit(conn, student_id: int) -> None:
     """Pays the student's oldest unpaid charges from whatever their valid
     payments still have unallocated. Run after any payment, charge or
     cancellation; does nothing when there is nothing to pay or nothing to
-    pay with."""
+    pay with.
+
+    Each branch is its own ledger: a payment only ever pays charges of the
+    branch it was taken in, and what is left of it waits as that branch's
+    credit."""
     await _lock_student(conn, student_id)
     payments = await conn.fetch(
         """
-        select p.id, p.received_at, p.amount - coalesce(sum(a.amount), 0) as available
+        select p.id, p.branch_id, p.received_at, p.amount - coalesce(sum(a.amount), 0) as available
         from payments p left join payment_allocations a on a.payment_id = p.id
         where p.student_id = $1 and p.kind = 'payment' and p.status = 'valid'
         group by p.id
@@ -324,22 +328,24 @@ async def apply_credit(conn, student_id: int) -> None:
     )
     if not payments:
         return
-    unpaid = [
-        [row["charge_id"], row["owed"], row["group_id"], row["teacher_id"]]
-        for row in await conn.fetch(
-            """
-            select cb.charge_id, cb.owed, cb.group_id, g.teacher_id
-            from charge_balances cb join groups g on g.id = cb.group_id
-            where cb.student_id = $1 and cb.status = 'active' and cb.owed > 0
-            order by cb.period_start, cb.charge_id
-            """,
-            student_id,
+    unpaid_by_branch: dict[int, list[list]] = {}
+    for row in await conn.fetch(
+        """
+        select cb.charge_id, cb.owed, cb.group_id, g.teacher_id, g.branch_id
+        from charge_balances cb join groups g on g.id = cb.group_id
+        where cb.student_id = $1 and cb.status = 'active' and cb.owed > 0
+        order by cb.period_start, cb.charge_id
+        """,
+        student_id,
+    ):
+        unpaid_by_branch.setdefault(row["branch_id"], []).append(
+            [row["charge_id"], row["owed"], row["group_id"], row["teacher_id"]]
         )
-    ]
     for payment in payments:
+        unpaid = unpaid_by_branch.get(payment["branch_id"], [])
         spread, _ = rules.allocate(payment["available"], [(u[0], u[1]) for u in unpaid])
         if not spread:
-            break
+            continue
         month = await _open_month(conn, _center_month(payment["received_at"]))
         for charge_id, amount in spread:
             entry = next(u for u in unpaid if u[0] == charge_id)
@@ -354,6 +360,7 @@ async def apply_credit(conn, student_id: int) -> None:
 async def record_payment(
     conn, *, student_id: int, amount: int, method: str, user_id: int | None,
     enrollment_id: int | None = None, received_at: datetime | None = None, note: str | None = None,
+    branch_id: int | None = None,
 ) -> dict:
     """Takes a payment and allocates it. Returns the payment row, with the
     receipt number and how much of it paid charges versus became credit."""
@@ -363,20 +370,39 @@ async def record_payment(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "To'lov usulini tanlang.")
     if not await conn.fetchval("select 1 from students where id = $1", student_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "O'quvchi topilmadi.")
-    if enrollment_id is not None and not await conn.fetchval(
-        "select 1 from enrollments where id = $1 and student_id = $2", enrollment_id, student_id
-    ):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Yozilish topilmadi.")
+    if enrollment_id is not None:
+        # The branch of the group it was handed over for.
+        group_branch = await conn.fetchval(
+            "select g.branch_id from enrollments e join groups g on g.id = e.group_id "
+            "where e.id = $1 and e.student_id = $2",
+            enrollment_id, student_id,
+        )
+        if group_branch is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Yozilish topilmadi.")
+        branch_id = group_branch
+    elif branch_id is None:
+        # No group named and no branch given: the student's own branch
+        # (the first one, if he has several), else the headquarters.
+        branch_id = await conn.fetchval(
+            "select coalesce((select min(branch_id) from student_branches where student_id = $1), "
+            "(select id from branches where is_headquarters))",
+            student_id,
+        )
+    await conn.execute(
+        "insert into student_branches (student_id, branch_id) values ($1, $2) on conflict do nothing",
+        student_id, branch_id,
+    )
     async with conn.transaction():
         await _lock_student(conn, student_id)
         payment = await conn.fetchrow(
             """
-            insert into payments (student_id, enrollment_id, amount, method, received_by, received_at, receipt_no, note)
+            insert into payments (student_id, enrollment_id, amount, method, received_by, received_at, receipt_no,
+                                  note, branch_id)
             values ($1, $2, $3, $4, $5, coalesce($6, now()),
-                    'R-' || lpad(nextval('payment_receipt_seq')::text, 6, '0'), $7)
+                    'R-' || lpad(nextval('payment_receipt_seq')::text, 6, '0'), $7, $8)
             returning *
             """,
-            student_id, enrollment_id, amount, method, user_id, received_at, (note or "").strip() or None,
+            student_id, enrollment_id, amount, method, user_id, received_at, (note or "").strip() or None, branch_id,
         )
         await apply_credit(conn, student_id)
         allocated = await conn.fetchval(
@@ -405,12 +431,13 @@ async def cancel_payment(conn, payment_id: int, reason: str, user_id: int | None
             raise HTTPException(status.HTTP_409_CONFLICT, "To'lov allaqachon bekor qilingan.")
         reversal = await conn.fetchrow(
             """
-            insert into payments (student_id, enrollment_id, kind, amount, method, received_by, reverses_id, reason)
-            values ($1, $2, 'reversal', $3, $4, $5, $6, $7)
+            insert into payments (student_id, enrollment_id, kind, amount, method, received_by, reverses_id, reason,
+                                  branch_id)
+            values ($1, $2, 'reversal', $3, $4, $5, $6, $7, $8)
             returning *
             """,
             payment["student_id"], payment["enrollment_id"], payment["amount"], payment["method"],
-            user_id, payment_id, reason,
+            user_id, payment_id, reason, payment["branch_id"],
         )
         await _reverse_allocations(conn, "payment_id = $1", payment_id)
         await audit(
@@ -432,7 +459,7 @@ async def student_balance(conn, student_id: int) -> dict:
     return dict(row)
 
 
-async def monthly_plan(conn, month: date) -> int:
+async def monthly_plan(conn, month: date, ids: list[int] | None = None) -> int:
     """What the center expects to bill in `month`: every active enrollment's
     charges for periods starting in it, as made or -- if not made yet --
     as they will be."""
@@ -443,8 +470,9 @@ async def monthly_plan(conn, month: date) -> int:
         select e.id, e.joined_at, e.discount_kind, e.discount_value,
                g.fee_amount, g.billing_mode, g.billing_day, g.prorate_first_period
         from enrollments e join groups g on g.id = e.group_id
-        where e.status = 'active'
-        """
+        where e.status = 'active' and ($1::bigint[] is null or g.branch_id = any($1::bigint[]))
+        """,
+        ids,
     )
     charged = {
         (r["enrollment_id"], r["period_start"]): r["amount"]
@@ -563,6 +591,9 @@ def _effective_rule(row) -> tuple[str | None, object, int | None]:
 
 
 async def _live_lines(conn, month: date) -> list[dict]:
+    # Every line carries its branch: a percent line the branch of the group
+    # the money was paid for, a fixed salary the teacher's home branch (the
+    # first one they are linked to), a group's own fixed pay its group's.
     """The month's pay lines, worked out now: a share of each student's
     payments where the rule is a percent, and the fixed amounts. Fixed pay
     accrues for the month whether or not anyone paid, from the month the
@@ -570,7 +601,7 @@ async def _live_lines(conn, month: date) -> list[dict]:
     rows = await conn.fetch(
         """
         select a.teacher_id, e.student_id, s.full_name as student_name, a.group_id, g.name as group_name,
-               sum(a.amount)::bigint as collected,
+               g.branch_id, sum(a.amount)::bigint as collected,
                g.salary_method as g_method, g.salary_percent as g_percent, g.salary_fixed as g_fixed,
                t.salary_method as t_method, t.salary_percent as t_percent, t.salary_fixed as t_fixed
         from payment_allocations a
@@ -580,7 +611,7 @@ async def _live_lines(conn, month: date) -> list[dict]:
         join groups g on g.id = a.group_id
         join teachers t on t.id = a.teacher_id
         where a.counts_in_month = $1
-        group by a.teacher_id, e.student_id, s.full_name, a.group_id, g.name,
+        group by a.teacher_id, e.student_id, s.full_name, a.group_id, g.name, g.branch_id,
                  g.salary_method, g.salary_percent, g.salary_fixed,
                  t.salary_method, t.salary_percent, t.salary_fixed
         having sum(a.amount) <> 0
@@ -595,7 +626,7 @@ async def _live_lines(conn, month: date) -> list[dict]:
         lines.append({
             "teacher_id": r["teacher_id"], "student_id": r["student_id"], "student_name": r["student_name"],
             "group_id": r["group_id"], "group_name": r["group_name"], "collected": r["collected"],
-            "percent": used, "method": "percent",
+            "branch_id": r["branch_id"], "percent": used, "method": "percent",
             "share": rules.salary_share(r["collected"], percent) if method == "percent" else 0,
         })
 
@@ -604,21 +635,24 @@ async def _live_lines(conn, month: date) -> list[dict]:
         # A teacher paid a fixed amount: once a month, whatever their groups.
         for t in await conn.fetch(
             """
-            select id, salary_fixed from teachers
-            where salary_method = 'fixed' and salary_fixed is not null and is_active
-              and (created_at at time zone $2)::date < $1
+            select t.id, t.salary_fixed,
+                   coalesce((select min(tb.branch_id) from teacher_branches tb where tb.teacher_id = t.id),
+                            (select id from branches where is_headquarters)) as branch_id
+            from teachers t
+            where t.salary_method = 'fixed' and t.salary_fixed is not null and t.is_active
+              and (t.created_at at time zone $2)::date < $1
             """,
             month_end, app_config.center_timezone,
         ):
             lines.append({
                 "teacher_id": t["id"], "student_id": None, "student_name": FIXED_SALARY_LABEL,
                 "group_id": None, "group_name": "", "collected": 0, "percent": None,
-                "method": "fixed", "share": t["salary_fixed"],
+                "branch_id": t["branch_id"], "method": "fixed", "share": t["salary_fixed"],
             })
         # A group paid a fixed amount of its own, to the group's teacher.
         for g in await conn.fetch(
             """
-            select id, name, teacher_id, salary_fixed from groups
+            select id, name, teacher_id, salary_fixed, branch_id from groups
             where salary_method = 'fixed' and salary_fixed is not null and is_active and teacher_id is not null
               and (created_at at time zone $2)::date < $1
             """,
@@ -627,15 +661,16 @@ async def _live_lines(conn, month: date) -> list[dict]:
             lines.append({
                 "teacher_id": g["teacher_id"], "student_id": None, "student_name": FIXED_SALARY_LABEL,
                 "group_id": g["id"], "group_name": g["name"], "collected": 0, "percent": None,
-                "method": "fixed", "share": g["salary_fixed"],
+                "branch_id": g["branch_id"], "method": "fixed", "share": g["salary_fixed"],
             })
     return lines
 
 
-async def salary_month(conn, month: date) -> dict:
+async def salary_month(conn, month: date, ids: list[int] | None = None) -> dict:
     """Every teacher's pay for a month: lines, what they earned, what has
     been paid out and what remains. A closed month comes from its frozen
-    snapshot; an open one is worked out now."""
+    snapshot; an open one is worked out now. `ids` are the branches to count
+    (None = all): each branch's pay is worked out and paid on its own."""
     month = rules.month_start(month)
     closed = await conn.fetchval("select closed_at from salary_months where month = $1", month)
     if closed is not None:
@@ -644,7 +679,7 @@ async def salary_month(conn, month: date) -> dict:
             for r in await conn.fetch(
                 """
                 select r.teacher_id, l.student_id, l.student_name, l.group_id, l.group_name, l.collected,
-                       l.percent::float8 as percent, l.method, l.share
+                       l.branch_id, l.percent::float8 as percent, l.method, l.share
                 from salary_run_lines l join salary_runs r on r.id = l.run_id
                 where r.month = $1 order by l.method, l.student_name, l.group_name
                 """,
@@ -655,18 +690,27 @@ async def salary_month(conn, month: date) -> dict:
     else:
         lines = await _live_lines(conn, month)
         runs = set()
+    if ids is not None:
+        lines = [l for l in lines if l["branch_id"] in ids]
     paid = {
         r["teacher_id"]: r["total"]
         for r in await conn.fetch(
             "select teacher_id, sum(amount)::bigint as total from salary_payouts "
-            "where month = $1 and voided_at is null group by teacher_id",
-            month,
+            "where month = $1 and voided_at is null and ($2::bigint[] is null or branch_id = any($2::bigint[])) "
+            "group by teacher_id",
+            month, ids,
         )
     }
     teachers = await conn.fetch(
-        "select id, full_name, is_active, salary_method, salary_percent, salary_fixed from teachers "
-        "where is_active or id = any($1::bigint[]) order by full_name",
-        list({l["teacher_id"] for l in lines} | set(paid) | runs),
+        """
+        select t.id, t.full_name, t.is_active, t.salary_method, t.salary_percent, t.salary_fixed from teachers t
+        where (t.is_active and ($2::bigint[] is null or exists (
+                 select 1 from teacher_branches tb where tb.teacher_id = t.id and tb.branch_id = any($2::bigint[]))))
+           or t.id = any($1::bigint[])
+        order by t.full_name
+        """,
+        list({l["teacher_id"] for l in lines} | set(paid) | (runs if ids is None else set())),
+        ids,
     )
     result = []
     for teacher in teachers:
@@ -719,9 +763,9 @@ async def close_month(conn, month: date, user_id: int | None) -> dict:
             for line in teacher["lines"]:
                 await conn.execute(
                     "insert into salary_run_lines (run_id, student_id, student_name, group_id, group_name, collected, "
-                    "percent, method, share) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+                    "percent, method, share, branch_id) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
                     run_id, line["student_id"], line["student_name"], line["group_id"], line["group_name"],
-                    line["collected"], line["percent"], line["method"], line["share"],
+                    line["collected"], line["percent"], line["method"], line["share"], line["branch_id"],
                 )
         await audit(conn, user_id, "salary_month", None, "close", after={"month": month, "earned": report["total_earned"]})
     return await salary_month(conn, month)
@@ -729,12 +773,15 @@ async def close_month(conn, month: date, user_id: int | None) -> dict:
 
 async def record_payout(
     conn, *, teacher_id: int, month: date, amount: int, paid_on: date, method: str | None,
-    note: str | None, user_id: int | None,
+    note: str | None, user_id: int | None, branch_id: int | None = None,
 ) -> dict:
     """Pays a teacher for a month. Two rules: only against a **closed**
     month (the figures are frozen, so there is a definite amount owed), and
     never more than what is still owed for it. Also writes the expense row,
-    so the cash that left shows in the center's profit, and an audit entry."""
+    so the cash that left shows in the center's profit, and an audit entry.
+
+    Each branch pays its own part: what is still owed is that branch's lines
+    minus what that branch already paid."""
     if amount <= 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Summa musbat bo'lishi kerak.")
     if method is not None and method not in PAYMENT_METHODS:
@@ -742,6 +789,8 @@ async def record_payout(
     if not await conn.fetchval("select 1 from teachers where id = $1", teacher_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "O'qituvchi topilmadi.")
     month = rules.month_start(month)
+    if branch_id is None:
+        branch_id = await conn.fetchval("select id from branches where is_headquarters")
     async with conn.transaction():
         # Two payouts for the same teacher at once must not both pass the check.
         await conn.execute("select pg_advisory_xact_lock($1, $2)", _LOCK_PAYOUT, teacher_id)
@@ -749,7 +798,7 @@ async def record_payout(
             raise HTTPException(
                 status.HTTP_409_CONFLICT, "Oylik faqat yopilgan oy uchun to'lanadi. Avval oyni yoping."
             )
-        report = await salary_month(conn, month)
+        report = await salary_month(conn, month, [branch_id])
         teacher = next((t for t in report["teachers"] if t["teacher_id"] == teacher_id), None)
         remaining = 0 if teacher is None else teacher["remaining"]
         if amount > remaining:
@@ -758,14 +807,14 @@ async def record_payout(
                 f"To'lov qoldiqdan oshib ketdi: bu oy uchun {max(remaining, 0)} so'm qolgan.",
             )
         expense_id = await conn.fetchval(
-            "insert into expenses (category, amount, spent_on, note, method, teacher_id, salary_month, created_by) "
-            "values ('salary', $1, $2, $3, $4, $5, $6, $7) returning id",
-            amount, paid_on, note, method, teacher_id, month, user_id,
+            "insert into expenses (category, amount, spent_on, note, method, teacher_id, salary_month, created_by, "
+            "branch_id) values ('salary', $1, $2, $3, $4, $5, $6, $7, $8) returning id",
+            amount, paid_on, note, method, teacher_id, month, user_id, branch_id,
         )
         payout_id = await conn.fetchval(
-            "insert into salary_payouts (teacher_id, month, amount, paid_on, method, note, expense_id, paid_by) "
-            "values ($1, $2, $3, $4, $5, $6, $7, $8) returning id",
-            teacher_id, month, amount, paid_on, method, note, expense_id, user_id,
+            "insert into salary_payouts (teacher_id, month, amount, paid_on, method, note, expense_id, paid_by, "
+            "branch_id) values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id",
+            teacher_id, month, amount, paid_on, method, note, expense_id, user_id, branch_id,
         )
         await audit(
             conn, user_id, "salary_payout", payout_id, "create",

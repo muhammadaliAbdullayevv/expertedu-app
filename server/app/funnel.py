@@ -46,6 +46,7 @@ from datetime import date
 
 from . import admissions, clock
 from .config import settings
+from .scope import branch_filter, student_filter, teacher_filter
 
 STAGE_TO_V2 = {
     "new": "new",
@@ -96,22 +97,29 @@ def _day(column: str) -> str:
 # --- Leads ---------------------------------------------------------------------------------------
 
 
-async def open_leads_by_stage(conn) -> dict[str, int]:
+# Every function below takes `ids`, the branches in scope (None = all); a
+# person is counted in the branch they asked in.
+
+
+async def open_leads_by_stage(conn, ids=None) -> dict[str, int]:
     """{v2 stage: how many open leads are there right now}, every open stage present."""
     rows = await conn.fetch(
         f"select {v2_case()} as v2, count(*) as n from leads l "
-        f"where l.stage = any($1::text[]) group by 1",
+        f"where l.stage = any($1::text[]) and {branch_filter('l.branch_id', 2)} group by 1",
         list(admissions.OPEN_STAGES),
+        ids,
     )
     found = {row["v2"]: row["n"] for row in rows}
     return {stage: found.get(stage, 0) for stage in OPEN_V2}
 
 
-async def lead_counts(conn) -> dict:
+async def lead_counts(conn, ids=None) -> dict:
     """The numbers about leads that are true right now."""
-    by_stage = await open_leads_by_stage(conn)
+    by_stage = await open_leads_by_stage(conn, ids)
     unanswered = await conn.fetchval(
-        "select count(*) from leads where stage = 'new' and created_at < now() - interval '24 hours'"
+        "select count(*) from leads l where l.stage = 'new' and l.created_at < now() - interval '24 hours' "
+        f"and {branch_filter('l.branch_id', 1)}",
+        ids,
     )
     return {
         "open_leads": sum(by_stage.values()),
@@ -120,7 +128,7 @@ async def lead_counts(conn) -> dict:
     }
 
 
-async def period_counts(conn, date_from: date, date_to: date) -> dict:
+async def period_counts(conn, date_from: date, date_to: date, ids=None) -> dict:
     """What happened to leads between two days (inclusive)."""
     created = await conn.fetchrow(
         f"""
@@ -129,20 +137,24 @@ async def period_counts(conn, date_from: date, date_to: date) -> dict:
           count(*) filter (where {_day('created_at')} between $1 and $2 and stage = 'enrolled') as cohort_joined,
           count(*) filter (where stage = 'enrolled' and {_day('enrolled_at')} between $1 and $2) as joined,
           count(*) filter (where stage = any($3::text[]) and {_day('closed_at')} between $1 and $2) as rejected
-        from leads
+        from leads l
+        where {branch_filter('l.branch_id', 4)}
         """,
         date_from,
         date_to,
         [s for s, v in STAGE_TO_V2.items() if v == "rejected"],
+        ids,
     )
     trial_people = await conn.fetchval(
         f"""
         select count(distinct b.lead_id)
         from trial_bookings b join trial_sessions ts on ts.id = b.session_id
         where b.status = 'attended' and {_day('ts.starts_at')} between $1 and $2
+          and {branch_filter('ts.branch_id', 3)}
         """,
         date_from,
         date_to,
+        ids,
     )
     cohort_size = created["leads"]
     return {
@@ -185,27 +197,33 @@ left join groups g on g.id = e.group_id
 _COLUMN_CARDS = 150
 
 
-async def board(conn, date_from: date, date_to: date) -> dict:
+async def board(conn, date_from: date, date_to: date, ids=None) -> dict:
     """Qabul: the KPI strip and one column per V2 stage. The open columns
     show everyone there now; Guruhga qo'shildi and Rad etildi show what
     happened in the range -- the same numbers as the KPI strip."""
-    period = await period_counts(conn, date_from, date_to)
-    open_counts = await open_leads_by_stage(conn)
+    period = await period_counts(conn, date_from, date_to, ids)
+    open_counts = await open_leads_by_stage(conn, ids)
     rejected = [s for s, v in STAGE_TO_V2.items() if v == "rejected"]
     columns = []
     for key in V2_STAGES:
         if key in OPEN_V2:
             count = open_counts[key]
-            where = f"where {v2_case()} = $1 and l.stage = any($2::text[])"
-            args = [key, list(admissions.OPEN_STAGES)]
+            where = f"where {v2_case()} = $1 and l.stage = any($2::text[]) and {branch_filter('l.branch_id', 3)}"
+            args = [key, list(admissions.OPEN_STAGES), ids]
         elif key == "joined":
             count = period["joined"]
-            where = f"where l.stage = 'enrolled' and {_day('l.enrolled_at')} between $1 and $2"
-            args = [date_from, date_to]
+            where = (
+                f"where l.stage = 'enrolled' and {_day('l.enrolled_at')} between $1 and $2 "
+                f"and {branch_filter('l.branch_id', 3)}"
+            )
+            args = [date_from, date_to, ids]
         else:
             count = period["rejected"]
-            where = f"where l.stage = any($1::text[]) and {_day('l.closed_at')} between $2 and $3"
-            args = [rejected, date_from, date_to]
+            where = (
+                f"where l.stage = any($1::text[]) and {_day('l.closed_at')} between $2 and $3 "
+                f"and {branch_filter('l.branch_id', 4)}"
+            )
+            args = [rejected, date_from, date_to, ids]
         rows = await conn.fetch(
             f"{_BOARD_SELECT} {where} order by stage_changed_at desc, l.id desc limit {_COLUMN_CARDS}", *args
         )
@@ -216,7 +234,7 @@ async def board(conn, date_from: date, date_to: date) -> dict:
 # --- Students ------------------------------------------------------------------------------------
 
 
-async def student_counts(conn, today: date | None = None) -> dict:
+async def student_counts(conn, today: date | None = None, ids=None) -> dict:
     """The numbers about students. Only people who joined a group are here:
     leads, with or without a trial, are not."""
     today = today or clock.today()
@@ -224,24 +242,31 @@ async def student_counts(conn, today: date | None = None) -> dict:
     row = await conn.fetchrow(
         f"""
         select
-          (select count(distinct student_id) from enrollments where status = 'active') as active_students,
-          (select count(*) from students) as total_students,
-          (select count(*) from students where {_day('created_at')} >= $1) as new_students_this_month,
-          (select count(distinct student_id) from enrollment_balances where owed > 0) as students_with_debt
+          (select count(distinct e.student_id) from enrollments e join groups g on g.id = e.group_id
+            where e.status = 'active' and {branch_filter('g.branch_id', 2)}) as active_students,
+          (select count(*) from students s where {student_filter('s', 2)}) as total_students,
+          (select count(distinct sb.student_id) from student_branches sb
+            where {_day('sb.linked_at')} >= $1 and {branch_filter('sb.branch_id', 2)}) as new_students_this_month,
+          (select count(distinct eb.student_id) from enrollment_balances eb
+            join enrollments e on e.id = eb.enrollment_id join groups g on g.id = e.group_id
+            where eb.owed > 0 and {branch_filter('g.branch_id', 2)}) as students_with_debt
         """,
         month_start,
+        ids,
     )
     return dict(row)
 
 
-async def shell_counts(conn) -> dict:
+async def shell_counts(conn, ids=None) -> dict:
     """The badges beside the sidebar's Qabul, O'quvchilar, Guruhlar and
     O'qituvchilar."""
-    leads = await lead_counts(conn)
-    students = await student_counts(conn)
+    leads = await lead_counts(conn, ids)
+    students = await student_counts(conn, None, ids)
     row = await conn.fetchrow(
-        "select (select count(*) from groups where is_active) as active_groups, "
-        "(select count(*) from teachers where is_active) as active_teachers"
+        f"select (select count(*) from groups g where g.is_active and {branch_filter('g.branch_id', 1)}) "
+        "as active_groups, "
+        f"(select count(*) from teachers t where t.is_active and {teacher_filter('t', 1)}) as active_teachers",
+        ids,
     )
     return {
         "open_leads": leads["open_leads"],

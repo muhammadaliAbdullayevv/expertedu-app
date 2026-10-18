@@ -110,6 +110,43 @@ class Api:
         )
 
 
+class _TestPool:
+    """The pool tests use for direct SQL. A teacher or student inserted by hand is
+    put in Bosh ofis, as the app would when the owner adds one there -- so the many
+    fixtures that seed teachers with raw SQL need no branch plumbing. (Branch
+    tests make their teachers through the API or link them explicitly.)"""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    async def _linked(self, sql, result):
+        lowered = sql.lower()
+        if "insert into teachers" in lowered:
+            await self._inner.execute(
+                "insert into teacher_branches (teacher_id, branch_id) select id, 1 from teachers on conflict do nothing"
+            )
+        if "insert into students" in lowered:
+            await self._inner.execute(
+                "insert into student_branches (student_id, branch_id) select id, 1 from students on conflict do nothing"
+            )
+        return result
+
+    async def execute(self, sql, *args, **kw):
+        return await self._linked(sql, await self._inner.execute(sql, *args, **kw))
+
+    async def fetch(self, sql, *args, **kw):
+        return await self._linked(sql, await self._inner.fetch(sql, *args, **kw))
+
+    async def fetchrow(self, sql, *args, **kw):
+        return await self._linked(sql, await self._inner.fetchrow(sql, *args, **kw))
+
+    async def fetchval(self, sql, *args, **kw):
+        return await self._linked(sql, await self._inner.fetchval(sql, *args, **kw))
+
+
 @pytest.fixture
 async def api(pool):
     tables = await pool.fetch(
@@ -118,6 +155,8 @@ async def api(pool):
     await pool.execute(
         "truncate " + ", ".join(row["tablename"] for row in tables) + " restart identity cascade"
     )
+    # Truncating wiped Bosh ofis (id 1) too: every test starts with it.
+    await pool.execute("insert into branches (name, is_headquarters) values ('Bosh ofis', true)")
     owner_id = await pool.fetchval(
         "insert into users (phone, password_hash, full_name, role) values ('998900000001', 'x', 'Owner', 'owner') "
         "returning id"
@@ -126,10 +165,11 @@ async def api(pool):
         "insert into users (phone, password_hash, full_name, role) values ('998900000002', 'x', 'Operator', 'admin') "
         "returning id"
     )
+    await pool.execute("insert into user_branches (user_id, branch_id) values ($1, 1)", admin_id)
     token = create_access_token(user_id=owner_id, role="owner", token_version=0)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url="http://test",
         headers={"Authorization": f"Bearer {token}"},
     ) as client:
-        yield Api(client=client, owner_id=owner_id, admin_id=admin_id, pool=pool)
+        yield Api(client=client, owner_id=owner_id, admin_id=admin_id, pool=_TestPool(pool))
