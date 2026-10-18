@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../app/theme/app_theme.dart';
 import '../../../core/widgets/bordered_list_tile.dart';
 import '../data/subjects_repository.dart';
+import 'subject_dialog.dart';
 import 'subject_groups_screen.dart';
 
 class SubjectsListScreen extends ConsumerStatefulWidget {
@@ -78,6 +80,25 @@ class SubjectsListScreenState extends ConsumerState<SubjectsListScreen> {
                   setState(() => _query = value.trim().toLowerCase()),
             ),
           ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(32, 0, 32, 4),
+          child: Row(
+            children: <Widget>[
+              const Expanded(
+                child: Text(
+                  'Fanlar hamma filiallar uchun umumiy; guruhlar esa har filialda alohida.',
+                  style: TextStyle(color: AppColors.inkMuted),
+                ),
+              ),
+              FilledButton.icon(
+                key: const ValueKey('new-subject'),
+                onPressed: showCreateSheet,
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Yangi fan'),
+              ),
+            ],
+          ),
+        ),
         Expanded(
           child: FutureBuilder<List<Subject>>(
             future: _future,
@@ -95,7 +116,28 @@ class SubjectsListScreenState extends ConsumerState<SubjectsListScreen> {
                   )
                   .toList();
               if (subjects.isEmpty) {
-                return const Center(child: Text('Hali fanlar yo\'q'));
+                return Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Text(
+                        _query.isEmpty
+                            ? 'Hali fanlar yo\'q. Guruh ochish uchun avval fan qo\'shing.'
+                            : 'Mos keladigan fan topilmadi',
+                        key: const ValueKey('no-subjects'),
+                      ),
+                      if (_query.isEmpty) ...<Widget>[
+                        const SizedBox(height: 12),
+                        FilledButton.icon(
+                          key: const ValueKey('new-subject-empty'),
+                          onPressed: showCreateSheet,
+                          icon: const Icon(Icons.add_rounded),
+                          label: const Text('Yangi fan'),
+                        ),
+                      ],
+                    ],
+                  ),
+                );
               }
               return ListView.builder(
                 padding: const EdgeInsets.symmetric(
@@ -132,85 +174,9 @@ class SubjectsListScreenState extends ConsumerState<SubjectsListScreen> {
     );
   }
 
-  /// Called from HomeShell's shared FAB -- see its GlobalKey\<SubjectsListScreenState\>.
+  /// "Yangi fan" (the button here, and the phone's shared + button).
   Future<void> showCreateSheet() async {
-    final context = this.context;
-    final nameController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-    String? error;
-
-    final created = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            return SafeArea(
-              top: false,
-              child: Padding(
-                padding: EdgeInsets.only(
-                  left: 16,
-                  right: 16,
-                  top: 16,
-                  bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
-                ),
-                child: Form(
-                  key: formKey,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: <Widget>[
-                      Text(
-                        'Yangi fan',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      const SizedBox(height: 16),
-                      TextFormField(
-                        controller: nameController,
-                        decoration: const InputDecoration(
-                          labelText: 'Fan nomi (masalan: Ingliz tili)',
-                        ),
-                        validator: (v) =>
-                            (v == null || v.trim().isEmpty) ? 'Majburiy' : null,
-                      ),
-                      if (error != null) ...<Widget>[
-                        const SizedBox(height: 8),
-                        Text(
-                          error!,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 20),
-                      FilledButton(
-                        onPressed: () async {
-                          if (!formKey.currentState!.validate()) return;
-                          try {
-                            await ref
-                                .read(subjectsRepositoryProvider)
-                                .create(nameController.text.trim());
-                            if (context.mounted) {
-                              Navigator.of(context).pop(true);
-                            }
-                          } catch (e) {
-                            setSheetState(() => error = e.toString());
-                          }
-                        },
-                        child: const Text('Yaratish'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-
-    if (created == true) {
-      _reload();
-    }
+    final created = await showSubjectDialog(context);
+    if (created != null && mounted) _reload();
   }
 }

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/formatters/thousands_input_formatter.dart';
 import '../../subjects/data/subjects_repository.dart';
+import '../../subjects/presentation/subject_dialog.dart';
 import '../../teachers/data/teachers_repository.dart';
 import '../data/groups_repository.dart';
 
@@ -50,7 +51,9 @@ class _GroupFormDialogState extends ConsumerState<_GroupFormDialog> {
 
   // Loaded fresh each time the dialog opens, so a teacher added a moment
   // ago on the O'qituvchilar tab is already in the list.
-  late final Future<_Options> _options = () async {
+  late Future<_Options> _options = _loadOptions();
+
+  Future<_Options> _loadOptions() async {
     final results = await Future.wait(<Future<Object>>[
       ref.read(subjectsRepositoryProvider).list(),
       ref.read(teachersRepositoryProvider).list(),
@@ -59,7 +62,18 @@ class _GroupFormDialogState extends ConsumerState<_GroupFormDialog> {
       subjects: results[0] as List<Subject>,
       teachers: results[1] as List<Teacher>,
     );
-  }();
+  }
+
+  /// No subject yet, or a new one is needed: make it here and pick it.
+  Future<void> _newSubject() async {
+    final created = await showSubjectDialog(context);
+    if (created == null || !mounted) return;
+    final next = _loadOptions();
+    setState(() {
+      _options = next;
+      _subjectId = created.id;
+    });
+  }
 
   @override
   void dispose() {
@@ -152,6 +166,7 @@ class _GroupFormDialogState extends ConsumerState<_GroupFormDialog> {
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int>(
+                    key: ValueKey('group-subject-$_subjectId'),
                     initialValue: _subjectId,
                     decoration: const InputDecoration(labelText: 'Fan'),
                     items: <DropdownMenuItem<int>>[
@@ -162,7 +177,24 @@ class _GroupFormDialogState extends ConsumerState<_GroupFormDialog> {
                         ),
                     ],
                     onChanged: (value) => setState(() => _subjectId = value),
-                    validator: (v) => v == null ? 'Fanni tanlang' : null,
+                    validator: (v) => v == null
+                        ? (options.subjects.isEmpty
+                              ? 'Avval fan qo\'shing'
+                              : 'Fanni tanlang')
+                        : null,
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      key: const ValueKey('group-new-subject'),
+                      onPressed: _saving ? null : _newSubject,
+                      icon: const Icon(Icons.add_rounded, size: 18),
+                      label: Text(
+                        options.subjects.isEmpty
+                            ? 'Fan yo\'q: yangi fan qo\'shish'
+                            : 'Yangi fan qo\'shish',
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int?>(

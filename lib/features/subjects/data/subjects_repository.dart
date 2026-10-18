@@ -20,7 +20,7 @@ class Subject {
   factory Subject.fromJson(Map<String, dynamic> json) => Subject(
     id: json['id'] as int,
     name: json['name'] as String,
-    groupCount: json['group_count'] as int,
+    groupCount: json['group_count'] as int? ?? 0,
   );
 }
 
@@ -36,7 +36,10 @@ class SubjectsRepository {
         .toList();
   }
 
-  Future<void> create(String name) {
-    return _api.post('/subjects', body: <String, dynamic>{'name': name});
+  Future<Subject> create(String name) async {
+    final json =
+        await _api.post('/subjects', body: <String, dynamic>{'name': name})
+            as Map<String, dynamic>;
+    return Subject.fromJson(json);
   }
 }
