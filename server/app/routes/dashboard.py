@@ -5,9 +5,10 @@ from fastapi import APIRouter, Depends
 from .. import clock, db, funnel
 from ..money import service as money
 from ..config import settings
-from ..deps import Scope, get_current_user, get_scope
-from ..schemas import DashboardSummary, MonthlyRevenue, RecentPayment, TrialToday
+from ..deps import Scope, get_current_user, get_scope, require_owner
+from ..schemas import BranchStats, DashboardSummary, MonthlyRevenue, RecentPayment, TrialToday
 from .debtors import list_debtors
+from .timetable import _timetable
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"], dependencies=[Depends(get_current_user)])
 
@@ -23,6 +24,85 @@ def _month_starts(today: date, count: int) -> list[date]:
     return [date((index - back) // 12, (index - back) % 12 + 1, 1) for back in range(count - 1, -1, -1)]
 
 
+async def _attendance_rate_7d(conn, today: date, ids: list[int] | None) -> float | None:
+    """present+late out of the marks that count (excused ones do not), over the
+    lessons of the last 7 days in these branches."""
+    row = await conn.fetchrow(
+        """
+        select count(*) filter (where a.status in ('present', 'late')) as came,
+               count(*) filter (where a.status <> 'excused') as expected
+        from attendance a
+        join lessons l on l.id = a.lesson_id
+        join groups g on g.id = l.group_id
+        where l.status = 'active' and (l.starts_at at time zone $1)::date between $2 and $3
+          and ($4::bigint[] is null or g.branch_id = any($4::bigint[]))
+        """,
+        settings.center_timezone,
+        today - timedelta(days=6),
+        today,
+        ids,
+    )
+    return round(row["came"] / row["expected"], 4) if row["expected"] else None
+
+
+async def _collected_this_month(conn, month_start: date, ids: list[int] | None) -> int:
+    return await conn.fetchval(
+        """
+        select coalesce(sum(case when kind = 'payment' then amount else -amount end), 0)::bigint from payments
+        where (received_at at time zone $1)::date >= $2 and ($3::bigint[] is null or branch_id = any($3::bigint[]))
+        """,
+        settings.center_timezone,
+        month_start,
+        ids,
+    )
+
+
+async def _debt(conn, ids: list[int] | None) -> tuple[int, int]:
+    row = await conn.fetchrow(
+        """
+        select coalesce(sum(eb.owed), 0)::bigint as total_debt, count(distinct eb.student_id) as debtor_count
+        from enrollment_balances eb
+        join enrollments e on e.id = eb.enrollment_id join groups g on g.id = e.group_id
+        where eb.owed > 0 and ($1::bigint[] is null or g.branch_id = any($1::bigint[]))
+        """,
+        ids,
+    )
+    return row["total_debt"], row["debtor_count"]
+
+
+@router.get("/branches", response_model=list[BranchStats], dependencies=[Depends(require_owner)])
+async def branch_stats():
+    """OWNER ONLY: every branch side by side -- students, what it collected this
+    month, what is owed, how lessons are attended, today's lessons, open requests."""
+    today = clock.today()
+    result = []
+    async with db.pool().acquire() as conn:
+        for b in await conn.fetch("select id, name, is_headquarters from branches where is_active order by is_headquarters desc, name"):
+            ids = [b["id"]]
+            students = await funnel.student_counts(conn, today, ids)
+            leads = await funnel.lead_counts(conn, ids)
+            debt, debtors = await _debt(conn, ids)
+            lessons = await _timetable(conn, today, today, ids=ids)
+            result.append(
+                BranchStats(
+                    branch_id=b["id"],
+                    name=b["name"],
+                    is_headquarters=b["is_headquarters"],
+                    active_students=students["active_students"],
+                    active_groups=await conn.fetchval(
+                        "select count(*) from groups where is_active and branch_id = $1", b["id"]
+                    ),
+                    collected_this_month=await _collected_this_month(conn, today.replace(day=1), ids),
+                    total_debt=debt,
+                    debtor_count=debtors,
+                    attendance_rate_7d=await _attendance_rate_7d(conn, today, ids),
+                    lessons_today=sum(1 for l in lessons if l.status != "cancelled"),
+                    open_leads=leads["open_leads"],
+                )
+            )
+    return result
+
+
 @router.get("", response_model=DashboardSummary)
 async def get_dashboard(scope: Scope = Depends(get_scope)):
     today = clock.today()
@@ -32,31 +112,32 @@ async def get_dashboard(scope: Scope = Depends(get_scope)):
     # -- a payment at 02:00 on the 1st in Tashkent belongs to the new month.
     tz = settings.center_timezone
 
+    money_visible = scope.user.is_owner
     async with db.pool().acquire() as conn:
-        counts = await conn.fetchrow(
+        counts = {
+            "active_groups": await conn.fetchval(
+                "select count(*) from groups where is_active and ($1::bigint[] is null or branch_id = any($1::bigint[]))",
+                scope.ids,
+            ),
+            # What the center collects is the owner's to see; an admin only
+            # collects from students (debts, who pays today).
+            "collected_this_month": await _collected_this_month(conn, month_start, scope.ids) if money_visible else 0,
+        }
+
+        total_debt, debtor_count = await _debt(conn, scope.ids)
+        debt = {"total_debt": total_debt, "debtor_count": debtor_count}
+        monthly_plan = await money.monthly_plan(conn, month_start, scope.ids) if money_visible else 0
+        attendance_7d = await _attendance_rate_7d(conn, today, scope.ids)
+        tasks_due_today = await conn.fetchval(
             """
-            select
-              (select count(*) from groups where is_active and ($3::bigint[] is null or branch_id = any($3::bigint[])))
-                as active_groups,
-              (select coalesce(sum(case when kind = 'payment' then amount else -amount end), 0) from payments
-                where (received_at at time zone $1)::date >= $2
-                  and ($3::bigint[] is null or branch_id = any($3::bigint[]))) as collected_this_month
+            select count(*) from follow_up_tasks t join leads l on l.id = t.lead_id
+            where t.status = 'open' and (t.due_at at time zone $1)::date <= $2
+              and ($3::bigint[] is null or l.branch_id = any($3::bigint[]))
             """,
             tz,
-            month_start,
+            today,
             scope.ids,
         )
-
-        debt = await conn.fetchrow(
-            """
-            select coalesce(sum(eb.owed), 0)::bigint as total_debt, count(distinct eb.student_id) as debtor_count
-            from enrollment_balances eb
-            join enrollments e on e.id = eb.enrollment_id join groups g on g.id = e.group_id
-            where eb.owed > 0 and ($1::bigint[] is null or g.branch_id = any($1::bigint[]))
-            """,
-            scope.ids,
-        )
-        monthly_plan = await money.monthly_plan(conn, month_start, scope.ids)
 
         # Every lead and student number comes from app/funnel.py -- the same
         # definitions Qabul and O'quvchilar use.
@@ -114,7 +195,7 @@ async def get_dashboard(scope: Scope = Depends(get_scope)):
             scope.ids,
         )
 
-        revenue_rows = await conn.fetch(
+        revenue_rows = [] if not money_visible else await conn.fetch(
             """
             select date_trunc('month', received_at at time zone $1)::date as month,
                    sum(case when kind = 'payment' then amount else -amount end)::bigint as amount
@@ -128,7 +209,7 @@ async def get_dashboard(scope: Scope = Depends(get_scope)):
             scope.ids,
         )
 
-        recent = await conn.fetch(
+        recent = [] if not money_visible else await conn.fetch(
             """
             select p.id, e.id as enrollment_id, s.full_name as student_full_name, g.name as group_name,
                    p.amount, p.received_at as occurred_at
@@ -157,7 +238,12 @@ async def get_dashboard(scope: Scope = Depends(get_scope)):
         **due_today,
         trials_today=[TrialToday(**row) for row in trials],
         # Zero-filled so the chart always shows every month, quiet ones too.
-        revenue_by_month=[MonthlyRevenue(month=month, amount=revenue.get(month, 0)) for month in months],
+        revenue_by_month=(
+            [MonthlyRevenue(month=month, amount=revenue.get(month, 0)) for month in months] if money_visible else []
+        ),
         recent_payments=[RecentPayment(**row) for row in recent],
         top_debtors=await list_debtors(limit=_TOP_DEBTORS, ids=scope.ids),
+        money_visible=money_visible,
+        attendance_rate_7d=attendance_7d,
+        tasks_due_today=tasks_due_today,
     )

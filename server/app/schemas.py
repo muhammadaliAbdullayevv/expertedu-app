@@ -415,6 +415,31 @@ class DashboardSummary(BaseModel):
     revenue_by_month: list[MonthlyRevenue]
     recent_payments: list[RecentPayment]
     top_debtors: list[Debtor]
+    # An admin only collects what students owe: the center's collected money,
+    # its plan, the revenue chart and the payment feed are the owner's, so they
+    # come back zero / empty and this is false.
+    money_visible: bool = True
+    # How the last 7 days of marked lessons went (present or late, out of
+    # those the student was expected at); null until a lesson was marked.
+    attendance_rate_7d: float | None = None
+    # Follow-up tasks (calls to make) due today.
+    tasks_due_today: int = 0
+
+
+class BranchStats(BaseModel):
+    """One branch's line on the owner's home page."""
+
+    branch_id: int
+    name: str
+    is_headquarters: bool = False
+    active_students: int
+    active_groups: int
+    collected_this_month: int
+    total_debt: int
+    debtor_count: int
+    attendance_rate_7d: float | None = None
+    lessons_today: int
+    open_leads: int
 
 
 class CreateStudentWithEnrollmentRequest(BaseModel):
