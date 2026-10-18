@@ -192,6 +192,31 @@ async def test_linking_again_from_another_chat_works_and_a_new_phone_moves_the_c
     assert await world.pool.fetchval("select student_id from telegram_links where chat_id = 2") == world.s2
 
 
+# --- who is this number? ---------------------------------------------------------------------------------
+
+
+async def test_staff_are_told_apart_by_their_number(world, bot):
+    owner_phone = await world.pool.fetchval("select phone from users where role = 'owner' limit 1")
+    admin_phone = await world.pool.fetchval("select phone from users where role = 'admin' limit 1")
+    teacher_id = await world.pool.fetchval(
+        "insert into teachers (full_name, phone) values ('Madina Karimova', '998905551234') returning id"
+    )
+    who = lambda phone: bot.get("/bot/who", params={"phone": phone})  # noqa: E731
+    assert (await who(owner_phone)).json()["role"] == "owner"
+    assert (await who(admin_phone)).json()["role"] == "admin"
+    assert (await who("+998 90 555 12 34")).json() == {"role": "teacher", "name": "Madina Karimova", "teacher_id": teacher_id}
+    assert (await who("+998 90 000 00 00")).json()["role"] is None
+    # A student is not staff.
+    assert (await who("998901110001")).json()["role"] is None
+    await world.pool.execute("update users set is_active = false where phone = $1", admin_phone)
+    assert (await who(admin_phone)).json()["role"] is None
+
+
+async def test_the_bot_lists_every_active_branch(world, bot):
+    names = [b["name"] for b in (await bot.get("/bot/branches")).json()]
+    assert names[0] == "Bosh ofis" and len(names) >= 2
+
+
 # --- someone who is not a student yet ------------------------------------------------------------------------
 
 

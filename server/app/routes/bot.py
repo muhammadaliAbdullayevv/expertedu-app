@@ -113,6 +113,50 @@ async def courses():
     ]
 
 
+# --- who is this number? ------------------------------------------------------------------------------------
+
+
+class BotBranch(BaseModel):
+    id: int
+    name: str
+
+
+@router.get("/branches", response_model=list[BotBranch])
+async def branches():
+    """Every active branch (also ones with no group yet): the owner sets their
+    address and pictures in the bot."""
+    rows = await db.pool().fetch("select id, name from branches where is_active order by is_headquarters desc, name")
+    return [BotBranch(id=r["id"], name=r["name"]) for r in rows]
+
+
+class Who(BaseModel):
+    # 'owner' | 'admin' | 'teacher' | None -- what the center knows this number as, apart from
+    # being a student (that is /link).
+    role: Literal["owner", "admin", "teacher"] | None = None
+    name: str | None = None
+    teacher_id: int | None = None
+
+
+@router.get("/who", response_model=Who)
+async def who(phone: str = Query(...)):
+    """Tells staff apart by the number Telegram verified: the owner and admins by their
+    login number, teachers by the number on their record. Only active people count."""
+    number = normalize(phone)
+    user = await db.pool().fetchrow(
+        "select role, full_name from users where phone = $1 and is_active order by role = 'owner' desc limit 1", number
+    )
+    teacher = await db.pool().fetchrow(
+        "select id, full_name from teachers where phone = $1 and is_active order by id limit 1", number
+    )
+    if user is not None:
+        return Who(
+            role=user["role"], name=user["full_name"], teacher_id=teacher["id"] if teacher is not None else None
+        )
+    if teacher is not None:
+        return Who(role="teacher", name=teacher["full_name"], teacher_id=teacher["id"])
+    return Who()
+
+
 # --- someone asks about a course ------------------------------------------------------------------------------
 
 
