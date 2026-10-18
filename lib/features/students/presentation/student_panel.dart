@@ -1176,12 +1176,18 @@ class _AttendanceTab extends StatelessWidget {
       ),
     );
     if (a.total == 0) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 16),
-        child: Text(
-          'Hali birorta dars belgilanmagan.',
-          style: TextStyle(color: AppColors.inkMuted),
-        ),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 16),
+            child: Text(
+              'Hali birorta dars belgilanmagan.',
+              style: TextStyle(color: AppColors.inkMuted),
+            ),
+          ),
+          _HomeworkSection(profile: profile),
+        ],
       );
     }
     return Column(
@@ -1265,6 +1271,125 @@ class _AttendanceTab extends StatelessWidget {
               ],
             ),
           ),
+        _HomeworkSection(profile: profile),
+      ],
+    );
+  }
+}
+
+/// Uy vazifasi: how well he prepares for lessons, from the teacher's answers to the
+/// Telegram bot -- the average, the counts, each group and the latest answers.
+class _HomeworkSection extends StatelessWidget {
+  const _HomeworkSection({required this.profile});
+
+  final StudentProfileData profile;
+
+  @override
+  Widget build(BuildContext context) {
+    final h = profile.homework;
+    final now = DateTime.now();
+    Widget count(String rating, int n) => Expanded(
+      child: Column(
+        children: <Widget>[
+          Text(
+            '$n',
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          ),
+          StatusChip(homeworkLabel(rating), tone: homeworkTone(rating)),
+        ],
+      ),
+    );
+    return Column(
+      key: const ValueKey('homework-section'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        const SizedBox(height: 22),
+        const Text('Uy vazifasi', style: _caption),
+        const SizedBox(height: 8),
+        if (h.total == 0)
+          const Text(
+            'Hali uy vazifasi baholanmagan. O\'qituvchi Telegram guruhida javob berganda shu yerda ko\'rinadi.',
+            key: ValueKey('homework-empty'),
+            style: TextStyle(color: AppColors.inkMuted),
+          )
+        else ...<Widget>[
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: <Widget>[
+              Text(
+                '${h.score!.toStringAsFixed(1)} / 4',
+                key: const ValueKey('homework-score'),
+                style: const TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  '${h.total} ta javobdan o\'rtacha',
+                  style: const TextStyle(color: AppColors.inkMuted),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: <Widget>[
+              count('great', h.great),
+              count('good', h.good),
+              count('weak', h.weak),
+              count('bad', h.bad),
+              count('none', h.none),
+            ],
+          ),
+          const SizedBox(height: 14),
+          for (final g in profile.activeGroups.where(
+            (g) => g.homework.total > 0,
+          ))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(
+                      g.groupName,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  Text(
+                    '${g.homework.score!.toStringAsFixed(1)} / 4',
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ),
+          const SizedBox(height: 6),
+          for (final m in profile.homeworkMarks.take(10))
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: <Widget>[
+                  SizedBox(
+                    width: 78,
+                    child: Text(
+                      dayLabel(m.at, now),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.inkMuted,
+                      ),
+                    ),
+                  ),
+                  Expanded(child: Text(m.groupName)),
+                  StatusChip(
+                    homeworkLabel(m.homework),
+                    tone: homeworkTone(m.homework),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ],
     );
   }

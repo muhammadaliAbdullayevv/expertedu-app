@@ -154,6 +154,21 @@ StatusTone attendanceTone(String status) => switch (status) {
   _ => StatusTone.neutral,
 };
 
+/// How well the student prepared, as the teacher answered the bot.
+String homeworkLabel(String rating) => switch (rating) {
+  'great' => 'Juda yaxshi',
+  'good' => 'Qoniqarli',
+  'weak' => 'Unchalik emas',
+  'bad' => 'Yomon',
+  _ => 'Qilmagan',
+};
+
+StatusTone homeworkTone(String rating) => switch (rating) {
+  'great' || 'good' => StatusTone.ok,
+  'weak' => StatusTone.warning,
+  _ => StatusTone.danger,
+};
+
 /// "2 kun kechikdi" -- how long the oldest unpaid charge has been due.
 String overdueText(int days) =>
     days <= 0 ? 'Bugun muddat' : '$days kun kechikdi';

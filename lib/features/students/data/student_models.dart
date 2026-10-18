@@ -142,6 +142,70 @@ class ProfileAttendance {
       );
 }
 
+/// How well the student prepared for lessons, from the teacher's answers to the
+/// Telegram bot's question (skipped answers are not counted).
+class ProfileHomework {
+  const ProfileHomework({
+    this.great = 0,
+    this.good = 0,
+    this.weak = 0,
+    this.bad = 0,
+    this.none = 0,
+    this.total = 0,
+    this.score,
+    this.recent = const [],
+  });
+
+  final int great;
+  final int good;
+  final int weak;
+  final int bad;
+  final int none;
+  final int total;
+
+  /// 0 (no homework at all) to 4 (great), averaged; null until there is an answer.
+  final double? score;
+
+  /// The last ten ratings, oldest first.
+  final List<String> recent;
+
+  factory ProfileHomework.fromJson(Map<String, dynamic> json) =>
+      ProfileHomework(
+        great: json['great'] as int? ?? 0,
+        good: json['good'] as int? ?? 0,
+        weak: json['weak'] as int? ?? 0,
+        bad: json['bad'] as int? ?? 0,
+        none: json['none'] as int? ?? 0,
+        total: json['total'] as int? ?? 0,
+        score: (json['score'] as num?)?.toDouble(),
+        recent: (json['recent'] as List<dynamic>? ?? const []).cast<String>(),
+      );
+}
+
+class ProfileHomeworkEntry {
+  const ProfileHomeworkEntry({
+    required this.at,
+    this.groupId,
+    required this.groupName,
+    required this.homework,
+  });
+
+  final DateTime at;
+  final int? groupId;
+  final String groupName;
+
+  /// 'great' | 'good' | 'weak' | 'bad' | 'none'.
+  final String homework;
+
+  factory ProfileHomeworkEntry.fromJson(Map<String, dynamic> json) =>
+      ProfileHomeworkEntry(
+        at: _dt(json['at']),
+        groupId: json['group_id'] as int?,
+        groupName: json['group_name'] as String,
+        homework: json['homework'] as String,
+      );
+}
+
 class ProfileGroup {
   const ProfileGroup({
     required this.enrollmentId,
@@ -158,6 +222,7 @@ class ProfileGroup {
     this.debtSince,
     this.schedule = const [],
     required this.attendance,
+    this.homework = const ProfileHomework(),
   });
 
   final int enrollmentId;
@@ -180,6 +245,7 @@ class ProfileGroup {
   final DateTime? debtSince;
   final List<ScheduleSlot> schedule;
   final ProfileAttendance attendance;
+  final ProfileHomework homework;
 
   bool get isActive => status == 'active';
 
@@ -207,6 +273,9 @@ class ProfileGroup {
     attendance: ProfileAttendance.fromJson(
       json['attendance'] as Map<String, dynamic>,
     ),
+    homework: json['homework'] == null
+        ? const ProfileHomework()
+        : ProfileHomework.fromJson(json['homework'] as Map<String, dynamic>),
   );
 }
 
@@ -320,6 +389,8 @@ class StudentProfileData {
     required this.paidTotal,
     required this.groups,
     required this.attendance,
+    this.homework = const ProfileHomework(),
+    this.homeworkMarks = const [],
     required this.payments,
     this.debtSince,
     this.overdueDays = 0,
@@ -341,6 +412,11 @@ class StudentProfileData {
   final int paidTotal;
   final List<ProfileGroup> groups;
   final ProfileAttendance attendance;
+
+  /// How the homework goes (the teacher's answers to the Telegram bot), overall,
+  /// and the latest answers, newest first.
+  final ProfileHomework homework;
+  final List<ProfileHomeworkEntry> homeworkMarks;
   final List<ProfilePayment> payments;
   final DateTime? debtSince;
   final int overdueDays;
@@ -406,6 +482,8 @@ class StudentProfileData {
       attendance: mine.isEmpty
           ? const ProfileAttendance()
           : mine.first.attendance,
+      homework: mine.isEmpty ? const ProfileHomework() : mine.first.homework,
+      homeworkMarks: homeworkMarks.where((h) => h.groupId == groupId).toList(),
       payments: myPayments,
       debtSince: owed > 0 ? since : null,
       overdueDays: owed > 0 ? overdue : 0,
@@ -421,43 +499,50 @@ class StudentProfileData {
     );
   }
 
-  factory StudentProfileData.fromJson(Map<String, dynamic> json) =>
-      StudentProfileData(
-        student: Student.fromJson(json['student'] as Map<String, dynamic>),
-        isNew: json['is_new'] as bool? ?? false,
-        balance: json['balance'] as int,
-        paidTotal: json['paid_total'] as int,
-        groups: [
-          for (final g in json['groups'] as List<dynamic>)
-            ProfileGroup.fromJson(g as Map<String, dynamic>),
-        ],
-        attendance: ProfileAttendance.fromJson(
-          json['attendance'] as Map<String, dynamic>,
-        ),
-        payments: [
-          for (final p in json['payments'] as List<dynamic>)
-            ProfilePayment.fromJson(p as Map<String, dynamic>),
-        ],
-        debtSince: _dtOrNull(json['debt_since']),
-        overdueDays: json['overdue_days'] as int? ?? 0,
-        activity: [
-          for (final a in json['activity'] as List<dynamic>? ?? const [])
-            ActivityItem.fromJson(a as Map<String, dynamic>),
-        ],
-        marks: [
-          for (final m in json['marks'] as List<dynamic>? ?? const [])
-            ProfileMark.fromJson(m as Map<String, dynamic>),
-        ],
-        events: [
-          for (final e in json['events'] as List<dynamic>? ?? const [])
-            StudentEvent.fromJson(e as Map<String, dynamic>),
-        ],
-        transferNotices: [
-          for (final n
-              in json['transfer_notices'] as List<dynamic>? ?? const [])
-            TransferNotice.fromJson(n as Map<String, dynamic>),
-        ],
-      );
+  factory StudentProfileData.fromJson(
+    Map<String, dynamic> json,
+  ) => StudentProfileData(
+    student: Student.fromJson(json['student'] as Map<String, dynamic>),
+    isNew: json['is_new'] as bool? ?? false,
+    balance: json['balance'] as int,
+    paidTotal: json['paid_total'] as int,
+    groups: [
+      for (final g in json['groups'] as List<dynamic>)
+        ProfileGroup.fromJson(g as Map<String, dynamic>),
+    ],
+    attendance: ProfileAttendance.fromJson(
+      json['attendance'] as Map<String, dynamic>,
+    ),
+    homework: json['homework'] == null
+        ? const ProfileHomework()
+        : ProfileHomework.fromJson(json['homework'] as Map<String, dynamic>),
+    homeworkMarks: [
+      for (final h in json['homework_marks'] as List<dynamic>? ?? const [])
+        ProfileHomeworkEntry.fromJson(h as Map<String, dynamic>),
+    ],
+    payments: [
+      for (final p in json['payments'] as List<dynamic>)
+        ProfilePayment.fromJson(p as Map<String, dynamic>),
+    ],
+    debtSince: _dtOrNull(json['debt_since']),
+    overdueDays: json['overdue_days'] as int? ?? 0,
+    activity: [
+      for (final a in json['activity'] as List<dynamic>? ?? const [])
+        ActivityItem.fromJson(a as Map<String, dynamic>),
+    ],
+    marks: [
+      for (final m in json['marks'] as List<dynamic>? ?? const [])
+        ProfileMark.fromJson(m as Map<String, dynamic>),
+    ],
+    events: [
+      for (final e in json['events'] as List<dynamic>? ?? const [])
+        StudentEvent.fromJson(e as Map<String, dynamic>),
+    ],
+    transferNotices: [
+      for (final n in json['transfer_notices'] as List<dynamic>? ?? const [])
+        TransferNotice.fromJson(n as Map<String, dynamic>),
+    ],
+  );
 }
 
 /// One entry of the Amallar tab.

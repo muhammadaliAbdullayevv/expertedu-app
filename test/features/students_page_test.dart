@@ -118,7 +118,11 @@ StudentProfileData profile(
   DateTime? archivedAt,
   List<StudentEvent> events = const [],
   List<TransferNotice> notices = const [],
+  ProfileHomework homework = const ProfileHomework(),
+  List<ProfileHomeworkEntry> homeworkMarks = const [],
 }) => StudentProfileData(
+  homework: homework,
+  homeworkMarks: homeworkMarks,
   student: Student(
     id: id,
     fullName: name,
@@ -862,6 +866,68 @@ void main() {
         expect(find.text('So\'nggi darslar'), findsOneWidget);
       },
     );
+
+    testWidgets(
+      'Davomat also shows how the homework goes, from the bot answers',
+      (tester) async {
+        final now = DateTime.now();
+        final rig = Rig(
+          profiles: {
+            1: profile(
+              1,
+              'Botir Aliyev',
+              homework: const ProfileHomework(
+                great: 2,
+                good: 1,
+                weak: 1,
+                none: 1,
+                total: 5,
+                score: 2.6,
+                recent: ['great', 'great', 'good', 'weak', 'none'],
+              ),
+              homeworkMarks: [
+                ProfileHomeworkEntry(
+                  at: now,
+                  groupId: 11,
+                  groupName: 'Fransuz tili, A1',
+                  homework: 'none',
+                ),
+                ProfileHomeworkEntry(
+                  at: now.subtract(const Duration(days: 2)),
+                  groupId: 11,
+                  groupName: 'Fransuz tili, A1',
+                  homework: 'great',
+                ),
+              ],
+            ),
+            2: profile(2, 'Dilnoza Ergasheva', balance: 0),
+            3: profile(3, 'Madina Qodirova', balance: -120000),
+            4: profile(4, 'Ketgan Odam', balance: 0),
+          },
+        );
+        await pump(tester, rig);
+        await tab(tester, 2);
+        expect(find.text('Uy vazifasi'), findsOneWidget);
+        expect(
+          tester
+              .widget<Text>(find.byKey(const ValueKey('homework-score')))
+              .data,
+          '2.6 / 4',
+        );
+        expect(find.text('Qilmagan'), findsNWidgets(2));
+        expect(find.text('Juda yaxshi'), findsNWidgets(2));
+        expect(find.byKey(const ValueKey('homework-empty')), findsNothing);
+      },
+    );
+
+    testWidgets('Davomat says so when no homework was answered yet', (
+      tester,
+    ) async {
+      await pump(tester, Rig());
+      await tab(tester, 2);
+      expect(find.byKey(const ValueKey('homework-empty')), findsOneWidget);
+      expect(find.byKey(const ValueKey('homework-score')), findsNothing);
+    });
 
     testWidgets('Izohlar: the note, or a line saying there is none', (
       tester,
