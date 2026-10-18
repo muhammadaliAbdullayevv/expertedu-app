@@ -62,6 +62,7 @@ async def generate(conn, now: datetime) -> int:
     today = local.date()
 
     made += await _welcome(conn)
+    made += await bot_groups.queue_payment_soon(conn, today)
 
     # Payments due tomorrow / today / overdue.
     charges = await conn.fetch(

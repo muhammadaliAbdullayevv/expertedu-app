@@ -32,6 +32,7 @@ from .routes import (
     subjects,
     timetable,
     teachers,
+    telegram_groups,
     transactions,
     trials,
     users,
@@ -96,6 +97,7 @@ app.include_router(inquiries.router, **_scoped)
 app.include_router(dashboard.router, **_scoped)
 app.include_router(debtors.router, **_scoped)
 app.include_router(teachers.router, **_scoped)
+app.include_router(telegram_groups.router, **_scoped)
 app.include_router(leads.router, **_scoped)
 app.include_router(trials.router, **_scoped)
 app.include_router(follow_ups.router, **_scoped)

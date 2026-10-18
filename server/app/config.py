@@ -19,6 +19,8 @@ class Settings:
 
     # The Telegram bot's key for /bot/*. Unset = the bot API is off (503).
     bot_api_key: str | None = os.environ.get("BOT_API_KEY") or None
+    # The Telegram bot's @name (no @), for the link that adds it to a group.
+    telegram_bot_username: str = os.environ.get("TELEGRAM_BOT_USERNAME") or "Expert_AI_Admin_bot"
 
     public_base_url: str = os.environ.get("PUBLIC_BASE_URL", "https://expertedu-api.ai-student-helper.site")
 

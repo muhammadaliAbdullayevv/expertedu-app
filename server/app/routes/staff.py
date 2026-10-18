@@ -16,9 +16,10 @@ router = APIRouter(prefix="/staff", tags=["staff"], dependencies=[Depends(requir
 _MIN_PASSWORD = 6
 _SELECT = """
 select u.id, u.phone, u.full_name, u.role, u.is_active, u.created_at, l.last_login_at,
-       ub.branch_id, b.name as branch_name
+       ub.branch_id, b.name as branch_name, st.telegram_user_id
 from users u
 left join staff_logins l on l.user_id = u.id
+left join staff_telegram st on st.user_id = u.id
 left join user_branches ub on ub.user_id = u.id
 left join branches b on b.id = ub.branch_id
 """
@@ -37,6 +38,23 @@ async def _branch(conn, branch_id: int | None) -> int:
     if not await conn.fetchval("select 1 from branches where id = $1 and is_active", branch_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Filial topilmadi.")
     return branch_id
+
+
+async def set_telegram_id(conn, staff_id: int, telegram_user_id: int | None) -> None:
+    """Sets (or clears) the Telegram user id the bot knows this staff member by; one id, one person."""
+    if telegram_user_id is None:
+        await conn.execute("delete from staff_telegram where user_id = $1", staff_id)
+        return
+    holder = await conn.fetchval("select user_id from staff_telegram where telegram_user_id = $1", telegram_user_id)
+    if holder is not None and holder != staff_id:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Bu Telegram ID boshqa xodimga biriktirilgan.")
+    await conn.execute(
+        """
+        insert into staff_telegram (user_id, telegram_user_id) values ($1, $2)
+        on conflict (user_id) do update set telegram_user_id = excluded.telegram_user_id
+        """,
+        staff_id, telegram_user_id,
+    )
 
 
 async def _fetch(conn, staff_id: int) -> StaffMember:
@@ -85,6 +103,8 @@ async def create_staff(payload: CreateStaffRequest):
             staff_id = await insert_admin(
                 conn, full_name=payload.full_name, phone=payload.phone, password=payload.password, branch_id=branch_id
             )
+            if payload.telegram_user_id is not None:
+                await set_telegram_id(conn, staff_id, payload.telegram_user_id)
             return await _fetch(conn, staff_id)
 
 
@@ -125,6 +145,8 @@ async def update_staff(staff_id: int, payload: UpdateStaffRequest, user: Current
                         )
                     except asyncpg.UniqueViolationError:
                         raise HTTPException(status.HTTP_409_CONFLICT, "Bu raqam bilan xodim allaqachon bor.")
+            if "telegram_user_id" in payload.model_fields_set:
+                await set_telegram_id(conn, staff_id, payload.telegram_user_id)
             if payload.branch_id is not None:
                 if row["role"] == "owner":
                     raise HTTPException(status.HTTP_400_BAD_REQUEST, "Egasi hamma filialni ko'radi.")

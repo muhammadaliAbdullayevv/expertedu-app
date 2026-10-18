@@ -1,6 +1,7 @@
-"""The bot in a course's group chat: connecting it, telling people apart, and the
-teacher's homework questions (routes/bot_groups.py)."""
+"""The bot in a course's group chat: connecting it with the group page's code, who may answer
+(Telegram ids held in the CRM), the teacher's homework questions and the group reminders."""
 
+import json
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -18,6 +19,9 @@ TZ = ZoneInfo("Asia/Tashkent")
 KEY = "test-bot-key-0123456789abcdef"
 CHAT = -1001234567890
 TEACHER_PHONE = "998905551111"
+TEACHER_TG = 500
+ADMIN_TG = 600
+OTHER_TG = 700
 
 
 @pytest.fixture
@@ -30,10 +34,15 @@ async def world(api):
         json={"slots": [{"weekday": d, "starts_at": "09:00", "ends_at": "10:00"} for d in range(1, 8)]},
     )
     w.s1b = await w.student(w.a1, "Aziza Karimova", "998901110003", w.g1)
+    await w.pool.execute("update teachers set telegram_user_id = $2 where id = $1", w.t1, TEACHER_TG)
     w.owner_phone = await w.pool.fetchval("select phone from users where role = 'owner' limit 1")
     w.admin1_phone = await w.pool.fetchval(
         "select u.phone from users u join user_branches ub on ub.user_id = u.id where ub.branch_id = $1", w.b1
     )
+    w.admin1_id = await w.pool.fetchval(
+        "select u.id from users u join user_branches ub on ub.user_id = u.id where ub.branch_id = $1", w.b1
+    )
+    await w.pool.execute("insert into staff_telegram (user_id, telegram_user_id) values ($1, $2)", w.admin1_id, ADMIN_TG)
     yield w
     await w.close()
 
@@ -54,49 +63,55 @@ async def run_job(world, now: datetime) -> int:
         return await telegram_notifier.generate(conn, now)
 
 
-async def connect(bot, world, chat=CHAT, group=None, phone=None, verified=True):
-    return await bot.post(
-        "/bot/connect",
-        json={"chat_id": chat, "title": "Beginner A", "group_id": group or world.g1, "phone": phone or world.owner_phone, "verified": verified},
-    )
+async def connect(bot, world, chat=CHAT, group=None):
+    """Connects a chat the way people do: a code from the group's page, then /connect in Telegram."""
+    made = await world.owner.post(f"/groups/{group or world.g1}/telegram/code")
+    assert made.status_code == 201, made.text
+    return await bot.post("/bot/connect", json={"chat_id": chat, "title": "Beginner A", "code": made.json()["code"]})
 
 
-# --- connecting a chat --------------------------------------------------------------------------------------
+# --- the group page: a code and the state of the connection ---------------------------------------------------
 
 
-async def test_who_may_connect_which_groups(world, bot):
-    async def names(phone, verified=True):
-        r = await bot.get("/bot/connectable", params={"phone": phone, "verified": verified})
-        return sorted(g["name"] for g in r.json())
-
-    assert await names(world.owner_phone) == ["Beginner A", "Beginner B"]
-    assert await names(world.admin1_phone) == ["Beginner A"]
-    assert await names(TEACHER_PHONE) == ["Beginner A"]
-    assert await names("998900009999") == []
-    # A staff login number that was only typed in (not verified by Telegram) gives nothing.
-    assert await names(world.owner_phone, verified=False) == []
-    assert await names(world.admin1_phone, verified=False) == []
-    # ... but a teacher's number counts however it was given.
-    assert await names(TEACHER_PHONE, verified=False) == ["Beginner A"]
+async def test_the_group_page_hands_out_a_one_time_code_and_a_link(world):
+    status_ = (await world.owner.get(f"/groups/{world.g1}/telegram")).json()
+    assert status_["connected"] is False and status_["code"] is None
+    made = (await world.owner.post(f"/groups/{world.g1}/telegram/code")).json()
+    assert len(made["code"]) == 8 and made["code"].isalnum() and made["code"] == made["code"].upper()
+    assert made["link"] == f"https://t.me/Expert_AI_Admin_bot?startgroup={made['code']}"
+    assert made["code_expires_at"] is not None and made["connected"] is False
+    # a page reload shows the same code; a new one replaces it
+    assert (await world.owner.get(f"/groups/{world.g1}/telegram")).json()["code"] == made["code"]
+    newer = (await world.owner.post(f"/groups/{world.g1}/telegram/code")).json()
+    assert newer["code"] != made["code"]
 
 
-async def test_connecting_a_chat_and_asking_about_it(world, bot):
-    assert (await bot.get(f"/bot/group-chat/{CHAT}")).json() == {
-        "connected": False, "group_id": None, "group_name": None, "subject_name": None, "branch_name": None, "teacher_name": None,
-    }
-    r = await connect(bot, world)
-    assert r.status_code == 200 and r.json()["group_name"] == "Beginner A"
-    info = (await bot.get(f"/bot/group-chat/{CHAT}")).json()
-    assert info["connected"] and info["teacher_name"] == "Madina" and info["subject_name"] == "Ingliz tili"
+async def test_a_branch_admin_manages_only_their_own_groups_telegram_section(world):
+    assert (await world.a1.post(f"/groups/{world.g1}/telegram/code")).status_code == 201
+    assert (await world.a2.get(f"/groups/{world.g1}/telegram")).status_code == 404
+    assert (await world.a2.post(f"/groups/{world.g1}/telegram/code")).status_code == 404
+    assert (await world.a2.delete(f"/groups/{world.g1}/telegram")).status_code == 404
 
 
-async def test_only_those_who_manage_the_group_can_connect_it(world, bot):
-    assert (await connect(bot, world, phone=TEACHER_PHONE)).status_code == 200
-    assert (await connect(bot, world, chat=-2, group=world.g2, phone=TEACHER_PHONE)).status_code == 403  # not their group
-    assert (await connect(bot, world, chat=-3, phone=world.owner_phone, verified=False)).status_code == 403
-    assert (await connect(bot, world, chat=-4, phone="998900009999")).status_code == 403
-    assert (await connect(bot, world, chat=-5, group=999999)).status_code == 404
-    assert await world.pool.fetchval("select count(*) from telegram_groups") == 1
+async def test_the_code_connects_the_chat_once(world, bot):
+    made = (await world.owner.post(f"/groups/{world.g1}/telegram/code")).json()["code"]
+    ok = await bot.post("/bot/connect", json={"chat_id": CHAT, "title": "Beginner A (chat)", "code": made.lower()})  # any case
+    assert ok.status_code == 200 and ok.json()["group_name"] == "Beginner A" and ok.json()["teacher_name"] == "Madina"
+    page = (await world.owner.get(f"/groups/{world.g1}/telegram")).json()
+    assert page["connected"] and page["chat_title"] == "Beginner A (chat)" and page["code"] is None and page["connected_by"]
+    assert (await bot.get(f"/bot/group-chat/{CHAT}")).json()["connected"] is True
+    # used: it does not work a second time, for this or another chat
+    assert (await bot.post("/bot/connect", json={"chat_id": -2, "code": made})).status_code == 400
+
+
+async def test_a_wrong_expired_or_replaced_code_is_refused(world, bot):
+    assert (await bot.post("/bot/connect", json={"chat_id": CHAT, "code": "ZZZZZZZZ"})).status_code == 400
+    first = (await world.owner.post(f"/groups/{world.g1}/telegram/code")).json()["code"]
+    second = (await world.owner.post(f"/groups/{world.g1}/telegram/code")).json()["code"]
+    assert (await bot.post("/bot/connect", json={"chat_id": CHAT, "code": first})).status_code == 400
+    await world.pool.execute("update telegram_connect_codes set expires_at = now() - interval '1 minute' where code = $1", second)
+    assert (await bot.post("/bot/connect", json={"chat_id": CHAT, "code": second})).status_code == 400
+    assert await world.pool.fetchval("select count(*) from telegram_groups") == 0
 
 
 async def test_connecting_again_moves_the_group_to_the_new_chat(world, bot):
@@ -107,63 +122,63 @@ async def test_connecting_again_moves_the_group_to_the_new_chat(world, bot):
     assert [r["group_id"] for r in await world.pool.fetch("select group_id from telegram_groups")] == [world.g2]
 
 
-async def test_disconnecting(world, bot):
+async def test_disconnecting_from_the_group_page_also_voids_the_open_code(world, bot):
     await connect(bot, world)
-    stranger = await bot.delete("/bot/connect", params={"chat_id": CHAT, "phone": "998900009999"})
-    assert stranger.status_code == 403
-    assert (await bot.delete("/bot/connect", params={"chat_id": CHAT, "phone": TEACHER_PHONE})).status_code == 204
+    code = (await world.owner.post(f"/groups/{world.g1}/telegram/code")).json()["code"]
+    page = (await world.owner.delete(f"/groups/{world.g1}/telegram")).json()
+    assert page["connected"] is False and page["code"] is None
     assert (await bot.get(f"/bot/group-chat/{CHAT}")).json()["connected"] is False
+    assert (await bot.post("/bot/connect", json={"chat_id": CHAT, "code": code})).status_code == 400
 
 
-# --- who is this person in the group ----------------------------------------------------------------------------
+# --- Telegram ids in the CRM -----------------------------------------------------------------------------------------
 
 
-async def group_link(bot, phone, chat_id=777, group_chat=CHAT):
-    r = await bot.post("/bot/link-in-group", json={"chat_id": chat_id, "group_chat_id": group_chat, "phone": phone})
-    assert r.status_code == 200, r.text
-    return r.json()
+async def test_a_teachers_telegram_id_is_set_changed_and_kept_unique(world):
+    t = (await world.a1.patch(f"/teachers/{world.t1}", json={"telegram_user_id": 123})).json()
+    assert t["telegram_user_id"] == 123
+    other = (await world.a1.post("/teachers", json={"full_name": "Olim Qodirov", "telegram_user_id": 456})).json()
+    assert other["telegram_user_id"] == 456
+    clash = await world.a1.patch(f"/teachers/{other['id']}", json={"telegram_user_id": 123})
+    assert clash.status_code == 409
+    clash = await world.a1.post("/teachers", json={"full_name": "Yana Biri", "telegram_user_id": 123})
+    assert clash.status_code == 409
+    cleared = (await world.a1.patch(f"/teachers/{world.t1}", json={"telegram_user_id": None})).json()
+    assert cleared["telegram_user_id"] is None
+    assert (await world.a1.get("/teachers")).json()[0].keys() >= {"telegram_user_id"}
 
 
-async def test_a_registered_number_typed_in_links_a_student_of_that_group(world, bot):
-    await connect(bot, world)
-    assert await group_link(bot, "+998 90 111 00 01") == {"status": "student", "name": "Botir Aliyev"}
-    me = (await bot.get("/bot/me/777")).json()
-    assert me["student_name"] == "Botir Aliyev"
-    assert await world.pool.fetchval("select method from telegram_links where chat_id = 777") == "group"
+async def test_an_admins_telegram_id_is_set_cleared_and_kept_unique(world):
+    admin = world.admin2_id
+    done = (await world.owner.patch(f"/staff/{admin}", json={"telegram_user_id": 999})).json()
+    assert done["telegram_user_id"] == 999
+    assert (await world.owner.patch(f"/staff/{world.admin1_id}", json={"telegram_user_id": 999})).status_code == 409
+    assert (await world.owner.patch(f"/staff/{admin}", json={"full_name": "Yangi Ism"})).json()["telegram_user_id"] == 999  # untouched
+    assert (await world.owner.patch(f"/staff/{admin}", json={"telegram_user_id": None})).json()["telegram_user_id"] is None
+    made = await world.owner.post(
+        "/staff", json={"phone": "998900000077", "full_name": "Yangi Admin", "password": "secret12", "telegram_user_id": 321}
+    )
+    assert made.status_code == 201 and made.json()["telegram_user_id"] == 321
 
 
-async def test_a_number_that_is_not_in_this_group_is_not_accepted(world, bot):
-    await connect(bot, world)
-    # a real student, but of the other group
-    assert (await group_link(bot, "998901110002"))["status"] == "none"
-    assert (await group_link(bot, "998900009999"))["status"] == "none"
-    assert (await bot.get("/bot/me/777")).status_code == 404
-    # a student who left this group
-    await world.pool.execute("update enrollments set status = 'withdrawn', ended_at = current_date where id = $1", await world.enrollment(world.s1, world.g1))
-    assert (await group_link(bot, "998901110001"))["status"] == "none"
+async def test_sharing_a_verified_number_fills_in_the_telegram_id(world, bot):
+    async def register(tg, phone):
+        r = await bot.post("/bot/telegram-id", json={"telegram_user_id": tg, "phone": phone})
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    assert await register(8001, "+998 90 555 11 11") == {"role": "teacher", "name": "Madina"}
+    assert await world.pool.fetchval("select telegram_user_id from teachers where id = $1", world.t1) == 8001
+    assert await register(8002, world.admin1_phone) == {"role": "admin", "name": await world.pool.fetchval("select full_name from users where id = $1", world.admin1_id)}
+    assert await world.pool.fetchval("select telegram_user_id from staff_telegram where user_id = $1", world.admin1_id) == 8002
+    assert (await register(8003, world.owner_phone))["role"] == "owner"
+    assert await register(8004, "998900009999") == {"role": None, "name": None}  # nobody
+    # the same account moving to another person takes the id with it
+    assert (await register(8001, world.admin1_phone))["role"] == "admin"
+    assert await world.pool.fetchval("select telegram_user_id from teachers where id = $1", world.t1) is None
 
 
-async def test_the_groups_teacher_is_told_apart_and_another_groups_teacher_is_not(world, bot):
-    await connect(bot, world)
-    assert await group_link(bot, TEACHER_PHONE) == {"status": "teacher", "name": "Madina"}
-    other = await world.pool.fetchval("update teachers set phone = '998905552222' where id = $1 returning phone", world.t2)
-    assert (await group_link(bot, other))["status"] == "none"
-    assert (await bot.get("/bot/me/777")).status_code == 404  # a teacher is not linked as a student
-
-
-async def test_a_chat_that_is_not_connected_accepts_nobody(world, bot):
-    assert (await group_link(bot, "998901110001", group_chat=-999))["status"] == "none"
-
-
-async def test_joining_through_the_group_clears_the_waiting_row(world, bot):
-    await connect(bot, world)
-    await bot.post("/bot/link", json={"chat_id": 777, "phone": "998907770000"})
-    assert await world.pool.fetchval("select count(*) from telegram_pending where chat_id = 777") == 1
-    await group_link(bot, "998901110001")
-    assert await world.pool.fetchval("select count(*) from telegram_pending where chat_id = 777") == 0
-
-
-# --- the homework questions ---------------------------------------------------------------------------------------
+# --- who may answer ------------------------------------------------------------------------------------------------
 
 
 async def pending(bot):
@@ -172,11 +187,15 @@ async def pending(bot):
     return r.json()
 
 
-async def answer(bot, world, enrollment, homework="good", phone=TEACHER_PHONE, chat=CHAT, verified=True, lesson=None):
+async def answer(bot, world, enrollment, homework="good", who=TEACHER_TG, chat=CHAT, owner=False, lesson=None):
+    """The teacher (by default) taps an answer; [who] is the Telegram user id, [owner] the bot's OWNER_IDS claim."""
     lesson = lesson or await world.pool.fetchval("select id from lessons order by id desc limit 1")
     return await bot.post(
         "/bot/feedback/answer",
-        json={"chat_id": chat, "lesson_id": lesson, "enrollment_id": enrollment, "homework": homework, "actor_phone": phone, "verified": verified},
+        json={
+            "chat_id": chat, "lesson_id": lesson, "enrollment_id": enrollment, "homework": homework,
+            "telegram_user_id": who, "is_owner": owner, "name": "Telegram Name",
+        },
     )
 
 
@@ -266,27 +285,49 @@ async def test_a_round_with_nobody_to_ask_is_dropped(world, bot):
     assert await world.pool.fetchval("select status from telegram_prompts") == "done"
 
 
-async def test_only_the_teacher_or_the_right_staff_can_answer(world, bot):
+async def test_only_the_teacher_the_owner_and_the_branch_admin_can_answer(world, bot):
     await connect(bot, world)
     await run_job(world, ending_soon())
     (round_,) = await pending(bot)
     e = round_["question"]["enrollment_id"]
     lesson = round_["lesson_id"]
-    assert (await answer(bot, world, e, phone="998901110001", lesson=lesson)).status_code == 403  # a student
-    assert (await answer(bot, world, e, phone="998900009999", lesson=lesson)).status_code == 403  # a stranger
-    assert (await answer(bot, world, e, phone=world.owner_phone, verified=False, lesson=lesson)).status_code == 403  # typed in
-    assert (await answer(bot, world, e, phone=world.admin1_phone, verified=False, lesson=lesson)).status_code == 403
-    assert (await answer(bot, world, e, phone=world.owner_phone, lesson=lesson)).status_code == 200
-    assert (await answer(bot, world, e, phone=world.admin1_phone, lesson=lesson)).status_code == 200
-    admin2 = await world.pool.fetchval(
-        "select u.phone from users u join user_branches ub on ub.user_id = u.id where ub.branch_id = $1", world.b2
-    )
-    assert (await answer(bot, world, e, phone=admin2, lesson=lesson)).status_code == 403  # another branch
-    # another group's teacher
-    await world.pool.execute("update teachers set phone = '998905552222' where id = $1", world.t2)
-    assert (await answer(bot, world, e, phone="998905552222", lesson=lesson)).status_code == 403
-    # a teacher whose number was typed into the join flow may answer
-    assert (await answer(bot, world, e, phone=TEACHER_PHONE, verified=False, lesson=lesson)).status_code == 200
+    # nobody the CRM knows: a student, a stranger, a Telegram admin of the chat with no place in the CRM
+    assert (await answer(bot, world, e, who=OTHER_TG, lesson=lesson)).status_code == 403
+    assert (await answer(bot, world, e, who=1, lesson=lesson)).status_code == 403
+    # the group's teacher, the owner (the bot says so), the admin of this group's branch
+    assert (await answer(bot, world, e, who=TEACHER_TG, lesson=lesson)).status_code == 200
+    assert (await answer(bot, world, e, who=OTHER_TG, owner=True, lesson=lesson)).status_code == 200
+    assert (await answer(bot, world, e, who=ADMIN_TG, lesson=lesson)).status_code == 200
+    # an admin of another branch, another group's teacher
+    await world.pool.execute("insert into staff_telegram (user_id, telegram_user_id) values ($1, 701)", world.admin2_id)
+    await world.pool.execute("update teachers set telegram_user_id = 702 where id = $1", world.t2)
+    assert (await answer(bot, world, e, who=701, lesson=lesson)).status_code == 403
+    assert (await answer(bot, world, e, who=702, lesson=lesson)).status_code == 403
+
+
+async def test_the_owner_is_a_claim_only_the_bot_can_make_and_anyone_else_is_still_checked(world, bot):
+    await connect(bot, world)
+    await run_job(world, ending_soon())
+    (round_,) = await pending(bot)
+    e, lesson = round_["question"]["enrollment_id"], round_["lesson_id"]
+    ok = await answer(bot, world, e, who=OTHER_TG, owner=True, lesson=lesson)
+    assert ok.status_code == 200
+    assert await world.pool.fetchval("select answered_by from lesson_feedback where enrollment_id = $1", e) == "Telegram Name"
+
+
+async def test_an_inactive_teacher_or_a_substitute_teacher(world, bot):
+    await connect(bot, world)
+    await run_job(world, ending_soon())
+    (round_,) = await pending(bot)
+    e, lesson = round_["question"]["enrollment_id"], round_["lesson_id"]
+    await world.pool.execute("update teachers set is_active = false where id = $1", world.t1)
+    assert (await answer(bot, world, e, lesson=lesson)).status_code == 403
+    await world.pool.execute("update teachers set is_active = true where id = $1", world.t1)
+    # a substitute who teaches this one lesson may answer for it
+    await world.pool.execute("update teachers set telegram_user_id = 703 where id = $1", world.t2)
+    assert (await answer(bot, world, e, who=703, lesson=lesson)).status_code == 403
+    await world.pool.execute("update lessons set teacher_id = $2 where id = $1", lesson, world.t2)
+    assert (await answer(bot, world, e, who=703, lesson=lesson)).status_code == 200
 
 
 async def test_an_answer_for_another_chat_or_another_groups_student_is_refused(world, bot):
@@ -302,7 +343,7 @@ async def test_an_answer_for_another_chat_or_another_groups_student_is_refused(w
 
 async def test_the_new_routes_need_the_bot_key(world, bot):
     anonymous = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
-    for method, path in (("GET", "/bot/feedback/pending"), ("GET", "/bot/group-chat/1"), ("GET", "/bot/connectable?phone=1")):
+    for method, path in (("GET", "/bot/feedback/pending"), ("GET", "/bot/group-chat/1"), ("GET", "/bot/group-outbox")):
         assert (await anonymous.request(method, path)).status_code == 401
     assert (await anonymous.post("/bot/connect", json={})).status_code == 401
 
@@ -461,3 +502,84 @@ async def test_a_week_without_homework_answers_has_no_homework_line(world, bot):
     (weekly,) = [r for r in await world.pool.fetch("select * from telegram_outbox where kind = 'weekly'")]
     data = weekly["payload"] if isinstance(weekly["payload"], dict) else json.loads(weekly["payload"])
     assert "homework_total" not in data
+
+
+# --- one general reminder for the whole group ------------------------------------------------------------------------
+
+
+async def due_in(world, student, group, days):
+    await world.pool.execute(
+        "update charges set period_start = $1, due_date = $1, period_end = $1::date + 30 where enrollment_id = $2",
+        date.today() + timedelta(days=days), await world.enrollment(student, group),
+    )
+
+
+async def outbox_rows(world):
+    return await world.pool.fetch("select * from telegram_group_outbox order by id")
+
+
+async def test_a_payment_due_tomorrow_gets_one_general_reminder_in_the_group_without_names_or_amounts(world, bot):
+    await connect(bot, world)
+    await due_in(world, world.s1, world.g1, 1)
+    await run_job(world, datetime.combine(date.today(), time(10), tzinfo=TZ))
+    (row,) = await outbox_rows(world)
+    assert row["kind"] == "payment_soon" and row["chat_id"] == CHAT
+    data = json.loads(row["payload"]) if isinstance(row["payload"], str) else row["payload"]
+    assert data == {"group_name": "Beginner A", "when": "tomorrow", "due_date": str(date.today() + timedelta(days=1))}
+    assert "Botir" not in str(data) and "300000" not in str(data)
+    # told once, however often the job runs
+    await run_job(world, datetime.combine(date.today(), time(10, 30), tzinfo=TZ))
+    assert len(await outbox_rows(world)) == 1
+    # and again on the day itself
+    await due_in(world, world.s1, world.g1, 0)
+    await run_job(world, datetime.combine(date.today(), time(11), tzinfo=TZ))
+    assert [json.loads(r["payload"])["when"] if isinstance(r["payload"], str) else r["payload"]["when"] for r in await outbox_rows(world)] == ["tomorrow", "today"]
+
+
+async def test_students_told_privately_do_not_make_the_group_reminder(world, bot):
+    await connect(bot, world)
+    await due_in(world, world.s1, world.g1, 1)
+    await bot.post("/bot/link", json={"chat_id": 555, "phone": "998901110001"})
+    await run_job(world, datetime.combine(date.today(), time(10), tzinfo=TZ))
+    assert await outbox_rows(world) == []
+    # one more student in the group who has not started the bot: now the group is reminded
+    await due_in(world, world.s1b, world.g1, 1)
+    await run_job(world, datetime.combine(date.today(), time(10, 5), tzinfo=TZ))
+    assert len(await outbox_rows(world)) == 1
+
+
+async def test_no_reminder_for_a_paid_charge_an_unconnected_group_or_at_night(world, bot):
+    await due_in(world, world.s1, world.g1, 1)
+    await run_job(world, datetime.combine(date.today(), time(10), tzinfo=TZ))
+    assert await outbox_rows(world) == []  # not connected
+    await connect(bot, world)
+    await run_job(world, datetime.combine(date.today(), time(23), tzinfo=TZ))
+    assert await outbox_rows(world) == []  # night
+    await due_in(world, world.s1, world.g1, 5)
+    await run_job(world, datetime.combine(date.today(), time(10), tzinfo=TZ))
+    assert await outbox_rows(world) == []  # not due yet
+
+
+async def test_the_bot_fetches_group_messages_and_reports_them(world, bot):
+    await connect(bot, world)
+    await due_in(world, world.s1, world.g1, 1)
+    await run_job(world, datetime.combine(date.today(), time(10), tzinfo=TZ))
+    (item,) = (await bot.get("/bot/group-outbox")).json()
+    assert item["kind"] == "payment_soon" and item["chat_id"] == CHAT and item["payload"]["group_name"] == "Beginner A"
+    # a failure is tried again, three times in all
+    for attempt in (1, 2):
+        await bot.post(f"/bot/group-outbox/{item['id']}/result", json={"status": "failed", "error": "boom"})
+        assert len((await bot.get("/bot/group-outbox")).json()) == 1, attempt
+    await bot.post(f"/bot/group-outbox/{item['id']}/result", json={"status": "failed", "error": "boom"})
+    assert (await bot.get("/bot/group-outbox")).json() == []
+    assert (await outbox_rows(world))[0]["status"] == "failed"
+    assert (await bot.post("/bot/group-outbox/9999/result", json={"status": "sent"})).status_code == 404
+
+
+async def test_a_sent_group_message_is_not_offered_again(world, bot):
+    await connect(bot, world)
+    await due_in(world, world.s1, world.g1, 1)
+    await run_job(world, datetime.combine(date.today(), time(10), tzinfo=TZ))
+    (item,) = (await bot.get("/bot/group-outbox")).json()
+    assert (await bot.post(f"/bot/group-outbox/{item['id']}/result", json={"status": "sent"})).status_code == 204
+    assert (await bot.get("/bot/group-outbox")).json() == []

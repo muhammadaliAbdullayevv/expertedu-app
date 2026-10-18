@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from .. import clock, db, schedule
@@ -185,17 +186,21 @@ async def create_teacher(
     async with db.pool().acquire() as conn:
         async with conn.transaction():
             await _refuse_twin(conn, name=name, phone=phone, branch_id=branch_id)
-            row = await conn.fetchrow(
-                """
-                insert into teachers (full_name, phone, note, created_by)
-                values ($1, $2, $3, $4)
-                returning id
-                """,
-                name,
-                _clean_phone(payload.phone),
-                payload.note,
-                user.id,
-            )
+            try:
+                row = await conn.fetchrow(
+                    """
+                    insert into teachers (full_name, phone, note, created_by, telegram_user_id)
+                    values ($1, $2, $3, $4, $5)
+                    returning id
+                    """,
+                    name,
+                    _clean_phone(payload.phone),
+                    payload.note,
+                    user.id,
+                    payload.telegram_user_id,
+                )
+            except asyncpg.UniqueViolationError:
+                raise HTTPException(status.HTTP_409_CONFLICT, "Bu Telegram ID boshqa o'qituvchiga biriktirilgan.")
             await link_teacher(conn, row["id"], branch_id)
             return await _teacher(conn, scope, row["id"])
 
@@ -253,7 +258,10 @@ async def update_teacher(teacher_id: int, payload: UpdateTeacherRequest, scope: 
     fields = list(updates.keys())
     values = list(updates.values())
     set_clause = ", ".join(f"{field} = ${i + 2}" for i, field in enumerate(fields))
-    await db.pool().execute(f"update teachers set {set_clause} where id = $1", teacher_id, *values)
+    try:
+        await db.pool().execute(f"update teachers set {set_clause} where id = $1", teacher_id, *values)
+    except asyncpg.UniqueViolationError:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Bu Telegram ID boshqa o'qituvchiga biriktirilgan.")
     return await _teacher(db.pool(), scope, teacher_id)
 
 

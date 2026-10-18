@@ -1,16 +1,18 @@
 """The Telegram bot in a course's group chat (see routes/bot.py for the bot's key and the
 rest of its door):
 
-  - a group chat is connected to its CRM group by the teacher / an admin / the owner;
-  - a person who joined the chat proves who they are in a private chat -- their
-    Telegram contact, or, when their Telegram number differs from the one they
-    registered with, the registered number typed in (accepted only for someone who is
-    in *this* group, so it cannot be used to claim anybody else);
-  - a few minutes before each lesson ends the bot asks the teacher, student by student,
-    how well they prepared (lesson_feedback), which the student's profile shows.
+  - a chat is connected to its CRM group by a one-time code the group's page hands out
+    (`/connect CODE` in the chat, or the add-the-bot link that carries it);
+  - who may answer the bot's questions is decided by Telegram user ids held in the CRM:
+    the group's teacher (teachers.telegram_user_id), admins (staff_telegram -- an admin only
+    in their own branch), and the owner (the bot says so for the ids in its OWNER_IDS);
+  - a few minutes before each lesson ends the bot asks the teacher, student by student, how well
+    they prepared (lesson_feedback), which the student's profile shows;
+  - messages for a whole group (no names, no amounts) wait in telegram_group_outbox.
 """
 
-from datetime import datetime, timedelta
+import json
+from datetime import date, datetime, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -37,43 +39,51 @@ REMIND_UNTIL = timedelta(hours=24)
 
 
 class _Actor:
-    """What the CRM knows about a phone number: staff by login number (only when
-    Telegram verified the number), a teacher by the number on their record."""
+    """A Telegram user as the CRM knows them: a teacher (by teachers.telegram_user_id), staff
+    (staff_telegram) or the owner (the bot vouches for the ids in its OWNER_IDS)."""
 
-    def __init__(self, user, teacher):
-        self.user = user
+    def __init__(self, *, is_owner: bool, teacher, staff, fallback_name: str | None = None):
+        self.is_owner = is_owner
         self.teacher = teacher
+        self.staff = staff
+        self._fallback_name = fallback_name
 
     @staticmethod
-    async def of(conn, phone: str | None, verified: bool) -> "_Actor":
-        number = normalize(phone or "")
-        user = None
-        if verified and number:
-            user = await conn.fetchrow(
-                "select u.id, u.role, u.full_name, ub.branch_id from users u "
-                "left join user_branches ub on ub.user_id = u.id where u.phone = $1 and u.is_active",
-                number,
-            )
-        teacher = (
-            await conn.fetchrow("select id, full_name from teachers where phone = $1 and is_active", number)
-            if number
-            else None
+    async def of(conn, telegram_user_id: int, *, is_owner: bool = False, name: str | None = None) -> "_Actor":
+        teacher = await conn.fetchrow(
+            "select id, full_name from teachers where telegram_user_id = $1 and is_active", telegram_user_id
         )
-        return _Actor(user, teacher)
+        staff = await conn.fetchrow(
+            """
+            select u.id, u.role, u.full_name, ub.branch_id
+            from staff_telegram st
+            join users u on u.id = st.user_id and u.is_active
+            left join user_branches ub on ub.user_id = u.id
+            where st.telegram_user_id = $1
+            """,
+            telegram_user_id,
+        )
+        return _Actor(is_owner=is_owner, teacher=teacher, staff=staff, fallback_name=name)
 
     @property
     def name(self) -> str | None:
-        if self.user:
-            return self.user["full_name"]
-        return self.teacher["full_name"] if self.teacher else None
+        if self.staff:
+            return self.staff["full_name"]
+        if self.teacher:
+            return self.teacher["full_name"]
+        return self._fallback_name if self.is_owner else None
 
-    def may_manage(self, group) -> bool:
-        """The owner, the admin of the group's branch, the group's own teacher."""
-        if self.user and (
-            self.user["role"] == "owner" or (self.user["role"] == "admin" and self.user["branch_id"] == group["branch_id"])
+    def may_manage(self, group, *, teacher_ids: tuple[int | None, ...] = ()) -> bool:
+        """The owner anywhere; an admin in their own branch; the group's teacher (or the lesson's)."""
+        if self.is_owner:
+            return True
+        if self.staff and (
+            self.staff["role"] == "owner" or (self.staff["role"] == "admin" and self.staff["branch_id"] == group["branch_id"])
         ):
             return True
-        return self.teacher is not None and group["teacher_id"] == self.teacher["id"]
+        if self.teacher is not None:
+            return self.teacher["id"] in {group["teacher_id"], *teacher_ids} - {None}
+        return False
 
 
 _GROUP_SQL = """
@@ -98,144 +108,101 @@ class GroupChat(BaseModel):
     teacher_name: str | None = None
 
 
-@router.get("/group-chat/{chat_id}", response_model=GroupChat)
-async def group_chat(chat_id: int):
-    row = await db.pool().fetchrow(
-        _GROUP_SQL + " join telegram_groups tg on tg.group_id = g.id where tg.chat_id = $1", chat_id
-    )
-    if row is None:
-        return GroupChat(connected=False)
+def _chat(row) -> GroupChat:
     return GroupChat(
         connected=True, group_id=row["group_id"], group_name=row["name"], subject_name=row["subject_name"],
         branch_name=row["branch_name"], teacher_name=row["teacher_name"],
     )
 
 
-class ConnectableGroup(BaseModel):
-    group_id: int
-    name: str
-    subject_name: str
-    branch_name: str
-
-
-@router.get("/connectable", response_model=list[ConnectableGroup])
-async def connectable(phone: str = Query(...), verified: bool = Query(True)):
-    """The CRM groups this person may connect a chat to: all of them for the owner, those of
-    their branch for an admin, their own for a teacher."""
-    async with db.pool().acquire() as conn:
-        actor = await _Actor.of(conn, phone, verified)
-        rows = await conn.fetch(_GROUP_SQL + " where g.is_active order by b.name, s.name, g.name")
-    return [
-        ConnectableGroup(group_id=r["group_id"], name=r["name"], subject_name=r["subject_name"], branch_name=r["branch_name"])
-        for r in rows
-        if actor.may_manage(r)
-    ]
+@router.get("/group-chat/{chat_id}", response_model=GroupChat)
+async def group_chat(chat_id: int):
+    row = await db.pool().fetchrow(
+        _GROUP_SQL + " join telegram_groups tg on tg.group_id = g.id where tg.chat_id = $1", chat_id
+    )
+    return GroupChat(connected=False) if row is None else _chat(row)
 
 
 class ConnectRequest(BaseModel):
     chat_id: int
     title: str | None = None
-    group_id: int
-    phone: str
-    verified: bool = True
+    # The one-time code from the group's page in the CRM.
+    code: str
 
 
 @router.post("/connect", response_model=GroupChat)
 async def connect(payload: ConnectRequest):
+    """Ties the chat to the group whose page issued [code]. A code works once and only for a day; a
+    wrong, used or old one is just refused. One chat per group, one group per chat: connecting again moves it."""
+    code = payload.code.strip().upper()
     async with db.pool().acquire() as conn:
         async with conn.transaction():
-            actor = await _Actor.of(conn, payload.phone, payload.verified)
-            group = await conn.fetchrow(_GROUP_SQL + " where g.id = $1 and g.is_active", payload.group_id)
+            row = await conn.fetchrow(
+                """
+                select c.group_id, u.full_name as made_by from telegram_connect_codes c
+                left join users u on u.id = c.created_by
+                where c.code = $1 and c.used_at is null and c.expires_at > now() for update of c
+                """,
+                code,
+            )
+            if row is None:
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Kod noto'g'ri yoki eskirgan.")
+            group = await conn.fetchrow(_GROUP_SQL + " where g.id = $1 and g.is_active", row["group_id"])
             if group is None:
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
-            if not actor.may_manage(group):
-                raise HTTPException(status.HTTP_403_FORBIDDEN, "Bu guruhni ulashga ruxsatingiz yo'q.")
-            # One chat per group, one group per chat: connecting again moves it.
-            await conn.execute("delete from telegram_groups where chat_id = $1 or group_id = $2", payload.chat_id, payload.group_id)
+            await conn.execute("delete from telegram_groups where chat_id = $1 or group_id = $2", payload.chat_id, group["group_id"])
             await conn.execute(
                 "insert into telegram_groups (chat_id, group_id, title, connected_by) values ($1, $2, $3, $4)",
-                payload.chat_id, payload.group_id, payload.title, actor.name,
+                payload.chat_id, group["group_id"], payload.title, row["made_by"],
             )
-    return GroupChat(
-        connected=True, group_id=group["group_id"], group_name=group["name"], subject_name=group["subject_name"],
-        branch_name=group["branch_name"], teacher_name=group["teacher_name"],
-    )
+            await conn.execute("update telegram_connect_codes set used_at = now() where code = $1", code)
+    return _chat(group)
 
 
-@router.delete("/connect", status_code=status.HTTP_204_NO_CONTENT)
-async def disconnect(chat_id: int = Query(...), phone: str = Query(...), verified: bool = Query(True)):
-    async with db.pool().acquire() as conn:
-        actor = await _Actor.of(conn, phone, verified)
-        group = await conn.fetchrow(
-            _GROUP_SQL + " join telegram_groups tg on tg.group_id = g.id where tg.chat_id = $1", chat_id
-        )
-        if group is None:
-            return
-        if not actor.may_manage(group):
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Bu guruhni uzishga ruxsatingiz yo'q.")
-        await conn.execute("delete from telegram_groups where chat_id = $1", chat_id)
+# --- a Telegram account's place in the CRM -----------------------------------------------------------------------
 
 
-# --- who is this person in the group? --------------------------------------------------------------------------
-
-
-class GroupLinkRequest(BaseModel):
-    # The person's private chat with the bot, the group chat they joined, and the
-    # number they typed (the one they registered with at the center).
-    chat_id: int
-    group_chat_id: int
+class RegisterIdRequest(BaseModel):
+    telegram_user_id: int
+    # The number Telegram verified for this account (they shared their own contact).
     phone: str
-    language: Literal["uz", "en"] = "uz"
 
 
-class GroupLinkResult(BaseModel):
-    # 'student' (linked now) | 'teacher' (this group's teacher) | 'none'
-    status: Literal["student", "teacher", "none"]
+class RegisteredId(BaseModel):
+    role: Literal["owner", "admin", "teacher"] | None = None
     name: str | None = None
 
 
-@router.post("/link-in-group", response_model=GroupLinkResult)
-async def link_in_group(payload: GroupLinkRequest):
-    """The registered number someone typed, accepted only if it belongs to a current student
-    of the CRM group this chat is connected to (or to that group's teacher). Nothing else is
-    revealed: anything else is just 'none'."""
+@router.post("/telegram-id", response_model=RegisteredId)
+async def register_telegram_id(payload: RegisterIdRequest):
+    """Fills in the Telegram id of the teacher or staff member whose number this is, so nobody has to
+    look the id up: Telegram itself vouches that the account has the number."""
     number = normalize(payload.phone)
+    found = RegisteredId()
     async with db.pool().acquire() as conn:
         async with conn.transaction():
-            group = await conn.fetchrow(
-                "select g.id, g.teacher_id from groups g join telegram_groups tg on tg.group_id = g.id where tg.chat_id = $1",
-                payload.group_chat_id,
-            )
-            if group is None:
-                return GroupLinkResult(status="none")
-            teacher = await conn.fetchrow(
-                "select id, full_name from teachers where phone = $1 and is_active and id = $2", number, group["teacher_id"]
-            )
-            if teacher is not None:
-                return GroupLinkResult(status="teacher", name=teacher["full_name"])
-            student = await conn.fetchrow(
-                """
-                select s.id, s.full_name from students s
-                join enrollments e on e.student_id = s.id and e.group_id = $2 and e.status = 'active'
-                where s.phone = $1 limit 1
-                """,
-                number,
-                group["id"],
-            )
-            if student is None:
-                return GroupLinkResult(status="none")
+            # One account is one person: it leaves anybody else it was filed under.
             await conn.execute(
-                """
-                insert into telegram_links (chat_id, student_id, phone, language, method)
-                values ($1, $2, $3, $4, 'group')
-                on conflict (chat_id) do update
-                  set student_id = excluded.student_id, phone = excluded.phone, language = excluded.language,
-                      stopped = false, method = 'group'
-                """,
-                payload.chat_id, student["id"], number, payload.language,
+                "update teachers set telegram_user_id = null where telegram_user_id = $1 and phone is distinct from $2",
+                payload.telegram_user_id, number,
             )
-            await conn.execute("delete from telegram_pending where chat_id = $1", payload.chat_id)
-    return GroupLinkResult(status="student", name=student["full_name"])
+            await conn.execute(
+                "delete from staff_telegram where telegram_user_id = $1 and user_id not in (select id from users where phone = $2)",
+                payload.telegram_user_id, number,
+            )
+            teacher = await conn.fetchrow("select id, full_name from teachers where phone = $1 and is_active", number)
+            if teacher is not None:
+                await conn.execute("update teachers set telegram_user_id = null where telegram_user_id = $1", payload.telegram_user_id)
+                await conn.execute("update teachers set telegram_user_id = $2 where id = $1", teacher["id"], payload.telegram_user_id)
+                found = RegisteredId(role="teacher", name=teacher["full_name"])
+            user = await conn.fetchrow("select id, role, full_name from users where phone = $1 and is_active", number)
+            if user is not None:
+                await conn.execute("delete from staff_telegram where telegram_user_id = $1 or user_id = $2", payload.telegram_user_id, user["id"])
+                await conn.execute(
+                    "insert into staff_telegram (user_id, telegram_user_id) values ($1, $2)", user["id"], payload.telegram_user_id
+                )
+                found = RegisteredId(role=user["role"], name=user["full_name"])
+    return found
 
 
 # --- asking the teacher about the homework -----------------------------------------------------------------
@@ -356,9 +323,11 @@ class FeedbackAnswer(BaseModel):
     lesson_id: int
     enrollment_id: int
     homework: Literal["great", "good", "weak", "bad", "none", "skipped"]
-    # Who pressed the button (their number as the bot knows it) and whether Telegram verified it.
-    actor_phone: str
-    verified: bool = True
+    # Who pressed the button: their Telegram user id, whether the bot's own config names them the
+    # owner, and their Telegram name (kept with the answer when the CRM has no name for them).
+    telegram_user_id: int
+    is_owner: bool = False
+    name: str | None = None
 
 
 class FeedbackNext(BaseModel):
@@ -382,8 +351,9 @@ async def feedback_answer(payload: FeedbackAnswer):
             group = await conn.fetchrow(
                 _GROUP_SQL + " join lessons l on l.group_id = g.id where l.id = $1", payload.lesson_id
             )
-            actor = await _Actor.of(conn, payload.actor_phone, payload.verified)
-            if not actor.may_manage(group):
+            actor = await _Actor.of(conn, payload.telegram_user_id, is_owner=payload.is_owner, name=payload.name)
+            lesson_teacher = await conn.fetchval("select teacher_id from lessons where id = $1", payload.lesson_id)
+            if not actor.may_manage(group, teacher_ids=(lesson_teacher,)):
                 raise HTTPException(status.HTTP_403_FORBIDDEN, "Faqat o'qituvchi yoki administrator javob bera oladi.")
             lesson = await conn.fetchrow("select group_id, starts_at from lessons where id = $1", payload.lesson_id)
             roster = await schedule.roster(conn, lesson["group_id"], _local_day(lesson["starts_at"]))
@@ -396,7 +366,7 @@ async def feedback_answer(payload: FeedbackAnswer):
                 on conflict (lesson_id, enrollment_id) do update
                   set homework = excluded.homework, answered_by = excluded.answered_by, answered_at = now()
                 """,
-                payload.lesson_id, payload.enrollment_id, payload.homework, actor.name,
+                payload.lesson_id, payload.enrollment_id, payload.homework, actor.name or payload.name,
             )
             question, answered, total = await next_question(conn, payload.lesson_id)
             if question is None:
@@ -446,3 +416,86 @@ async def feedback_reminders(limit: int = Query(10, ge=1, le=50)):
 @router.post("/feedback/{lesson_id}/reminded", status_code=status.HTTP_204_NO_CONTENT)
 async def feedback_reminded(lesson_id: int):
     await db.pool().execute("update telegram_prompts set reminded_at = now() where lesson_id = $1", lesson_id)
+
+
+# --- messages for a whole group --------------------------------------------------------------------------------
+
+
+async def queue_payment_soon(conn, today: date) -> int:
+    """For each connected group with a payment due tomorrow or today: one general reminder in the chat
+    -- no names, no amounts -- when at least one of those students has no private Telegram link (the
+    others are told privately). Safe to repeat."""
+    made = 0
+    for when, day in (("tomorrow", today + timedelta(days=1)), ("today", today)):
+        rows = await conn.fetch(
+            """
+            select tg.chat_id, g.name as group_name
+            from telegram_groups tg
+            join groups g on g.id = tg.group_id
+            where exists (
+              select 1 from charge_balances cb
+              join enrollments e on e.id = cb.enrollment_id and e.status = 'active'
+              where e.group_id = g.id and cb.status = 'active' and cb.owed > 0 and cb.due_date = $1
+                and not exists (select 1 from telegram_links tl where tl.student_id = e.student_id and not tl.stopped)
+            )
+            """,
+            day,
+        )
+        for r in rows:
+            made += int(
+                await conn.fetchval(
+                    "insert into telegram_group_outbox (chat_id, kind, payload, dedupe_key) values ($1, 'payment_soon', $2::jsonb, $3) "
+                    "on conflict (dedupe_key) do nothing returning 1",
+                    r["chat_id"], json.dumps({"group_name": r["group_name"], "when": when, "due_date": str(day)}),
+                    f"gpay:{r['chat_id']}:{day}:{when}",
+                )
+                or 0
+            )
+    return made
+
+
+class GroupOutboxItem(BaseModel):
+    id: int
+    chat_id: int
+    kind: str
+    payload: dict
+
+
+@router.get("/group-outbox", response_model=list[GroupOutboxItem])
+async def group_outbox(limit: int = Query(30, ge=1, le=100)):
+    rows = await db.pool().fetch(
+        "select id, chat_id, kind, payload from telegram_group_outbox where status = 'pending' order by id limit $1", limit
+    )
+    return [
+        GroupOutboxItem(
+            id=r["id"], chat_id=r["chat_id"], kind=r["kind"],
+            payload=json.loads(r["payload"]) if isinstance(r["payload"], str) else r["payload"],
+        )
+        for r in rows
+    ]
+
+
+class GroupOutboxResult(BaseModel):
+    status: Literal["sent", "failed"]
+    error: str | None = None
+
+
+@router.post("/group-outbox/{item_id}/result", status_code=status.HTTP_204_NO_CONTENT)
+async def group_outbox_result(item_id: int, payload: GroupOutboxResult):
+    """'sent', or 'failed' (tried again, three times in all, then given up)."""
+    async with db.pool().acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow("select attempts from telegram_group_outbox where id = $1 for update", item_id)
+            if row is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Xabar topilmadi.")
+            if payload.status == "sent":
+                await conn.execute(
+                    "update telegram_group_outbox set status = 'sent', sent_at = now(), error = null, attempts = attempts + 1 where id = $1",
+                    item_id,
+                )
+            else:
+                attempts = row["attempts"] + 1
+                await conn.execute(
+                    "update telegram_group_outbox set status = $2, attempts = $3, error = $4 where id = $1",
+                    item_id, "failed" if attempts >= 3 else "pending", attempts, payload.error,
+                )

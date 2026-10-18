@@ -148,6 +148,8 @@ class CreateTeacherRequest(BaseModel):
     full_name: str
     phone: str | None = None
     note: str | None = None
+    # Their Telegram user id (the bot trusts it to know who the teacher is); /myid in the bot shows it.
+    telegram_user_id: int | None = None
 
 
 class UpdateTeacherRequest(BaseModel):
@@ -155,6 +157,7 @@ class UpdateTeacherRequest(BaseModel):
     phone: str | None = None
     note: str | None = None
     is_active: bool | None = None
+    telegram_user_id: int | None = None
 
 
 class SetTeacherBranchesRequest(BaseModel):
@@ -191,6 +194,7 @@ class Teacher(BaseModel):
     created_at: datetime
     # Stored name of the profile photo (fetch it from /photos/file/{name}); null = none.
     photo: str | None = None
+    telegram_user_id: int | None = None
     # The branches they work in (within the scope of the request).
     branch_ids: list[int] = []
     branch_names: list[str] = []
@@ -984,12 +988,15 @@ class StaffMember(BaseModel):
     # The branch an admin works in (the owner has none).
     branch_id: int | None = None
     branch_name: str | None = None
+    # Their Telegram user id: lets the bot know them in the groups.
+    telegram_user_id: int | None = None
 
 
 class CreateStaffRequest(BaseModel):
     phone: str
     full_name: str
     password: str
+    telegram_user_id: int | None = None
     # Which branch the admin works in; Bosh ofis when not given.
     branch_id: int | None = None
 
@@ -1000,6 +1007,8 @@ class UpdateStaffRequest(BaseModel):
     phone: str | None = None
     is_active: bool | None = None
     branch_id: int | None = None
+    # Set or (null) clear; leave out to keep.
+    telegram_user_id: int | None = None
 
 
 class ResetPasswordRequest(BaseModel):

@@ -821,3 +821,35 @@ create index if not exists idx_lesson_feedback_enrollment on lesson_feedback (en
 
 -- ---- 0026: reminding the teacher about unanswered homework questions ----
 alter table telegram_prompts add column if not exists reminded_at timestamptz;
+
+-- ---- 0027: Telegram ids and connect codes ----
+alter table teachers add column if not exists telegram_user_id bigint unique;
+
+create table if not exists staff_telegram (
+  user_id bigint primary key references users(id),
+  telegram_user_id bigint not null unique
+);
+
+create table if not exists telegram_connect_codes (
+  code text primary key,
+  group_id bigint not null references groups(id) on delete cascade,
+  created_by bigint references users(id),
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  used_at timestamptz
+);
+create index if not exists idx_telegram_connect_codes_group on telegram_connect_codes (group_id);
+
+create table if not exists telegram_group_outbox (
+  id bigserial primary key,
+  chat_id bigint not null,
+  kind text not null check (kind in ('payment_soon')),
+  payload jsonb not null default '{}',
+  dedupe_key text not null unique,
+  status text not null default 'pending' check (status in ('pending', 'sent', 'failed')),
+  attempts int not null default 0,
+  error text,
+  created_at timestamptz not null default now(),
+  sent_at timestamptz
+);
+create index if not exists idx_telegram_group_outbox_pending on telegram_group_outbox (id) where status = 'pending';
