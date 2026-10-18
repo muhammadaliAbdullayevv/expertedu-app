@@ -53,10 +53,13 @@ async def _queue(conn, rows: list[tuple]) -> int:
 async def generate(conn, now: datetime) -> int:
     """Queues what is due as of [now] (timezone-aware); returns how many messages."""
     local = now.astimezone(ZoneInfo(settings.center_timezone))
+    from ..routes import bot_groups
+
+    # The teacher's homework question belongs to the lesson's hour, whatever the hour is.
+    made = await bot_groups.queue_prompts(conn, now)
     if not _FIRST_HOUR <= local.hour < _LAST_HOUR:
-        return 0
+        return made
     today = local.date()
-    made = 0
 
     made += await _welcome(conn)
 

@@ -786,3 +786,35 @@ create table if not exists telegram_pending (
   created_at timestamptz not null default now()
 );
 create index if not exists idx_telegram_pending_phone on telegram_pending (phone);
+
+-- ---- 0025: Telegram groups and homework feedback ----
+alter table telegram_links add column if not exists method text not null default 'contact'
+  check (method in ('contact', 'group'));
+
+create table if not exists telegram_groups (
+  chat_id bigint primary key,
+  group_id bigint not null unique references groups(id),
+  title text,
+  connected_by text,
+  connected_at timestamptz not null default now()
+);
+
+create table if not exists telegram_prompts (
+  lesson_id bigint primary key references lessons(id) on delete cascade,
+  chat_id bigint not null,
+  status text not null default 'pending' check (status in ('pending', 'asked', 'done')),
+  message_id bigint,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_telegram_prompts_pending on telegram_prompts (created_at) where status = 'pending';
+
+create table if not exists lesson_feedback (
+  id bigserial primary key,
+  lesson_id bigint not null references lessons(id) on delete cascade,
+  enrollment_id bigint not null references enrollments(id),
+  homework text not null check (homework in ('great', 'good', 'weak', 'bad', 'none', 'skipped')),
+  answered_by text,
+  answered_at timestamptz not null default now(),
+  constraint uq_lesson_feedback unique (lesson_id, enrollment_id)
+);
+create index if not exists idx_lesson_feedback_enrollment on lesson_feedback (enrollment_id);
