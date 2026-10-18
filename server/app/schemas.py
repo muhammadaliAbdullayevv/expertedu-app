@@ -1352,6 +1352,29 @@ class ProfileAttendance(BaseModel):
     recent: list[str] = []
 
 
+class ProfileHomework(BaseModel):
+    """How well the student prepared for lessons, as the teacher answered the bot's
+    question (lesson_feedback). Skipped answers are not counted."""
+
+    great: int = 0
+    good: int = 0
+    weak: int = 0
+    bad: int = 0
+    none: int = 0
+    total: int = 0
+    # 0 (no homework at all) .. 4 (great), averaged over the answers; null until there is one.
+    score: float | None = None
+    # The last ten answers as ratings, oldest first -- the little chart.
+    recent: list[str] = []
+
+
+class ProfileHomeworkEntry(BaseModel):
+    at: datetime
+    group_id: int | None = None
+    group_name: str
+    homework: str
+
+
 class ProfileMark(BaseModel):
     at: datetime
     group_id: int | None = None
@@ -1377,6 +1400,7 @@ class ProfileGroup(BaseModel):
     debt_since: date | None = None
     schedule: list["ScheduleSlot"] = []
     attendance: ProfileAttendance
+    homework: ProfileHomework = ProfileHomework()
 
 
 class ProfilePayment(BaseModel):
@@ -1404,6 +1428,9 @@ class StudentProfile(BaseModel):
     paid_total: int
     groups: list[ProfileGroup]
     attendance: ProfileAttendance
+    homework: ProfileHomework = ProfileHomework()
+    # The last thirty homework answers, newest first -- the Uy vazifasi tab.
+    homework_marks: list["ProfileHomeworkEntry"] = []
     payments: list[ProfilePayment]
     # How long the oldest unpaid charge has been due (null = nothing overdue).
     debt_since: date | None = None

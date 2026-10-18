@@ -305,3 +305,42 @@ async def test_the_new_routes_need_the_bot_key(world, bot):
     for method, path in (("GET", "/bot/feedback/pending"), ("GET", "/bot/group-chat/1"), ("GET", "/bot/connectable?phone=1")):
         assert (await anonymous.request(method, path)).status_code == 401
     assert (await anonymous.post("/bot/connect", json={})).status_code == 401
+
+
+# --- the student's profile shows it ---------------------------------------------------------------------------------
+
+
+async def test_the_profile_shows_how_the_homework_goes(world, bot):
+    await connect(bot, world)
+    await run_job(world, ending_soon())
+    (round_,) = await pending(bot)
+    lesson = round_["lesson_id"]
+    aziza = round_["question"]["enrollment_id"]
+    botir = (await answer(bot, world, aziza, "great", lesson=lesson)).json()["question"]["enrollment_id"]
+    await answer(bot, world, botir, "weak", lesson=lesson)
+
+    profile = (await world.a1.get(f"/students/{world.s1}/profile")).json()
+    assert profile["homework"] == {"great": 0, "good": 0, "weak": 1, "bad": 0, "none": 0, "total": 1, "score": 2.0, "recent": ["weak"]}
+    assert [(h["group_name"], h["homework"]) for h in profile["homework_marks"]] == [("Beginner A", "weak")]
+    assert profile["groups"][0]["homework"]["total"] == 1
+    other = (await world.a1.get(f"/students/{world.s1b}/profile")).json()
+    assert other["homework"]["great"] == 1 and other["homework"]["score"] == 4.0
+
+
+async def test_skipped_answers_are_not_counted_and_a_fresh_profile_is_empty(world, bot):
+    await connect(bot, world)
+    await run_job(world, ending_soon())
+    (round_,) = await pending(bot)
+    await answer(bot, world, round_["question"]["enrollment_id"], "skipped", lesson=round_["lesson_id"])
+    profile = (await world.a1.get(f"/students/{world.s1b}/profile")).json()
+    assert profile["homework"]["total"] == 0 and profile["homework"]["score"] is None and profile["homework_marks"] == []
+    empty = (await world.a1.get(f"/students/{world.s1}/profile")).json()
+    assert empty["homework"] == {"great": 0, "good": 0, "weak": 0, "bad": 0, "none": 0, "total": 0, "score": None, "recent": []}
+
+
+async def test_another_branch_does_not_see_the_homework(world, bot):
+    await connect(bot, world)
+    await run_job(world, ending_soon())
+    (round_,) = await pending(bot)
+    await answer(bot, world, round_["question"]["enrollment_id"], "good", lesson=round_["lesson_id"])
+    assert (await world.a2.get(f"/students/{world.s1b}/profile")).status_code == 404

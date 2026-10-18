@@ -24,6 +24,8 @@ from ..schemas import (
     UnarchiveRequest,
     JoinBranchRequest,
     ProfileAttendance,
+    ProfileHomework,
+    ProfileHomeworkEntry,
     ProfileGroup,
     ProfileMark,
     ProfilePayment,
@@ -417,6 +419,21 @@ async def create_student_with_enrollment(
     )
 
 
+_HOMEWORK_SCORE = {"great": 4, "good": 3, "weak": 2, "bad": 1, "none": 0}
+
+
+def _homework(ratings: list[str]) -> ProfileHomework:
+    """Counts and the average from the answers (oldest first); skipped ones are not answers."""
+    ratings = [r for r in ratings if r in _HOMEWORK_SCORE]
+    counts = {key: ratings.count(key) for key in _HOMEWORK_SCORE}
+    return ProfileHomework(
+        **counts,
+        total=len(ratings),
+        score=round(sum(_HOMEWORK_SCORE[r] for r in ratings) / len(ratings), 2) if ratings else None,
+        recent=ratings[-10:],
+    )
+
+
 def _attendance(marks: list[str]) -> ProfileAttendance:
     """Counts and the rate from a list of marks, oldest first."""
     counts = {key: marks.count(key) for key in ("present", "late", "absent", "excused")}
@@ -487,6 +504,21 @@ async def student_profile(student_id: int, scope: Scope = Depends(get_scope)):
         by_enrollment: dict[int, list[str]] = {}
         for mark in marks:
             by_enrollment.setdefault(mark["enrollment_id"], []).append(mark["status"])
+        homework_rows = await conn.fetch(
+            f"""
+            select f.enrollment_id, f.homework, l.starts_at as at, g.name as group_name, g.id as group_id
+            from lesson_feedback f join lessons l on l.id = f.lesson_id
+            join enrollments e on e.id = f.enrollment_id
+            join groups g on g.id = e.group_id
+            where e.student_id = $1 and f.homework <> 'skipped' and {in_scope}
+            order by l.starts_at, f.id
+            """,
+            student_id,
+            ids,
+        )
+        homework_by_enrollment: dict[int, list[str]] = {}
+        for h in homework_rows:
+            homework_by_enrollment.setdefault(h["enrollment_id"], []).append(h["homework"])
         slots = await schedule.load_slots(conn, group_ids=[e["group_id"] for e in enrollments], active_only=False)
         due = await money.next_due_dates(conn, [e["enrollment_id"] for e in enrollments])
         debt_since = await conn.fetchval(
@@ -591,6 +623,7 @@ async def student_profile(student_id: int, scope: Scope = Depends(get_scope)):
                 if sl.group_id == e["group_id"]
             ],
             attendance=_attendance(by_enrollment.get(e["enrollment_id"], [])),
+            homework=_homework(homework_by_enrollment.get(e["enrollment_id"], [])),
         )
         for e in enrollments
     ]
@@ -601,6 +634,11 @@ async def student_profile(student_id: int, scope: Scope = Depends(get_scope)):
         paid_total=sum(p["amount"] for p in payments if p["status"] == "valid"),
         groups=groups,
         attendance=_attendance([m["status"] for m in marks]),
+        homework=_homework([h["homework"] for h in homework_rows]),
+        homework_marks=[
+            ProfileHomeworkEntry(at=h["at"], group_id=h["group_id"], group_name=h["group_name"], homework=h["homework"])
+            for h in reversed(homework_rows)
+        ][:30],
         payments=[ProfilePayment(**p) for p in payments],
         debt_since=debt_since,
         overdue_days=max((today - debt_since).days, 0) if debt_since else 0,
