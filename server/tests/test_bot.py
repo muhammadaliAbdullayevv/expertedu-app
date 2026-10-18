@@ -204,7 +204,8 @@ async def test_staff_are_told_apart_by_their_number(world, bot):
     who = lambda phone: bot.get("/bot/who", params={"phone": phone})  # noqa: E731
     assert (await who(owner_phone)).json()["role"] == "owner"
     assert (await who(admin_phone)).json()["role"] == "admin"
-    assert (await who("+998 90 555 12 34")).json() == {"role": "teacher", "name": "Madina Karimova", "teacher_id": teacher_id}
+    found = (await who("+998 90 555 12 34")).json()
+    assert (found["role"], found["name"], found["teacher_id"], found["via"]) == ("teacher", "Madina Karimova", teacher_id, "phone")
     assert (await who("+998 90 000 00 00")).json()["role"] is None
     # A student is not staff.
     assert (await who("998901110001")).json()["role"] is None

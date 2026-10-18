@@ -161,21 +161,46 @@ async def test_an_admins_telegram_id_is_set_cleared_and_kept_unique(world):
     assert made.status_code == 201 and made.json()["telegram_user_id"] == 321
 
 
-async def test_sharing_a_verified_number_fills_in_the_telegram_id(world, bot):
+async def test_sharing_a_verified_number_fills_in_an_empty_telegram_id(world, bot):
     async def register(tg, phone):
         r = await bot.post("/bot/telegram-id", json={"telegram_user_id": tg, "phone": phone})
         assert r.status_code == 200, r.text
         return r.json()
 
+    await world.pool.execute("update teachers set telegram_user_id = null where id = $1", world.t1)
+    await world.pool.execute("delete from staff_telegram")
     assert await register(8001, "+998 90 555 11 11") == {"role": "teacher", "name": "Madina"}
     assert await world.pool.fetchval("select telegram_user_id from teachers where id = $1", world.t1) == 8001
-    assert await register(8002, world.admin1_phone) == {"role": "admin", "name": await world.pool.fetchval("select full_name from users where id = $1", world.admin1_id)}
+    assert (await register(8002, world.admin1_phone))["role"] == "admin"
     assert await world.pool.fetchval("select telegram_user_id from staff_telegram where user_id = $1", world.admin1_id) == 8002
     assert (await register(8003, world.owner_phone))["role"] == "owner"
     assert await register(8004, "998900009999") == {"role": None, "name": None}  # nobody
-    # the same account moving to another person takes the id with it
-    assert (await register(8001, world.admin1_phone))["role"] == "admin"
+
+
+async def test_an_id_set_by_hand_is_never_replaced_by_a_shared_number(world, bot):
+    """The CRM is the authority: the teacher's card says 500; sharing the same number from another account changes nothing."""
+    assert await world.pool.fetchval("select telegram_user_id from teachers where id = $1", world.t1) == TEACHER_TG
+    r = await bot.post("/bot/telegram-id", json={"telegram_user_id": 9999, "phone": "998905551111"})
+    assert r.json() == {"role": "teacher", "name": "Madina"}  # still recognised as a person, ...
+    assert await world.pool.fetchval("select telegram_user_id from teachers where id = $1", world.t1) == TEACHER_TG  # ... id untouched
+    await bot.post("/bot/telegram-id", json={"telegram_user_id": 9998, "phone": world.admin1_phone})
+    assert await world.pool.fetchval("select telegram_user_id from staff_telegram where user_id = $1", world.admin1_id) == ADMIN_TG
+
+
+async def test_an_account_already_filed_under_someone_is_not_given_to_another(world, bot):
+    await world.pool.execute("update teachers set telegram_user_id = null where id = $1", world.t1)
+    r = await bot.post("/bot/telegram-id", json={"telegram_user_id": ADMIN_TG, "phone": "998905551111"})  # ADMIN_TG is the admin's
+    assert r.json()["role"] == "teacher"
     assert await world.pool.fetchval("select telegram_user_id from teachers where id = $1", world.t1) is None
+
+
+async def test_the_phone_on_the_teachers_card_does_not_have_to_match_their_telegram_number(world, bot):
+    """Detection in the group is by the id on the card alone: the teacher's Telegram account may have any number."""
+    await connect(bot, world)
+    await run_job(world, ending_soon())
+    (round_,) = await pending(bot)
+    # TEACHER_TG is the id set by hand; the teacher's saved phone is a different number from that account's.
+    assert (await answer(bot, world, round_["question"]["enrollment_id"], lesson=round_["lesson_id"])).status_code == 200
 
 
 # --- who may answer ------------------------------------------------------------------------------------------------
@@ -583,3 +608,79 @@ async def test_a_sent_group_message_is_not_offered_again(world, bot):
     (item,) = (await bot.get("/bot/group-outbox")).json()
     assert (await bot.post(f"/bot/group-outbox/{item['id']}/result", json={"status": "sent"})).status_code == 204
     assert (await bot.get("/bot/group-outbox")).json() == []
+
+
+# --- how a person was recognised: by id first, by the verified number as the second way ------------------------------
+
+
+async def who(bot, **params):
+    r = await bot.get("/bot/who", params=params)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+async def test_a_telegram_id_on_a_card_recognises_the_teacher_whatever_their_number(world, bot):
+    found = await who(bot, telegram_user_id=TEACHER_TG)
+    assert (found["role"], found["name"], found["via"], found["groups"]) == ("teacher", "Madina", "id", ["Beginner A"])
+    assert found["phone_matches"] is None  # no number was given
+    # a number that is not the one on the card: still recognised by the id, and the bot is told the number differs
+    other = await who(bot, telegram_user_id=TEACHER_TG, phone="998909998877")
+    assert (other["via"], other["phone_matches"]) == ("id", False)
+    same = await who(bot, telegram_user_id=TEACHER_TG, phone="+998 90 555 11 11")
+    assert (same["via"], same["phone_matches"]) == ("id", True)
+
+
+async def test_the_id_comes_first_and_the_verified_number_is_the_second_way(world, bot):
+    # an id the CRM does not know: the number decides
+    by_phone = await who(bot, telegram_user_id=424242, phone="998905551111")
+    assert (by_phone["role"], by_phone["via"], by_phone["phone_matches"]) == ("teacher", "phone", None)
+    # neither: nobody
+    assert (await who(bot, telegram_user_id=424242, phone="998900009999"))["role"] is None
+    assert (await who(bot, telegram_user_id=424242))["role"] is None
+    # the id wins over a number that belongs to somebody else
+    mixed = await who(bot, telegram_user_id=TEACHER_TG, phone=world.admin1_phone)
+    assert (mixed["role"], mixed["name"], mixed["via"]) == ("teacher", "Madina", "id")
+
+
+async def test_an_admin_is_recognised_by_id_with_their_branch_and_the_owner_by_the_bots_list(world, bot):
+    admin = await who(bot, telegram_user_id=ADMIN_TG)
+    assert (admin["role"], admin["via"], admin["branch_name"]) == ("admin", "id", "Bosh ofis")
+    owner = await who(bot, telegram_user_id=OTHER_TG, is_owner="true", phone="998909998877")
+    assert (owner["role"], owner["via"], owner["phone_matches"]) == ("owner", "id", False)
+    owner_phone = await who(bot, telegram_user_id=OTHER_TG, is_owner="true", phone=world.owner_phone)
+    assert owner_phone["phone_matches"] is True
+    # a staff card holding the owner's id (set in the app) also makes the owner
+    await world.pool.execute("insert into staff_telegram (user_id, telegram_user_id) values ((select id from users where role = 'owner'), 6001)")
+    assert (await who(bot, telegram_user_id=6001))["role"] == "owner"
+
+
+async def test_an_inactive_person_is_not_recognised_by_either_way(world, bot):
+    await world.pool.execute("update teachers set is_active = false where id = $1", world.t1)
+    assert (await who(bot, telegram_user_id=TEACHER_TG, phone="998905551111"))["role"] is None
+
+
+async def test_answering_in_the_group_works_by_the_verified_number_when_no_id_is_on_the_card(world, bot):
+    await world.pool.execute("update teachers set telegram_user_id = null where id = $1", world.t1)
+    await connect(bot, world)
+    await run_job(world, ending_soon())
+    (round_,) = await pending(bot)
+    e, lesson = round_["question"]["enrollment_id"], round_["lesson_id"]
+    body = {"chat_id": CHAT, "lesson_id": lesson, "enrollment_id": e, "homework": "good", "telegram_user_id": 31337, "name": "Whoever"}
+    assert (await bot.post("/bot/feedback/answer", json=body)).status_code == 403  # no id, no number
+    wrong = await bot.post("/bot/feedback/answer", json={**body, "verified_phone": "998900009999"})
+    assert wrong.status_code == 403
+    ok = await bot.post("/bot/feedback/answer", json={**body, "verified_phone": "+998 90 555 11 11"})
+    assert ok.status_code == 200 and (ok.json()["recognized_as"], ok.json()["via"]) == ("teacher", "phone")
+
+
+async def test_the_answer_says_who_was_recognised_and_how(world, bot):
+    await connect(bot, world)
+    await run_job(world, ending_soon())
+    (round_,) = await pending(bot)
+    e, lesson = round_["question"]["enrollment_id"], round_["lesson_id"]
+    by_id = (await answer(bot, world, e, who=TEACHER_TG, lesson=lesson)).json()
+    assert (by_id["recognized_as"], by_id["via"]) == ("teacher", "id")
+    admin = (await answer(bot, world, e, who=ADMIN_TG, lesson=lesson)).json()
+    assert (admin["recognized_as"], admin["via"]) == ("admin", "id")
+    owner = (await answer(bot, world, e, who=OTHER_TG, owner=True, lesson=lesson)).json()
+    assert (owner["recognized_as"], owner["via"]) == ("owner", "id")

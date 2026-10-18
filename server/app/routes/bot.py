@@ -130,31 +130,83 @@ async def branches():
 
 
 class Who(BaseModel):
-    # 'owner' | 'admin' | 'teacher' | None -- what the center knows this number as, apart from
+    # 'owner' | 'admin' | 'teacher' | None -- what the center knows this person as, apart from
     # being a student (that is /link).
     role: Literal["owner", "admin", "teacher"] | None = None
     name: str | None = None
     teacher_id: int | None = None
+    # How they were recognised: 'id' (their Telegram user id is on a card in the CRM, or the bot's owner
+    # list) or 'phone' (the number Telegram verified is on a card). The id is checked first.
+    via: Literal["id", "phone"] | None = None
+    # Recognised by id, and the number Telegram verified is given: is it the number on the card?
+    # (None when no number was given.) A different number does not matter -- the id decides.
+    phone_matches: bool | None = None
+    # The active groups they teach (a teacher), or the branch they work in (an admin).
+    groups: list[str] = []
+    branch_name: str | None = None
 
 
 @router.get("/who", response_model=Who)
-async def who(phone: str = Query(...)):
-    """Tells staff apart by the number Telegram verified: the owner and admins by their
-    login number, teachers by the number on their record. Only active people count."""
-    number = normalize(phone)
-    user = await db.pool().fetchrow(
-        "select role, full_name from users where phone = $1 and is_active order by role = 'owner' desc limit 1", number
-    )
-    teacher = await db.pool().fetchrow(
-        "select id, full_name from teachers where phone = $1 and is_active order by id limit 1", number
-    )
-    if user is not None:
-        return Who(
-            role=user["role"], name=user["full_name"], teacher_id=teacher["id"] if teacher is not None else None
+async def who(
+    phone: str | None = Query(None),
+    telegram_user_id: int | None = Query(None),
+    is_owner: bool = Query(False),
+):
+    """Tells staff apart. First by Telegram user id -- the id on a teacher's or staff member's card, or
+    [is_owner] when the bot's own list names them -- then, failing that, by the number Telegram verified (the
+    owner and admins by their login number, teachers by the number on their record). Only active people count."""
+    number = normalize(phone) if phone else None
+    pool = db.pool()
+    teacher = staff = None
+    via = None
+    if telegram_user_id is not None:
+        teacher = await pool.fetchrow(
+            "select id, full_name, phone from teachers where telegram_user_id = $1 and is_active", telegram_user_id
         )
+        staff = await pool.fetchrow(
+            "select u.role, u.full_name, u.phone, ub.branch_id from staff_telegram st "
+            "join users u on u.id = st.user_id and u.is_active left join user_branches ub on ub.user_id = u.id "
+            "where st.telegram_user_id = $1",
+            telegram_user_id,
+        )
+        if teacher is not None or staff is not None or is_owner:
+            via = "id"
+    if via is None and number:
+        staff = await pool.fetchrow(
+            "select u.role, u.full_name, u.phone, ub.branch_id from users u left join user_branches ub on ub.user_id = u.id "
+            "where u.phone = $1 and u.is_active order by u.role = 'owner' desc limit 1",
+            number,
+        )
+        teacher = await pool.fetchrow(
+            "select id, full_name, phone from teachers where phone = $1 and is_active order by id limit 1", number
+        )
+        if teacher is not None or staff is not None:
+            via = "phone"
+    if via is None:
+        return Who()
+    role = "owner" if is_owner or (staff and staff["role"] == "owner") else "admin" if staff else "teacher"
+    name = staff["full_name"] if staff else teacher["full_name"] if teacher else None
+    matches = None
+    if via == "id" and number:
+        on_cards = {c["phone"] for c in (teacher, staff) if c is not None}
+        if is_owner and not on_cards:
+            on_cards = {await pool.fetchval("select phone from users where role = 'owner' and is_active limit 1")}
+        matches = number in on_cards
+    groups = []
     if teacher is not None:
-        return Who(role="teacher", name=teacher["full_name"], teacher_id=teacher["id"])
-    return Who()
+        groups = [
+            r["name"]
+            for r in await pool.fetch(
+                "select name from groups where teacher_id = $1 and is_active order by name limit 12", teacher["id"]
+            )
+        ]
+    branch = None
+    if staff is not None and staff["role"] == "admin" and staff["branch_id"] is not None:
+        branch = await pool.fetchval("select name from branches where id = $1", staff["branch_id"])
+    return Who(
+        role=role, name=name, teacher_id=teacher["id"] if teacher else None, via=via, phone_matches=matches,
+        groups=groups, branch_name=branch,
+    )
 
 
 # --- someone asks about a course ------------------------------------------------------------------------------

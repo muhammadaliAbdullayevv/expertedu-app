@@ -39,17 +39,21 @@ REMIND_UNTIL = timedelta(hours=24)
 
 
 class _Actor:
-    """A Telegram user as the CRM knows them: a teacher (by teachers.telegram_user_id), staff
-    (staff_telegram) or the owner (the bot vouches for the ids in its OWNER_IDS)."""
+    """A Telegram user as the CRM knows them: first by Telegram user id -- a teacher (teachers.telegram_user_id),
+    staff (staff_telegram) or the owner (the bot vouches for the ids in its OWNER_IDS) -- and, failing that,
+    by the number Telegram verified for them (a teacher's or a staff member's card)."""
 
-    def __init__(self, *, is_owner: bool, teacher, staff, fallback_name: str | None = None):
+    def __init__(self, *, is_owner: bool, teacher, staff, via: str | None, fallback_name: str | None = None):
         self.is_owner = is_owner
         self.teacher = teacher
         self.staff = staff
+        self.via = via
         self._fallback_name = fallback_name
 
     @staticmethod
-    async def of(conn, telegram_user_id: int, *, is_owner: bool = False, name: str | None = None) -> "_Actor":
+    async def of(
+        conn, telegram_user_id: int, *, is_owner: bool = False, name: str | None = None, verified_phone: str | None = None
+    ) -> "_Actor":
         teacher = await conn.fetchrow(
             "select id, full_name from teachers where telegram_user_id = $1 and is_active", telegram_user_id
         )
@@ -63,7 +67,17 @@ class _Actor:
             """,
             telegram_user_id,
         )
-        return _Actor(is_owner=is_owner, teacher=teacher, staff=staff, fallback_name=name)
+        via = "id" if (teacher or staff or is_owner) else None
+        number = normalize(verified_phone or "")
+        if via is None and number:
+            teacher = await conn.fetchrow("select id, full_name from teachers where phone = $1 and is_active", number)
+            staff = await conn.fetchrow(
+                "select u.id, u.role, u.full_name, ub.branch_id from users u left join user_branches ub on ub.user_id = u.id "
+                "where u.phone = $1 and u.is_active",
+                number,
+            )
+            via = "phone" if (teacher or staff) else None
+        return _Actor(is_owner=is_owner, teacher=teacher, staff=staff, via=via, fallback_name=name)
 
     @property
     def name(self) -> str | None:
@@ -75,15 +89,17 @@ class _Actor:
 
     def may_manage(self, group, *, teacher_ids: tuple[int | None, ...] = ()) -> bool:
         """The owner anywhere; an admin in their own branch; the group's teacher (or the lesson's)."""
-        if self.is_owner:
-            return True
-        if self.staff and (
-            self.staff["role"] == "owner" or (self.staff["role"] == "admin" and self.staff["branch_id"] == group["branch_id"])
-        ):
-            return True
-        if self.teacher is not None:
-            return self.teacher["id"] in {group["teacher_id"], *teacher_ids} - {None}
-        return False
+        return self.role_for(group, teacher_ids=teacher_ids) is not None
+
+    def role_for(self, group, *, teacher_ids: tuple[int | None, ...] = ()) -> str | None:
+        """What lets them answer for this group: 'owner' | 'admin' | 'teacher', or None."""
+        if self.is_owner or (self.staff and self.staff["role"] == "owner"):
+            return "owner"
+        if self.staff and self.staff["role"] == "admin" and self.staff["branch_id"] == group["branch_id"]:
+            return "admin"
+        if self.teacher is not None and self.teacher["id"] in ({group["teacher_id"], *teacher_ids} - {None}):
+            return "teacher"
+        return None
 
 
 _GROUP_SQL = """
@@ -175,32 +191,35 @@ class RegisteredId(BaseModel):
 
 @router.post("/telegram-id", response_model=RegisteredId)
 async def register_telegram_id(payload: RegisterIdRequest):
-    """Fills in the Telegram id of the teacher or staff member whose number this is, so nobody has to
-    look the id up: Telegram itself vouches that the account has the number."""
+    """A convenience for the teacher or staff member who has no Telegram id on their card yet: when they
+    share their own number with the bot and it matches, the id of that account is filled in. An id someone
+    set by hand is never replaced (the CRM is the authority), nor taken from another person."""
     number = normalize(payload.phone)
     found = RegisteredId()
     async with db.pool().acquire() as conn:
         async with conn.transaction():
-            # One account is one person: it leaves anybody else it was filed under.
-            await conn.execute(
-                "update teachers set telegram_user_id = null where telegram_user_id = $1 and phone is distinct from $2",
-                payload.telegram_user_id, number,
+            taken = await conn.fetchval(
+                "select exists(select 1 from teachers where telegram_user_id = $1) "
+                "or exists(select 1 from staff_telegram where telegram_user_id = $1)",
+                payload.telegram_user_id,
             )
-            await conn.execute(
-                "delete from staff_telegram where telegram_user_id = $1 and user_id not in (select id from users where phone = $2)",
-                payload.telegram_user_id, number,
+            teacher = await conn.fetchrow(
+                "select id, full_name, telegram_user_id from teachers where phone = $1 and is_active", number
             )
-            teacher = await conn.fetchrow("select id, full_name from teachers where phone = $1 and is_active", number)
             if teacher is not None:
-                await conn.execute("update teachers set telegram_user_id = null where telegram_user_id = $1", payload.telegram_user_id)
-                await conn.execute("update teachers set telegram_user_id = $2 where id = $1", teacher["id"], payload.telegram_user_id)
+                if teacher["telegram_user_id"] is None and not taken:
+                    await conn.execute(
+                        "update teachers set telegram_user_id = $2 where id = $1", teacher["id"], payload.telegram_user_id
+                    )
+                    taken = True
                 found = RegisteredId(role="teacher", name=teacher["full_name"])
             user = await conn.fetchrow("select id, role, full_name from users where phone = $1 and is_active", number)
             if user is not None:
-                await conn.execute("delete from staff_telegram where telegram_user_id = $1 or user_id = $2", payload.telegram_user_id, user["id"])
-                await conn.execute(
-                    "insert into staff_telegram (user_id, telegram_user_id) values ($1, $2)", user["id"], payload.telegram_user_id
-                )
+                has_one = await conn.fetchval("select exists(select 1 from staff_telegram where user_id = $1)", user["id"])
+                if not has_one and not taken:
+                    await conn.execute(
+                        "insert into staff_telegram (user_id, telegram_user_id) values ($1, $2)", user["id"], payload.telegram_user_id
+                    )
                 found = RegisteredId(role=user["role"], name=user["full_name"])
     return found
 
@@ -328,6 +347,8 @@ class FeedbackAnswer(BaseModel):
     telegram_user_id: int
     is_owner: bool = False
     name: str | None = None
+    # The number Telegram verified for them, if they shared one with the bot: the second way to be recognised.
+    verified_phone: str | None = None
 
 
 class FeedbackNext(BaseModel):
@@ -336,6 +357,9 @@ class FeedbackNext(BaseModel):
     question: Question | None = None
     answered: int
     total: int
+    # Who the answer was accepted from and how they were recognised ('id' or 'phone'), for the bot to say.
+    recognized_as: Literal["owner", "admin", "teacher"] | None = None
+    via: Literal["id", "phone"] | None = None
 
 
 @router.post("/feedback/answer", response_model=FeedbackNext)
@@ -351,9 +375,12 @@ async def feedback_answer(payload: FeedbackAnswer):
             group = await conn.fetchrow(
                 _GROUP_SQL + " join lessons l on l.group_id = g.id where l.id = $1", payload.lesson_id
             )
-            actor = await _Actor.of(conn, payload.telegram_user_id, is_owner=payload.is_owner, name=payload.name)
+            actor = await _Actor.of(
+                conn, payload.telegram_user_id, is_owner=payload.is_owner, name=payload.name, verified_phone=payload.verified_phone
+            )
             lesson_teacher = await conn.fetchval("select teacher_id from lessons where id = $1", payload.lesson_id)
-            if not actor.may_manage(group, teacher_ids=(lesson_teacher,)):
+            recognized_as = actor.role_for(group, teacher_ids=(lesson_teacher,))
+            if recognized_as is None:
                 raise HTTPException(status.HTTP_403_FORBIDDEN, "Faqat o'qituvchi yoki administrator javob bera oladi.")
             lesson = await conn.fetchrow("select group_id, starts_at from lessons where id = $1", payload.lesson_id)
             roster = await schedule.roster(conn, lesson["group_id"], _local_day(lesson["starts_at"]))
@@ -371,7 +398,10 @@ async def feedback_answer(payload: FeedbackAnswer):
             question, answered, total = await next_question(conn, payload.lesson_id)
             if question is None:
                 await conn.execute("update telegram_prompts set status = 'done' where lesson_id = $1", payload.lesson_id)
-    return FeedbackNext(group_name=group["name"], done=question is None, question=question, answered=answered, total=total)
+    return FeedbackNext(
+        group_name=group["name"], done=question is None, question=question, answered=answered, total=total,
+        recognized_as=recognized_as, via=actor.via,
+    )
 
 
 class Reminder(BaseModel):
