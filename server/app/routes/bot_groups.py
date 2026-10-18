@@ -359,6 +359,7 @@ class FeedbackAnswer(BaseModel):
 
 
 class FeedbackNext(BaseModel):
+    group_name: str
     done: bool
     question: Question | None = None
     answered: int
@@ -397,4 +398,4 @@ async def feedback_answer(payload: FeedbackAnswer):
             question, answered, total = await next_question(conn, payload.lesson_id)
             if question is None:
                 await conn.execute("update telegram_prompts set status = 'done' where lesson_id = $1", payload.lesson_id)
-    return FeedbackNext(done=question is None, question=question, answered=answered, total=total)
+    return FeedbackNext(group_name=group["name"], done=question is None, question=question, answered=answered, total=total)
