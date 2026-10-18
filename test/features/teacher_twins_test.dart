@@ -23,6 +23,7 @@ class FakeTeachers implements TeachersRepository {
   final joined = <({int id, String? phone})>[];
   final merged = <({int id, int into})>[];
   final created = <String>[];
+  final createdTelegramIds = <int?>[];
   ApiException? mergeError;
 
   @override
@@ -42,8 +43,10 @@ class FakeTeachers implements TeachersRepository {
     required String fullName,
     String? phone,
     String? note,
+    int? telegramUserId,
   }) async {
     created.add(fullName);
+    createdTelegramIds.add(telegramUserId);
     return Teacher(id: 99, fullName: fullName, isActive: true);
   }
 
@@ -255,6 +258,24 @@ void main() {
       await tester.tap(find.text('Saqlash'));
       await tester.pumpAndSettle();
       expect(teachers.created, ['Yangi Odam']);
+      expect(teachers.createdTelegramIds, [null]);
+    });
+
+    testWidgets('a Telegram ID can be typed (digits only) and is saved', (
+      tester,
+    ) async {
+      final teachers = FakeTeachers();
+      await pump(tester, teachers, opener: opener);
+      await openForm(tester);
+      await typeName(tester, 'Madina Karimova');
+      await tester.enterText(
+        find.byKey(const ValueKey('teacher-telegram-id')),
+        '12ab34 5678',
+      );
+      await tester.pump();
+      await tester.tap(find.text('Saqlash'));
+      await tester.pumpAndSettle();
+      expect(teachers.createdTelegramIds, [12345678]);
     });
   });
 

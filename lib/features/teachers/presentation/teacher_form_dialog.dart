@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/theme/app_theme.dart';
@@ -32,6 +33,9 @@ class _TeacherFormDialogState extends ConsumerState<_TeacherFormDialog> {
     text: UzPhoneField.stripPrefix(widget.teacher?.phone),
   );
   late final _note = TextEditingController(text: widget.teacher?.note);
+  late final _telegramId = TextEditingController(
+    text: widget.teacher?.telegramUserId?.toString() ?? '',
+  );
   bool _saving = false;
   String? _error;
   List<TeacherMatch> _matches = const [];
@@ -88,6 +92,7 @@ class _TeacherFormDialogState extends ConsumerState<_TeacherFormDialog> {
     _name.dispose();
     _phone.dispose();
     _note.dispose();
+    _telegramId.dispose();
     super.dispose();
   }
 
@@ -102,6 +107,7 @@ class _TeacherFormDialogState extends ConsumerState<_TeacherFormDialog> {
         ? null
         : UzPhoneField.toE164(_phone.text);
     final note = _note.text.trim().isEmpty ? null : _note.text.trim();
+    final telegramId = int.tryParse(_telegramId.text.trim());
     try {
       final existing = widget.teacher;
       if (existing == null) {
@@ -109,6 +115,7 @@ class _TeacherFormDialogState extends ConsumerState<_TeacherFormDialog> {
           fullName: _name.text.trim(),
           phone: phone,
           note: note,
+          telegramUserId: telegramId,
         );
       } else {
         await repo.update(
@@ -116,6 +123,7 @@ class _TeacherFormDialogState extends ConsumerState<_TeacherFormDialog> {
           fullName: _name.text.trim(),
           phone: phone,
           note: note,
+          telegramUserId: telegramId,
         );
       }
       if (mounted) Navigator.of(context).pop(true);
@@ -163,6 +171,21 @@ class _TeacherFormDialogState extends ConsumerState<_TeacherFormDialog> {
                   busy: _saving,
                   onJoin: () => _join(m),
                 ),
+              const SizedBox(height: 12),
+              TextFormField(
+                key: const ValueKey('teacher-telegram-id'),
+                controller: _telegramId,
+                keyboardType: TextInputType.number,
+                inputFormatters: <TextInputFormatter>[
+                  FilteringTextInputFormatter.digitsOnly,
+                ],
+                decoration: const InputDecoration(
+                  labelText: 'Telegram ID (ixtiyoriy)',
+                  helperText:
+                      'Botga /myid yuborsa, raqamini ko\'rsatadi. Bot guruhda o\'qituvchini shu bilan taniydi.',
+                  helperMaxLines: 2,
+                ),
+              ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _note,

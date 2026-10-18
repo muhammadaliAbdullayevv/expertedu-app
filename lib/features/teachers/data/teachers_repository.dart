@@ -17,6 +17,7 @@ class Teacher {
     this.groupCount,
     this.studentCount,
     this.photo,
+    this.telegramUserId,
     this.branchIds = const [],
     this.branchNames = const [],
   });
@@ -29,6 +30,9 @@ class Teacher {
 
   /// Stored name of the profile photo; null = none.
   final String? photo;
+
+  /// Their Telegram user id: how the bot knows them in the course groups.
+  final int? telegramUserId;
 
   /// The branches they work in (within the branch in view).
   final List<int> branchIds;
@@ -49,6 +53,7 @@ class Teacher {
     groupCount: json['group_count'] as int?,
     studentCount: json['student_count'] as int?,
     photo: json['photo'] as String?,
+    telegramUserId: json['telegram_user_id'] as int?,
     branchIds: (json['branch_ids'] as List<dynamic>? ?? const []).cast<int>(),
     branchNames: (json['branch_names'] as List<dynamic>? ?? const [])
         .cast<String>(),
@@ -328,6 +333,7 @@ class TeachersRepository {
     required String fullName,
     String? phone,
     String? note,
+    int? telegramUserId,
   }) async {
     final json =
         await _api.post(
@@ -336,6 +342,7 @@ class TeachersRepository {
                 'full_name': fullName,
                 'phone': phone,
                 'note': note,
+                'telegram_user_id': telegramUserId,
               },
             )
             as Map<String, dynamic>;
@@ -349,6 +356,7 @@ class TeachersRepository {
     required String fullName,
     String? phone,
     String? note,
+    int? telegramUserId,
   }) async {
     final json =
         await _api.patch(
@@ -357,6 +365,7 @@ class TeachersRepository {
                 'full_name': fullName,
                 'phone': phone,
                 'note': note,
+                'telegram_user_id': telegramUserId,
               },
             )
             as Map<String, dynamic>;

@@ -16,6 +16,7 @@ class StaffMember {
     this.lastLoginAt,
     this.branchId,
     this.branchName,
+    this.telegramUserId,
   });
 
   final int id;
@@ -31,6 +32,9 @@ class StaffMember {
   final int? branchId;
   final String? branchName;
 
+  /// Their Telegram user id: how the bot knows them in the course groups.
+  final int? telegramUserId;
+
   bool get isOwner => role == 'owner';
 
   factory StaffMember.fromJson(Map<String, dynamic> json) => StaffMember(
@@ -44,6 +48,7 @@ class StaffMember {
         : DateTime.parse(json['last_login_at'] as String),
     branchId: json['branch_id'] as int?,
     branchName: json['branch_name'] as String?,
+    telegramUserId: json['telegram_user_id'] as int?,
   );
 }
 
@@ -65,6 +70,7 @@ class StaffRepository {
     required String fullName,
     required String password,
     int? branchId,
+    int? telegramUserId,
   }) async {
     final json = await _api.post(
       '/staff',
@@ -73,6 +79,7 @@ class StaffRepository {
         'full_name': fullName,
         'password': password,
         'branch_id': branchId,
+        'telegram_user_id': ?telegramUserId,
       },
     );
     return StaffMember.fromJson(json as Map<String, dynamic>);
@@ -84,6 +91,8 @@ class StaffRepository {
     String? phone,
     bool? isActive,
     int? branchId,
+    int? telegramUserId,
+    bool clearTelegramId = false,
   }) async {
     final json = await _api.patch(
       '/staff/$id',
@@ -92,6 +101,11 @@ class StaffRepository {
         'phone': ?phone,
         'is_active': ?isActive,
         'branch_id': ?branchId,
+        // Left out = unchanged; a number sets it; null (when cleared) removes it.
+        if (clearTelegramId)
+          'telegram_user_id': null
+        else
+          'telegram_user_id': ?telegramUserId,
       },
     );
     return StaffMember.fromJson(json as Map<String, dynamic>);

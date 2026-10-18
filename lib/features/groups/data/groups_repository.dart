@@ -158,6 +158,45 @@ class RosterEntry {
   );
 }
 
+/// Whether a Telegram chat is connected to a group, and the one-time code that connects one.
+class TelegramGroupStatus {
+  const TelegramGroupStatus({
+    required this.connected,
+    this.chatTitle,
+    this.connectedAt,
+    this.connectedBy,
+    this.code,
+    this.codeExpiresAt,
+    this.link,
+  });
+
+  final bool connected;
+  final String? chatTitle;
+  final DateTime? connectedAt;
+  final String? connectedBy;
+
+  /// The newest code that can still be used (null = none), when it stops working, and the link
+  /// that adds the bot to a Telegram group and hands the code over.
+  final String? code;
+  final DateTime? codeExpiresAt;
+  final String? link;
+
+  factory TelegramGroupStatus.fromJson(Map<String, dynamic> json) =>
+      TelegramGroupStatus(
+        connected: json['connected'] as bool,
+        chatTitle: json['chat_title'] as String?,
+        connectedAt: json['connected_at'] == null
+            ? null
+            : DateTime.parse(json['connected_at'] as String).toLocal(),
+        connectedBy: json['connected_by'] as String?,
+        code: json['code'] as String?,
+        codeExpiresAt: json['code_expires_at'] == null
+            ? null
+            : DateTime.parse(json['code_expires_at'] as String).toLocal(),
+        link: json['link'] as String?,
+      );
+}
+
 class GroupsRepository {
   GroupsRepository(this._api);
 
@@ -261,5 +300,21 @@ class GroupsRepository {
     return json
         .map((e) => RosterEntry.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+
+  Future<TelegramGroupStatus> telegramStatus(int groupId) async {
+    final json = await _api.get('/groups/$groupId/telegram');
+    return TelegramGroupStatus.fromJson(json as Map<String, dynamic>);
+  }
+
+  /// A fresh one-time code (valid for a day); the earlier unused ones stop working.
+  Future<TelegramGroupStatus> newTelegramCode(int groupId) async {
+    final json = await _api.post('/groups/$groupId/telegram/code');
+    return TelegramGroupStatus.fromJson(json as Map<String, dynamic>);
+  }
+
+  Future<TelegramGroupStatus> disconnectTelegram(int groupId) async {
+    await _api.delete('/groups/$groupId/telegram');
+    return telegramStatus(groupId);
   }
 }

@@ -20,6 +20,7 @@ import '../data/group_profile_models.dart';
 import '../data/groups_repository.dart';
 import 'group_form_dialog.dart';
 import 'groups_breadcrumb.dart';
+import 'telegram_section.dart';
 
 /// A group's profile page, inside Guruhlar (the sidebar stays): the teacher,
 /// how full it is, who has paid, how they attend, when it meets and bills,
@@ -304,6 +305,11 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
         _stats(p),
         const SizedBox(height: 14),
         _details(p),
+        const SizedBox(height: 14),
+        TelegramSection(
+          key: ValueKey('telegram-${p.group.id}'),
+          groupId: p.group.id,
+        ),
         if (p.waiting.isNotEmpty) ...<Widget>[
           const SizedBox(height: 14),
           _waiting(p),

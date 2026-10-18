@@ -116,6 +116,9 @@ class FakeStaff implements StaffRepository {
   final signedOut = <int>[];
   final passwords = <int, String>{};
 
+  /// What was sent about the Telegram id: ('create'|'update', id or null, number, clear).
+  final telegram = <({String call, int? id, int? number, bool clear})>[];
+
   @override
   Future<List<StaffMember>> list() async => members;
 
@@ -125,7 +128,14 @@ class FakeStaff implements StaffRepository {
     required String fullName,
     required String password,
     int? branchId,
+    int? telegramUserId,
   }) async {
+    telegram.add((
+      call: 'create',
+      id: null,
+      number: telegramUserId,
+      clear: false,
+    ));
     created.add((
       phone: phone,
       name: fullName,
@@ -151,7 +161,15 @@ class FakeStaff implements StaffRepository {
     String? phone,
     bool? isActive,
     int? branchId,
+    int? telegramUserId,
+    bool clearTelegramId = false,
   }) async {
+    telegram.add((
+      call: 'update',
+      id: id,
+      number: telegramUserId,
+      clear: clearTelegramId,
+    ));
     updates.add((id: id, name: fullName, phone: phone, active: isActive));
     return members.firstWhere((m) => m.id == id);
   }
@@ -755,6 +773,83 @@ void main() {
         expect(staff.passwords, {11: 'newpass1'});
       });
 
+      testWidgets('a Telegram ID is set when adding, changed and cleared', (
+        tester,
+      ) async {
+        await open(tester, members: const []);
+        await tester.tap(find.byKey(const ValueKey('add-admin')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const ValueKey('staff-phone')),
+          '935550000',
+        );
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Ism'),
+          'Yangi Admin',
+        );
+        await tester.enterText(
+          find.byKey(const ValueKey('staff-telegram-id')),
+          '5550001',
+        );
+        await tester.enterText(
+          find.byKey(const ValueKey('staff-password')),
+          'secret1',
+        );
+        await tester.tap(find.text('Qo\'shish').last);
+        await tester.pumpAndSettle();
+        expect(staff.telegram.single, (
+          call: 'create',
+          id: null,
+          number: 5550001,
+          clear: false,
+        ));
+      });
+
+      testWidgets(
+        'editing: a changed Telegram ID is sent, an emptied one clears, an untouched one is not sent',
+        (tester) async {
+          await open(
+            tester,
+            members: [
+              StaffMember(
+                id: 11,
+                phone: '998900000003',
+                fullName: 'Dilfuza H.',
+                role: 'admin',
+                isActive: true,
+                branchId: 2,
+                telegramUserId: 777,
+              ),
+            ],
+          );
+          Future<void> edit(String? id) async {
+            await tester.tap(find.byKey(const ValueKey('edit-admin-11')));
+            await tester.pumpAndSettle();
+            if (id != null) {
+              await tester.enterText(
+                find.byKey(const ValueKey('staff-telegram-id')),
+                id,
+              );
+            }
+            await tester.enterText(
+              find.widgetWithText(TextFormField, 'Ism'),
+              'Ism ${staff.telegram.length}',
+            );
+            await tester.tap(find.text('Saqlash').last);
+            await tester.pumpAndSettle();
+          }
+
+          await edit(null); // untouched: shows 777, sends nothing about it
+          await edit('888');
+          await edit('');
+          expect(staff.telegram, [
+            (call: 'update', id: 11, number: null, clear: false),
+            (call: 'update', id: 11, number: 888, clear: false),
+            (call: 'update', id: 11, number: null, clear: true),
+          ]);
+        },
+      );
+
       testWidgets('an unchanged number is not sent again', (tester) async {
         await open(tester);
         await tester.tap(find.byKey(const ValueKey('edit-admin-11')));
@@ -775,12 +870,16 @@ void main() {
           await open(tester);
           await tester.tap(find.byKey(const ValueKey('edit-admin-11')));
           await tester.pumpAndSettle();
+          await tester.ensureVisible(
+            find.byKey(const ValueKey('staff-sign-out')),
+          );
           await tester.tap(find.byKey(const ValueKey('staff-sign-out')));
           await tester.pumpAndSettle();
           expect(staff.signedOut, [11]);
 
           await tester.tap(find.byKey(const ValueKey('edit-admin-11')));
           await tester.pumpAndSettle();
+          await tester.ensureVisible(find.byType(Switch));
           await tester.tap(find.byType(Switch));
           await tester.tap(find.text('Saqlash').last);
           await tester.pumpAndSettle();

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/extensions/build_context_x.dart';
@@ -41,6 +42,9 @@ class _StaffFormState extends ConsumerState<StaffForm> {
   late final _phone = TextEditingController(
     text: UzPhoneField.stripPrefix(widget.member?.phone),
   );
+  late final _telegramId = TextEditingController(
+    text: widget.member?.telegramUserId?.toString() ?? '',
+  );
   final _password = TextEditingController();
   late bool _active = widget.member?.isActive ?? true;
   late int? _branch = widget.member?.branchId ?? widget.branchId;
@@ -53,6 +57,7 @@ class _StaffFormState extends ConsumerState<StaffForm> {
   void dispose() {
     _name.dispose();
     _phone.dispose();
+    _telegramId.dispose();
     _password.dispose();
     super.dispose();
   }
@@ -72,16 +77,22 @@ class _StaffFormState extends ConsumerState<StaffForm> {
           fullName: _name.text.trim(),
           password: _password.text,
           branchId: _branch,
+          telegramUserId: int.tryParse(_telegramId.text.trim()),
         );
       } else {
         final name = _name.text.trim();
         final phone = UzPhoneField.toE164(_phone.text);
+        final telegramId = int.tryParse(_telegramId.text.trim());
         await repo.update(
           member.id,
           fullName: name == member.fullName ? null : name,
           phone: member.isOwner || phone == '+${member.phone}' ? null : phone,
           isActive: _active == member.isActive ? null : _active,
           branchId: _branch == member.branchId ? null : _branch,
+          telegramUserId: telegramId == member.telegramUserId
+              ? null
+              : telegramId,
+          clearTelegramId: telegramId == null && member.telegramUserId != null,
         );
         if (_password.text.isNotEmpty) {
           await repo.resetPassword(member.id, _password.text);
@@ -165,6 +176,21 @@ class _StaffFormState extends ConsumerState<StaffForm> {
                         onChanged: (id) => setState(() => _branch = id),
                       ),
                     ],
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      key: const ValueKey('staff-telegram-id'),
+                      controller: _telegramId,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: <TextInputFormatter>[
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'Telegram ID (ixtiyoriy)',
+                        helperText:
+                            'Botga /myid yuborsa, raqamini ko\'rsatadi. Bot guruhlarda shu bilan taniydi.',
+                        helperMaxLines: 2,
+                      ),
+                    ),
                     const SizedBox(height: 14),
                     TextFormField(
                       key: const ValueKey('staff-password'),
