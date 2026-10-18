@@ -18,6 +18,8 @@ import '../../admissions/presentation/admissions_screen.dart';
 import '../../admissions/presentation/admissions_ui.dart'
     show admissionsRefreshProvider;
 import '../../auth/application/session_controller.dart';
+import '../../branches/application/branch_view.dart';
+import '../../branches/presentation/branch_switcher.dart';
 import '../../debtors/presentation/debtors_screen.dart';
 import '../../finance/presentation/finance_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
@@ -69,6 +71,12 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // Any change to a lead moves the sidebar numbers (and Bugun's).
     _admissionsRefresh.addListener(_onAdmissionsChanged);
     _openStudent.addListener(_onOpenStudentRequest);
+    // A new session starts looking at every branch.
+    Future.microtask(() => ref.read(branchViewProvider.notifier).reset());
+    _branchListener = ref.listenManual<int?>(
+      branchViewProvider,
+      (_, _) => _onBranchChanged(),
+    );
   }
 
   @override
@@ -76,12 +84,28 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     _session.removeListener(_onSessionChanged);
     _admissionsRefresh.removeListener(_onAdmissionsChanged);
     _openStudent.removeListener(_onOpenStudentRequest);
+    _branchListener?.close();
     super.dispose();
   }
 
   late final ValueNotifier<int?> _openStudent = ref.read(
     openStudentRequestProvider,
   );
+
+  ProviderSubscription<int?>? _branchListener;
+
+  /// The owner switched the branch in view: every page shows the new
+  /// branch's data, and a course or group left open (it may belong to the
+  /// other branch) is closed.
+  void _onBranchChanged() {
+    if (!mounted) return;
+    _groupsNav.currentState?.popUntil((r) => r.isFirst);
+    for (final d in Destination.values) {
+      _refresh(d);
+    }
+    ref.invalidate(branchListProvider);
+    setState(() {});
+  }
 
   late final ValueNotifier<int> _admissionsRefresh = ref.read(
     admissionsRefreshProvider,
@@ -164,6 +188,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         _debtorsKey.currentState?.reload();
       case Destination.teachers:
         _teachersKey.currentState?.reload();
+      case Destination.groups:
+        _subjectsKey.currentState?.reload();
+      case Destination.students:
+        _studentsKey.currentState?.reload();
       default:
         break;
     }
@@ -303,6 +331,9 @@ class _HomeShellState extends ConsumerState<HomeShell> {
                   counts: counts,
                   compact: width < _fullSidebarBreakpoint,
                   localMode: ApiConfig.isLocal(),
+                  branchSlot: BranchSwitcher(
+                    compact: width < _fullSidebarBreakpoint,
+                  ),
                   userName: _session.user?.fullName ?? '',
                   onUserTap: () => _go(Destination.settings),
                 ),

@@ -114,10 +114,18 @@ def ambient_scope() -> "Scope | None":
 
 async def get_scope(
     user: CurrentUser = Depends(get_current_user),
-    x_branch: int | None = Header(default=None),
+    x_branch: str | None = Header(default=None),
 ) -> Scope:
+    """The branch in view comes from X-Branch: an id, or "all" (also what no
+    header means). Only the owner has a choice."""
     headquarters = await db.pool().fetchval("select id from branches where is_headquarters")
     if user.is_owner:
+        if x_branch in (None, "", "all"):
+            x_branch = None
+        elif not x_branch.isdigit():
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Filial noto'g'ri.")
+        else:
+            x_branch = int(x_branch)
         if x_branch is None:
             scope = Scope(user, None, headquarters)
         else:

@@ -34,6 +34,11 @@ class ApiClient {
 
   void Function()? onUnauthorized;
 
+  /// The branch the owner is looking at (the X-Branch header); null = every
+  /// branch. An admin's server-side branch always wins, so this is only ever
+  /// meaningful for the owner (see lib/features/branches).
+  int? branchId;
+
   /// Told after every call whether the server could be reached: true when
   /// it answered (with anything), false only for a real network failure.
   /// The sync engine shows "Oflayn" from this, so it is never stale.
@@ -57,6 +62,8 @@ class ApiClient {
   /// even when nothing was blocked.
   void resetAuthBlock() {
     _blockedUntilReauth = false;
+    // A new session starts looking at every branch.
+    branchId = null;
   }
 
   static const Duration _timeout = Duration(seconds: 15);
@@ -65,10 +72,14 @@ class ApiClient {
     String path, {
     Map<String, String>? query,
     Duration? timeout,
+    Map<String, String>? headers,
   }) {
     return _guarded(() async {
       final response = await _http
-          .get(_uri(path, query), headers: await _headers())
+          .get(
+            _uri(path, query),
+            headers: <String, String>{...await _headers(), ...?headers},
+          )
           .timeout(timeout ?? _timeout);
       return _decode(response);
     });
@@ -228,6 +239,8 @@ class ApiClient {
 
   Future<Map<String, String>> _headers({bool withAuth = true}) async {
     final headers = <String, String>{'Content-Type': 'application/json'};
+    final branch = branchId;
+    if (branch != null) headers['X-Branch'] = '$branch';
     if (withAuth) {
       final token = await _tokenStorage.readToken();
       if (token != null) {

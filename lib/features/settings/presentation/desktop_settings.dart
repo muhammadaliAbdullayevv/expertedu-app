@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../branches/presentation/branches_tab.dart';
+import '../../branches/presentation/choose_branch.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../core/extensions/build_context_x.dart';
 import '../../../core/formatters/currency_formatter.dart';
@@ -39,7 +41,7 @@ class DesktopSettings extends ConsumerWidget {
     return DefaultTabController(
       // Rebuilt from scratch if the tab count changes (another account).
       key: ValueKey<bool>(isOwner),
-      length: isOwner ? 3 : 2,
+      length: isOwner ? 4 : 2,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -62,6 +64,7 @@ class DesktopSettings extends ConsumerWidget {
               labelStyle: context.textTheme.labelLarge,
               tabs: <Tab>[
                 const Tab(text: 'Guruhlar'),
+                if (isOwner) const Tab(text: 'Filiallar'),
                 if (isOwner) const Tab(text: 'Xodimlar'),
                 const Tab(text: 'Hisob'),
               ],
@@ -71,6 +74,7 @@ class DesktopSettings extends ConsumerWidget {
             child: TabBarView(
               children: <Widget>[
                 const _GroupsTab(),
+                if (isOwner) const BranchesTab(),
                 if (isOwner) const StaffTab(),
                 Align(
                   alignment: Alignment.topCenter,
@@ -170,6 +174,8 @@ class _GroupsTabState extends ConsumerState<_GroupsTab> {
   }
 
   Future<void> _openForm([Group? group]) async {
+    if (group == null && !await ensureBranchChosen(context, ref)) return;
+    if (!mounted) return;
     final saved = await showGroupFormDialog(context, group: group);
     if (saved == true) _reload();
   }

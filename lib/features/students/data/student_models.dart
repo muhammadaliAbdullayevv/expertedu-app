@@ -57,6 +57,7 @@ class StudentRow {
     this.isAtRisk = false,
     this.isActive = false,
     this.isArchived = false,
+    this.branches = const [],
   });
 
   final int id;
@@ -82,6 +83,9 @@ class StudentRow {
   /// In the archive: out of every group, everything kept.
   final bool isArchived;
 
+  /// The branches they are in (within the branch in view).
+  final List<String> branches;
+
   factory StudentRow.fromJson(Map<String, dynamic> json) => StudentRow(
     id: json['id'] as int,
     fullName: json['full_name'] as String,
@@ -101,6 +105,7 @@ class StudentRow {
     isAtRisk: json['is_at_risk'] as bool? ?? false,
     isActive: json['is_active'] as bool? ?? false,
     isArchived: json['is_archived'] as bool? ?? false,
+    branches: (json['branches'] as List<dynamic>? ?? const []).cast<String>(),
   );
 }
 

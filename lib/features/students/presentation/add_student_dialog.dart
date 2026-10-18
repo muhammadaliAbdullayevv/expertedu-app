@@ -796,7 +796,60 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
     );
   }
 
+  /// The number belongs to a student of ANOTHER branch: the same person is put
+  /// in this branch too (no duplicate), then the usual flow goes on.
+  Future<void> _joinBranch(PhoneOwner owner) async {
+    try {
+      final repo = ref.read(studentsRepositoryProvider);
+      await repo.joinBranch(owner.studentId, phone: owner.phone);
+      final fresh = await repo.checkPhone(owner.phone);
+      if (!mounted) return;
+      setState(() => _phoneOwner = fresh);
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    }
+  }
+
+  Widget _otherBranchWarning(PhoneOwner owner) {
+    return Container(
+      key: const ValueKey('other-branch-warning'),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: context.colors.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: context.colors.error.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(
+            'Bu raqam bilan o\'quvchi allaqachon ${owner.branchNames.join(', ')} '
+            'filialida mavjud: ${owner.fullName}',
+            style: TextStyle(
+              color: context.colors.error,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Ism va ma\'lumotlari bir xil bo\'ladi: yangi o\'quvchi ochilmaydi, shu '
+            'odam sizning filialingizga ham qo\'shiladi. Boshqa filialdagi '
+            'guruh, to\'lov va izohlari ko\'rinmaydi.',
+            style: context.textTheme.bodySmall,
+          ),
+          const SizedBox(height: 10),
+          FilledButton.tonal(
+            key: const ValueKey('join-branch'),
+            onPressed: () => _joinBranch(owner),
+            child: const Text('Shu o\'quvchini mening filialimga qo\'shish'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _duplicateWarning(PhoneOwner owner) {
+    if (!owner.inScope) return _otherBranchWarning(owner);
     final groups = owner.groupNames.isEmpty
         ? 'guruhsiz'
         : owner.groupNames.join(', ');

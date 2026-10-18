@@ -416,6 +416,7 @@ class FakeQabul implements QabulRepository {
     String? level,
     Set<int> weekdays = const {},
     String? timeOfDay,
+    int? branchId,
   }) async => GroupSearchResult(exact: list, near: const []);
 
   @override

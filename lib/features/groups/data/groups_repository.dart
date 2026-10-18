@@ -35,6 +35,8 @@ class Group {
     this.schedule = const <ScheduleSlot>[],
     this.level,
     this.startDate,
+    this.branchId,
+    this.branchName,
   });
 
   final int id;
@@ -82,6 +84,10 @@ class Group {
   final String? level;
   final DateTime? startDate;
 
+  /// The branch it belongs to.
+  final int? branchId;
+  final String? branchName;
+
   factory Group.fromJson(Map<String, dynamic> json) => Group(
     id: json['id'] as int,
     subjectId: json['subject_id'] as int?,
@@ -101,6 +107,8 @@ class Group {
         .map((e) => ScheduleSlot.fromJson(e as Map<String, dynamic>))
         .toList(),
     level: json['level'] as String?,
+    branchId: json['branch_id'] as int?,
+    branchName: json['branch_name'] as String?,
     startDate: json['start_date'] == null
         ? null
         : DateTime.parse(json['start_date'] as String),

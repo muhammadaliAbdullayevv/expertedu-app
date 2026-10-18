@@ -1,3 +1,4 @@
+import '../../branches/application/branch_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -127,6 +128,9 @@ class _SubjectGroupsScreenState extends ConsumerState<SubjectGroupsScreen> {
                           group.teacherName!.isNotEmpty)
                         group.teacherName!,
                       count == 1 ? '1 o\'quvchi' : '$count o\'quvchi',
+                      if (ref.watch(showBranchLabelsProvider) &&
+                          group.branchName != null)
+                        group.branchName!,
                     ].join(' • ');
                     return BorderedListTile(
                       leading: const CircleAvatar(child: Icon(Icons.groups)),

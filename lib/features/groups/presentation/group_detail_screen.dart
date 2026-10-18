@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../branches/application/branch_view.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../core/formatters/currency_formatter.dart';
 import '../../../core/formatters/phone_formatter.dart';
@@ -209,6 +210,15 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
         if (g.level != null && g.level!.isNotEmpty)
           StatusChip(g.level!, tone: StatusTone.info),
         const SizedBox(width: 6),
+        if (ref.watch(showBranchLabelsProvider) &&
+            g.branchName != null) ...<Widget>[
+          StatusChip(
+            g.branchName!,
+            key: const ValueKey('group-branch'),
+            tone: StatusTone.neutral,
+          ),
+          const SizedBox(width: 6),
+        ],
         if (p.isFull)
           const StatusChip('To\'lgan', tone: StatusTone.warning)
         else if (p.freeSeats != null)

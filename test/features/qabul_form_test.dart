@@ -100,6 +100,7 @@ class FakeQabul implements QabulRepository {
     String? level,
     Set<int> weekdays = const {},
     String? timeOfDay,
+    int? branchId,
   }) async {
     if (fail) throw ApiException(0, 'offline');
     return GroupSearchResult(exact: list, near: const []);

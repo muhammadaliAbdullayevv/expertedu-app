@@ -9,6 +9,7 @@ import '../../../core/formatters/phone_formatter.dart';
 import '../../../core/widgets/person_avatar.dart';
 import '../../../core/widgets/status_chip.dart';
 import '../../admissions/presentation/admissions_ui.dart';
+import '../../branches/application/branch_view.dart';
 import '../data/student_models.dart';
 import '../data/students_repository.dart';
 import 'add_student_dialog.dart';
@@ -393,6 +394,7 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
                     itemBuilder: (context, i) => _StudentRowView(
                       key: ValueKey('student-${shown[i].id}'),
                       row: shown[i],
+                      showBranch: ref.watch(showBranchLabelsProvider),
                       selected: shown[i].id == selected,
                       onTap: () => setState(() => _selected = shown[i].id),
                     ),
@@ -519,8 +521,11 @@ class _StudentRowView extends StatelessWidget {
     required this.row,
     required this.selected,
     required this.onTap,
+    this.showBranch = false,
   });
 
+  /// Say which branch(es) the student is in (every branch in view).
+  final bool showBranch;
   final StudentRow row;
   final bool selected;
   final VoidCallback onTap;
@@ -570,7 +575,11 @@ class _StudentRowView extends StatelessWidget {
                           ],
                         ),
                         Text(
-                          PhoneFormatter.display(row.phone),
+                          showBranch && row.branches.isNotEmpty
+                              ? '${PhoneFormatter.display(row.phone)} · ${row.branches.join(', ')}'
+                              : PhoneFormatter.display(row.phone),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 12,
                             color: AppColors.inkMuted,

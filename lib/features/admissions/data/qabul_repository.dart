@@ -23,9 +23,15 @@ class QabulRepository {
     String? level,
     Set<int> weekdays = const {},
     String? timeOfDay,
+    int? branchId,
   }) async {
     final json = await _api.get(
       '/groups/search',
+      // The owner can look at one branch's groups (id) or all of them (0),
+      // whatever branch is in view; null = the branch in view.
+      headers: branchId == null
+          ? null
+          : {'X-Branch': branchId == 0 ? 'all' : '$branchId'},
       query: {
         'subject_id': ?(subjectId == null ? null : '$subjectId'),
         'level': ?level,

@@ -30,6 +30,9 @@ class SubjectsListScreenState extends ConsumerState<SubjectsListScreen> {
     super.dispose();
   }
 
+  /// Called by the shell when the owner switches branch.
+  void reload() => _reload();
+
   void _reload() {
     final next = ref.read(subjectsRepositoryProvider).list();
     setState(() {

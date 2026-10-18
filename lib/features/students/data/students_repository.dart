@@ -71,6 +71,8 @@ class PhoneOwner {
     required this.fullName,
     required this.phone,
     required this.groupNames,
+    this.branchNames = const [],
+    this.inScope = true,
   });
 
   final int studentId;
@@ -80,11 +82,22 @@ class PhoneOwner {
   /// Groups they're currently active in.
   final List<String> groupNames;
 
+  /// The branches they are in. For a student of ANOTHER branch ([inScope]
+  /// false) this and the name are all that is shown.
+  final List<String> branchNames;
+
+  /// False: the student belongs only to another branch -- the app offers
+  /// "Shu o'quvchini mening filialimga qo'shish".
+  final bool inScope;
+
   factory PhoneOwner.fromJson(Map<String, dynamic> json) => PhoneOwner(
     studentId: json['student_id'] as int,
     fullName: json['full_name'] as String,
     phone: json['phone'] as String,
     groupNames: (json['group_names'] as List<dynamic>).cast<String>(),
+    branchNames: (json['branch_names'] as List<dynamic>? ?? const [])
+        .cast<String>(),
+    inScope: json['in_scope'] as bool? ?? true,
   );
 }
 
@@ -204,6 +217,16 @@ class StudentsRepository {
             )
             as Map<String, dynamic>;
     return TransferResult.fromJson(json);
+  }
+
+  /// "Shu o'quvchini mening filialimga qo'shish": the same person is put in
+  /// this branch too (the number must match). Their shared details show here;
+  /// the other branch's groups, payments and notes do not.
+  Future<Student> joinBranch(int id, {required String phone}) async {
+    final json =
+        await _api.post('/students/$id/join-branch', body: {'phone': phone})
+            as Map<String, dynamic>;
+    return Student.fromJson(json);
   }
 
   Future<Student> get(int id) async {

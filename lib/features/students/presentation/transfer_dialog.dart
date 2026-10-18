@@ -7,8 +7,10 @@ import '../../../services/api/api_client.dart';
 import '../../admissions/data/qabul_models.dart';
 import '../../admissions/presentation/admissions_ui.dart';
 import '../../admissions/presentation/qabul_form.dart'
-    show GroupRow, groupPageSize, qabulGroupsProvider, searchGroups;
+    show GroupRow, groupPageSize, qabulBranchGroupsProvider, searchGroups;
 import '../../admissions/presentation/qabul_widgets.dart';
+import '../../branches/application/branch_view.dart';
+import '../../branches/data/branches_repository.dart';
 import '../../enrollments/data/enrollments_repository.dart';
 import '../data/student_models.dart';
 import '../data/students_repository.dart';
@@ -43,6 +45,10 @@ class _TransferDialogState extends ConsumerState<TransferDialog> {
   final _search = TextEditingController();
   final _note = TextEditingController();
   int _shown = groupPageSize;
+
+  /// The owner's choice of Filial for the new group: a branch id, 0 = every
+  /// branch, null = the branch in view (untouched).
+  int? _branchPick;
   late ProfileGroup? _from = _initialFrom();
   GroupMatch? _to;
   Future<FirstChargePreview>? _preview;
@@ -106,7 +112,10 @@ class _TransferDialogState extends ConsumerState<TransferDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final groups = ref.watch(qabulGroupsProvider);
+    final groups = ref.watch(qabulBranchGroupsProvider(_branchPick));
+    final branches = ref.watch(branchListProvider).value ?? const <Branch>[];
+    final viewing = ref.watch(branchViewProvider);
+    final pickedBranch = _branchPick ?? viewing ?? 0;
     final taken = {for (final g in _current) g.groupId};
     final all = (groups.value ?? const <GroupMatch>[])
         .where((g) => !taken.contains(g.groupId))
@@ -143,6 +152,36 @@ class _TransferDialogState extends ConsumerState<TransferDialog> {
                   ),
                 const SizedBox(height: 16),
                 const FieldCaption('Qaysi guruhga o\'tadi'),
+                // Only the owner has more than one branch to choose from: the
+                // courses below are that branch's.
+                if (branches.length > 1) ...<Widget>[
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: <Widget>[
+                      OptionPill(
+                        'Hammasi',
+                        key: const ValueKey('transfer-branch-all'),
+                        selected: pickedBranch == 0,
+                        onTap: () => setState(() {
+                          _branchPick = 0;
+                          _to = null;
+                        }),
+                      ),
+                      for (final b in branches)
+                        OptionPill(
+                          b.name,
+                          key: ValueKey('transfer-branch-${b.id}'),
+                          selected: pickedBranch == b.id,
+                          onTap: () => setState(() {
+                            _branchPick = b.id;
+                            _to = null;
+                          }),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                ],
                 TextField(
                   key: const ValueKey('transfer-search'),
                   controller: _search,
@@ -174,6 +213,7 @@ class _TransferDialogState extends ConsumerState<TransferDialog> {
                     child: GroupRow(
                       key: ValueKey('transfer-to-${m.groupId}'),
                       group: m,
+                      showBranch: pickedBranch == 0 && branches.length > 1,
                       selected: to?.groupId == m.groupId,
                       onTap: () => _pickTo(m),
                     ),

@@ -7,6 +7,8 @@ import '../../../core/formatters/phone_formatter.dart';
 import '../../../core/widgets/person_avatar.dart';
 import '../../../core/widgets/status_chip.dart';
 import '../../admissions/presentation/admissions_ui.dart';
+import '../../branches/application/branch_view.dart';
+import '../../branches/presentation/choose_branch.dart';
 import '../data/teachers_repository.dart';
 import 'teacher_form_dialog.dart';
 import 'teacher_panel.dart';
@@ -54,6 +56,8 @@ class TeachersScreenState extends ConsumerState<TeachersScreen> {
   }
 
   Future<void> _create() async {
+    if (!await ensureBranchChosen(context, ref)) return;
+    if (!mounted) return;
     final saved = await showTeacherFormDialog(context);
     if (saved == true) reload();
   }
@@ -243,6 +247,7 @@ class TeachersScreenState extends ConsumerState<TeachersScreen> {
                     itemBuilder: (context, i) => _TeacherRow(
                       key: ValueKey('teacher-${shown[i].id}'),
                       teacher: shown[i],
+                      showBranch: ref.watch(showBranchLabelsProvider),
                       selected: shown[i].id == selected,
                       onTap: () => setState(() => _selected = shown[i].id),
                     ),
@@ -311,8 +316,11 @@ class _TeacherRow extends StatelessWidget {
     required this.teacher,
     required this.selected,
     required this.onTap,
+    this.showBranch = false,
   });
 
+  /// Say which branch(es) the teacher works in (every branch in view).
+  final bool showBranch;
   final Teacher teacher;
   final bool selected;
   final VoidCallback onTap;
@@ -356,9 +364,15 @@ class _TeacherRow extends StatelessWidget {
                           ],
                         ),
                         Text(
-                          t.phone == null
-                              ? '—'
-                              : PhoneFormatter.display(t.phone!),
+                          [
+                            t.phone == null
+                                ? '—'
+                                : PhoneFormatter.display(t.phone!),
+                            if (showBranch && t.branchNames.isNotEmpty)
+                              t.branchNames.join(', '),
+                          ].join(' · '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             fontSize: 12,
                             color: AppColors.inkMuted,

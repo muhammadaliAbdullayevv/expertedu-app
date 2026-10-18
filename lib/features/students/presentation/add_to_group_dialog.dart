@@ -5,6 +5,7 @@ import '../../../app/theme/app_theme.dart';
 import '../../../core/formatters/currency_formatter.dart';
 import '../../../services/api/api_client.dart';
 import '../../admissions/data/qabul_models.dart';
+import '../../branches/application/branch_view.dart';
 import '../../admissions/data/qabul_repository.dart';
 import '../../admissions/presentation/admissions_ui.dart';
 import '../../admissions/presentation/qabul_form.dart'
@@ -217,6 +218,7 @@ class _AddToGroupDialogState extends ConsumerState<AddToGroupDialog> {
                     child: GroupRow(
                       key: ValueKey('add-group-${m.groupId}'),
                       group: m,
+                      showBranch: ref.watch(showBranchLabelsProvider),
                       selected: g?.groupId == m.groupId,
                       onTap: () => _pick(m),
                     ),

@@ -9,12 +9,14 @@ import '../../../core/widgets/person_avatar.dart';
 import '../../../core/widgets/status_chip.dart';
 import '../../admissions/presentation/admissions_ui.dart';
 import '../../auth/application/session_controller.dart';
+import '../../branches/application/branch_view.dart';
 import '../../finance/data/finance_repository.dart';
 import '../../finance/presentation/finance_screen.dart';
 import '../../photos/photo_actions.dart';
 import '../../photos/photos_repository.dart';
 import '../../timetable/data/timetable_models.dart';
 import '../data/teachers_repository.dart';
+import 'teacher_branches_dialog.dart';
 import 'teacher_form_dialog.dart';
 import 'teacher_text.dart';
 
@@ -72,6 +74,11 @@ class _TeacherPanelState extends ConsumerState<TeacherPanel> {
 
   Future<void> _edit(Teacher teacher) async {
     final saved = await showTeacherFormDialog(context, teacher: teacher);
+    if (saved == true && mounted) _reload();
+  }
+
+  Future<void> _branches(Teacher teacher) async {
+    final saved = await showTeacherBranchesDialog(context, teacher: teacher);
     if (saved == true && mounted) _reload();
   }
 
@@ -236,6 +243,12 @@ class _TeacherPanelState extends ConsumerState<TeacherPanel> {
                       tone: t.isActive ? StatusTone.ok : StatusTone.neutral,
                     ),
                     StatusChip('${p.studentTotal} o\'quvchi'),
+                    for (final name in t.branchNames)
+                      StatusChip(
+                        name,
+                        key: ValueKey('teacher-branch-chip-$name'),
+                        tone: StatusTone.info,
+                      ),
                   ],
                 ),
               ),
@@ -268,6 +281,7 @@ class _TeacherPanelState extends ConsumerState<TeacherPanel> {
           onSelected: (value) => switch (value) {
             'photo' => _photo(t, remove: false),
             'photo-remove' => _photo(t, remove: true),
+            'branches' => _branches(t),
             'archive' => _setActive(p, false),
             _ => _setActive(p, true),
           },
@@ -284,6 +298,12 @@ class _TeacherPanelState extends ConsumerState<TeacherPanel> {
                 key: ValueKey('menu-photo-remove'),
                 value: 'photo-remove',
                 child: Text('Rasmni o\'chirish'),
+              ),
+            if (ref.read(sessionControllerProvider).isOwner)
+              const PopupMenuItem(
+                key: ValueKey('menu-branches'),
+                value: 'branches',
+                child: Text('Filiallarni o\'zgartirish'),
               ),
             const PopupMenuDivider(),
             PopupMenuItem(
@@ -430,14 +450,15 @@ class _TeacherPanelState extends ConsumerState<TeacherPanel> {
 
 /// One group: only its name, days and times, and how many students. Its
 /// numbers (attendance, money) are on the group's own page.
-class _GroupCard extends StatelessWidget {
+class _GroupCard extends ConsumerWidget {
   const _GroupCard({required this.group});
 
   final TeacherGroupCard group;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final g = group;
+    final showBranch = ref.watch(showBranchLabelsProvider);
     return Container(
       key: ValueKey('teacher-group-${g.groupId}'),
       margin: const EdgeInsets.only(bottom: 10),
@@ -454,9 +475,17 @@ class _GroupCard extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
           ),
-          if ([?g.subjectName, ?g.level].isNotEmpty)
+          if ([
+            ?g.subjectName,
+            ?g.level,
+            if (showBranch) ?g.branchName,
+          ].isNotEmpty)
             Text(
-              [?g.subjectName, ?g.level].join(' · '),
+              [
+                ?g.subjectName,
+                ?g.level,
+                if (showBranch) ?g.branchName,
+              ].join(' · '),
               style: const TextStyle(fontSize: 12, color: AppColors.inkMuted),
             ),
           const SizedBox(height: 8),

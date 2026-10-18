@@ -66,12 +66,18 @@ class AuthUser {
     required this.phone,
     required this.fullName,
     required this.role,
+    this.branchId,
+    this.branchName,
   });
 
   final String id;
   final String phone;
   final String fullName;
   final String role;
+
+  /// An admin works in one branch (the owner sees every branch: null).
+  final int? branchId;
+  final String? branchName;
 
   bool get isOwner => role == 'owner';
 
@@ -81,6 +87,8 @@ class AuthUser {
       phone: json['phone'] as String,
       fullName: json['full_name'] as String,
       role: json['role'] as String,
+      branchId: json['branch_id'] as int?,
+      branchName: json['branch_name'] as String?,
     );
   }
 }

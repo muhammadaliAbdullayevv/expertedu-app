@@ -20,6 +20,7 @@ class AppSidebar extends StatelessWidget {
     this.counts = const {},
     this.compact = false,
     this.localMode = false,
+    this.branchSlot,
   });
 
   static const double width = 244;
@@ -38,6 +39,10 @@ class AppSidebar extends StatelessWidget {
 
   /// The app is on this computer's own test data, not the real server.
   final bool localMode;
+
+  /// The branch in view (the owner's switcher) or the admin's branch name,
+  /// right under the logo.
+  final Widget? branchSlot;
 
   @override
   Widget build(BuildContext context) {
@@ -63,6 +68,10 @@ class AppSidebar extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             _Brand(compact: compact),
+            if (branchSlot != null) ...<Widget>[
+              branchSlot!,
+              const SizedBox(height: 10),
+            ],
             Expanded(
               child: ListView(
                 padding: EdgeInsets.zero,

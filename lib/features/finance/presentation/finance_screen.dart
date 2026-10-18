@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../branches/presentation/choose_branch.dart';
 import '../../../app/theme/app_theme.dart';
 import '../../../core/extensions/build_context_x.dart';
 import '../../../core/formatters/currency_formatter.dart';
@@ -462,6 +463,9 @@ class _SalariesViewState extends ConsumerState<_SalariesView>
   }
 
   Future<void> _pay(SalaryMonth month, TeacherSalary teacher) async {
+    // A payout comes from one branch's pay.
+    if (!await ensureBranchChosen(context, ref, what: 'to\'lanadi')) return;
+    if (!mounted) return;
     final saved = await showExpenseDialog(
       context,
       ref,
@@ -674,6 +678,8 @@ class _ExpensesViewState extends ConsumerState<_ExpensesView>
   });
 
   Future<void> _add() async {
+    if (!await ensureBranchChosen(context, ref, what: 'yoziladi')) return;
+    if (!mounted) return;
     final saved = await showExpenseDialog(context, ref);
     if (saved == true) widget.onChanged();
   }

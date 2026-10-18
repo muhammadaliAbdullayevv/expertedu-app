@@ -10,6 +10,7 @@ import '../../../core/formatters/phone_formatter.dart';
 import '../../../core/formatters/uz_phone_mask_formatter.dart';
 import '../../../core/widgets/status_chip.dart';
 import '../../../services/api/api_client.dart';
+import '../../branches/application/branch_view.dart';
 import '../../subjects/data/subjects_repository.dart';
 import '../data/admissions_repository.dart';
 import '../data/qabul_models.dart';
@@ -29,6 +30,16 @@ final qabulGroupsProvider = FutureProvider.autoDispose<List<GroupMatch>>((
   final found = await ref.read(qabulRepositoryProvider).searchGroups();
   return <GroupMatch>[...found.exact, ...found.near];
 });
+
+/// Groups of one branch for the owner's "Guruhni almashtirish": [branch] is a
+/// branch id, 0 = every branch, null = the branch in view.
+final qabulBranchGroupsProvider = FutureProvider.autoDispose
+    .family<List<GroupMatch>, int?>((ref, branch) async {
+      final found = await ref
+          .read(qabulRepositoryProvider)
+          .searchGroups(branchId: branch);
+      return <GroupMatch>[...found.exact, ...found.near];
+    });
 
 final qabulSubjectsProvider = FutureProvider.autoDispose<List<Subject>>(
   (ref) => ref.read(admissionsRepositoryProvider).subjects(),
@@ -362,6 +373,7 @@ class QabulFormState extends ConsumerState<QabulForm> {
       });
     }
     final noSchedule = all.where((g) => g.slots.isEmpty).length;
+    final showBranches = ref.watch(showBranchLabelsProvider);
     return Focus(
       canRequestFocus: false,
       onKeyEvent: _onKey,
@@ -375,6 +387,7 @@ class QabulFormState extends ConsumerState<QabulForm> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 if (noSchedule > 0) _scheduleBanner(noSchedule),
+                if (showBranches) _allBranchesNote(),
                 Container(
                   padding: const EdgeInsets.all(28),
                   decoration: BoxDecoration(
@@ -398,6 +411,28 @@ class QabulFormState extends ConsumerState<QabulForm> {
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  /// The owner looking at every branch: a request for a group goes to that
+  /// group's branch; one without a group has to go somewhere.
+  Widget _allBranchesNote() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Container(
+        key: const ValueKey('all-branches-note'),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.accentSoft,
+          borderRadius: BorderRadius.circular(AppRadius.button),
+        ),
+        child: const Text(
+          'Hammasi rejimida so\'rov tanlangan guruhning filialiga yoziladi. '
+          'Guruhsiz so\'rov Bosh ofisga tushadi — boshqa filial uchun avval '
+          'chapdan o\'sha filialni tanlang.',
+          style: TextStyle(fontSize: 13, color: AppColors.accentText),
         ),
       ),
     );
@@ -497,6 +532,7 @@ class QabulFormState extends ConsumerState<QabulForm> {
             child: GroupRow(
               key: ValueKey('group-${g.groupId}'),
               group: g,
+              showBranch: ref.watch(showBranchLabelsProvider),
               selected: _group?.groupId == g.groupId,
               onTap: () {
                 _choose(g);
@@ -799,7 +835,10 @@ class _DuplicateWarning extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lines = <String>[
-      if (check.phoneStudent != null)
+      if (check.phoneStudent != null && !check.phoneStudent!.inScope)
+        'Bu raqam ${check.phoneStudent!.branchNames.join(', ')} filialidagi '
+            'o\'quvchiniki: ${check.phoneStudent!.fullName}.'
+      else if (check.phoneStudent != null)
         'Bu raqam o\'quvchiniki: ${check.phoneStudent!.fullName}'
             '${_groups(check.phoneStudent!.groups)}.',
       for (final l in check.phoneLeads)
@@ -863,11 +902,15 @@ class GroupRow extends StatelessWidget {
     required this.group,
     required this.selected,
     required this.onTap,
+    this.showBranch = false,
   });
 
   final GroupMatch group;
   final bool selected;
   final VoidCallback onTap;
+
+  /// Say which branch the group is in (the owner looking at every branch).
+  final bool showBranch;
 
   @override
   Widget build(BuildContext context) {
@@ -912,6 +955,15 @@ class GroupRow extends StatelessWidget {
                           : AppColors.warnText,
                     ),
                   ),
+                  if (showBranch && group.branchName != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: StatusChip(
+                        group.branchName!,
+                        key: ValueKey('group-branch-${group.groupId}'),
+                        tone: StatusTone.info,
+                      ),
+                    ),
                 ],
               ),
             ),

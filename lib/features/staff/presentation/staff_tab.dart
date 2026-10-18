@@ -7,6 +7,8 @@ import '../../../core/formatters/phone_formatter.dart';
 import '../../../core/widgets/table_card.dart';
 import '../../../core/widgets/uz_phone_field.dart';
 import '../../admissions/presentation/admissions_ui.dart';
+import '../../branches/application/branch_view.dart';
+import '../../branches/data/branches_repository.dart';
 import '../data/staff_repository.dart';
 
 /// Settings' "Xodimlar" tab (owner only): the owner and the admins they've
@@ -39,6 +41,7 @@ class _StaffTabState extends ConsumerState<StaffTab> {
     TableColumn('Xodim', flex: 3),
     TableColumn('Telefon', flex: 2),
     TableColumn('Rol', flex: 1),
+    TableColumn('Filial', flex: 2),
     TableColumn('Holat', flex: 1),
     TableColumn('Oxirgi kirish', flex: 2),
     TableColumn('', width: 56),
@@ -68,8 +71,8 @@ class _StaffTabState extends ConsumerState<StaffTab> {
                 children: <Widget>[
                   Expanded(
                     child: Text(
-                      'Adminlar hamma ishni qila oladi; xodimlar va moliya '
-                      'faqat egasiga ko\'rinadi.',
+                      'Har bir admin faqat o\'z filialini ko\'radi; xodimlar, moliya '
+                      'va oylik faqat egasiga ko\'rinadi.',
                       style: muted,
                     ),
                   ),
@@ -100,12 +103,19 @@ class _StaffTabState extends ConsumerState<StaffTab> {
                         style: muted,
                       ),
                       3 => Text(
+                        member.isOwner
+                            ? 'Hamma filial'
+                            : (member.branchName ?? '—'),
+                        key: ValueKey('staff-branch-${member.id}'),
+                        style: muted,
+                      ),
+                      4 => Text(
                         member.isActive ? 'Faol' : 'O\'chirilgan',
                         style: member.isActive
                             ? muted
                             : TextStyle(color: context.colors.error),
                       ),
-                      4 => Text(
+                      5 => Text(
                         member.lastLoginAt == null
                             ? 'Hali kirmagan'
                             : DateFormatters.dateTime(member.lastLoginAt!),
@@ -155,6 +165,7 @@ class _StaffFormState extends ConsumerState<_StaffForm> {
   final _phone = TextEditingController();
   final _password = TextEditingController();
   late bool _active = widget.member?.isActive ?? true;
+  late int? _branch = widget.member?.branchId;
   bool _saving = false;
   String? _error;
 
@@ -182,6 +193,7 @@ class _StaffFormState extends ConsumerState<_StaffForm> {
           phone: UzPhoneField.toE164(_phone.text),
           fullName: _name.text.trim(),
           password: _password.text,
+          branchId: _branch,
         );
       } else {
         final name = _name.text.trim();
@@ -189,6 +201,7 @@ class _StaffFormState extends ConsumerState<_StaffForm> {
           member.id,
           fullName: name == member.fullName ? null : name,
           isActive: _active == member.isActive ? null : _active,
+          branchId: _branch == member.branchId ? null : _branch,
         );
         if (_password.text.isNotEmpty) {
           await repo.resetPassword(member.id, _password.text);
@@ -242,6 +255,13 @@ class _StaffFormState extends ConsumerState<_StaffForm> {
                         validator: (v) => (v ?? '').trim().length == 9
                             ? null
                             : '+998 dan keyin 9 ta raqam bo\'lishi kerak',
+                      ),
+                    ],
+                    if (member == null || !member.isOwner) ...<Widget>[
+                      const SizedBox(height: 14),
+                      _BranchField(
+                        value: _branch,
+                        onChanged: (id) => setState(() => _branch = id),
                       ),
                     ],
                     const SizedBox(height: 14),
@@ -306,6 +326,36 @@ class _StaffFormState extends ConsumerState<_StaffForm> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The branch an admin works in: they see only this branch's students, groups,
+/// money and Qabul, whatever the owner does elsewhere.
+class _BranchField extends ConsumerWidget {
+  const _BranchField({required this.value, required this.onChanged});
+
+  final int? value;
+  final ValueChanged<int?> onChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final branches = ref.watch(branchListProvider).value ?? const <Branch>[];
+    final selected = branches.any((b) => b.id == value) ? value : null;
+    return DropdownButtonFormField<int>(
+      key: const ValueKey('staff-branch-field'),
+      initialValue: selected,
+      isExpanded: true,
+      decoration: const InputDecoration(
+        labelText: 'Filial',
+        helperText: 'Admin faqat shu filialni ko\'radi',
+      ),
+      items: <DropdownMenuItem<int>>[
+        for (final b in branches)
+          DropdownMenuItem(value: b.id, child: Text(b.name)),
+      ],
+      onChanged: onChanged,
+      hint: const Text('Bosh ofis'),
     );
   }
 }

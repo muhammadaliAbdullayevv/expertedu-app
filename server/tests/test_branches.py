@@ -123,6 +123,12 @@ async def test_the_owner_sees_everything_or_one_branch_and_an_admin_cannot_choos
     # An admin's X-Branch header is ignored: A2 stays in Chilonzor.
     cheat = client_for(world.admin2_id, branch=world.b1)
     assert ids((await cheat.get("/groups")).json()) == [world.g2]
+    # "all" is the same as no header -- the app uses it to look past the branch in view.
+    in2 = client_for(world.api.owner_id, "owner", branch=world.b2)
+    everything = await in2.get("/groups", headers={"X-Branch": "all"})
+    assert ids(everything.json()) == sorted([world.g1, world.g2])
+    assert (await in2.get("/groups", headers={"X-Branch": "abc"})).status_code == 400
+    await in2.aclose()
     # An unknown branch is a 404 for the owner.
     assert (await client_for(world.api.owner_id, "owner", branch=999).get("/groups")).status_code == 404
     for c in (only2, cheat):

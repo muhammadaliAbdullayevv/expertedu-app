@@ -17,6 +17,8 @@ class Teacher {
     this.groupCount,
     this.studentCount,
     this.photo,
+    this.branchIds = const [],
+    this.branchNames = const [],
   });
 
   final int id;
@@ -27,6 +29,10 @@ class Teacher {
 
   /// Stored name of the profile photo; null = none.
   final String? photo;
+
+  /// The branches they work in (within the branch in view).
+  final List<int> branchIds;
+  final List<String> branchNames;
 
   /// Active groups taught -- only populated by [TeachersRepository.list].
   final int? groupCount;
@@ -43,6 +49,9 @@ class Teacher {
     groupCount: json['group_count'] as int?,
     studentCount: json['student_count'] as int?,
     photo: json['photo'] as String?,
+    branchIds: (json['branch_ids'] as List<dynamic>? ?? const []).cast<int>(),
+    branchNames: (json['branch_names'] as List<dynamic>? ?? const [])
+        .cast<String>(),
   );
 }
 
@@ -59,6 +68,7 @@ class TeacherGroupCard {
     required this.studentCount,
     this.capacity,
     this.schedule = const [],
+    this.branchName,
   });
 
   final int groupId;
@@ -69,6 +79,9 @@ class TeacherGroupCard {
   final int? capacity;
   final List<ScheduleSlot> schedule;
 
+  /// Which branch it is in (shown while looking at every branch).
+  final String? branchName;
+
   factory TeacherGroupCard.fromJson(Map<String, dynamic> json) =>
       TeacherGroupCard(
         groupId: json['group_id'] as int,
@@ -77,6 +90,7 @@ class TeacherGroupCard {
         level: json['level'] as String?,
         studentCount: json['student_count'] as int,
         capacity: json['capacity'] as int?,
+        branchName: json['branch_name'] as String?,
         schedule: [
           for (final s in json['schedule'] as List<dynamic>? ?? const [])
             ScheduleSlot.fromJson(s as Map<String, dynamic>),
@@ -215,6 +229,17 @@ class TeachersRepository {
             )
             as Map<String, dynamic>;
     return TeacherProfileData.fromJson(json);
+  }
+
+  /// OWNER ONLY: the branches this teacher works in (at least one).
+  Future<Teacher> setBranches(int id, List<int> branchIds) async {
+    final json =
+        await _api.put(
+              '/teachers/$id/branches',
+              body: {'branch_ids': branchIds},
+            )
+            as Map<String, dynamic>;
+    return Teacher.fromJson(json);
   }
 
   /// Archive (false) or bring back (true).

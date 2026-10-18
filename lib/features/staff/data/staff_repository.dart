@@ -14,6 +14,8 @@ class StaffMember {
     required this.role,
     required this.isActive,
     this.lastLoginAt,
+    this.branchId,
+    this.branchName,
   });
 
   final int id;
@@ -24,6 +26,10 @@ class StaffMember {
   final String role;
   final bool isActive;
   final DateTime? lastLoginAt;
+
+  /// The branch an admin works in (the owner has none).
+  final int? branchId;
+  final String? branchName;
 
   bool get isOwner => role == 'owner';
 
@@ -36,6 +42,8 @@ class StaffMember {
     lastLoginAt: json['last_login_at'] == null
         ? null
         : DateTime.parse(json['last_login_at'] as String),
+    branchId: json['branch_id'] as int?,
+    branchName: json['branch_name'] as String?,
   );
 }
 
@@ -56,6 +64,7 @@ class StaffRepository {
     required String phone,
     required String fullName,
     required String password,
+    int? branchId,
   }) async {
     final json = await _api.post(
       '/staff',
@@ -63,15 +72,25 @@ class StaffRepository {
         'phone': phone,
         'full_name': fullName,
         'password': password,
+        'branch_id': branchId,
       },
     );
     return StaffMember.fromJson(json as Map<String, dynamic>);
   }
 
-  Future<StaffMember> update(int id, {String? fullName, bool? isActive}) async {
+  Future<StaffMember> update(
+    int id, {
+    String? fullName,
+    bool? isActive,
+    int? branchId,
+  }) async {
     final json = await _api.patch(
       '/staff/$id',
-      body: <String, dynamic>{'full_name': ?fullName, 'is_active': ?isActive},
+      body: <String, dynamic>{
+        'full_name': ?fullName,
+        'is_active': ?isActive,
+        'branch_id': ?branchId,
+      },
     );
     return StaffMember.fromJson(json as Map<String, dynamic>);
   }

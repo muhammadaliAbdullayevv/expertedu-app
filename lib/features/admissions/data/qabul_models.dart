@@ -22,9 +22,15 @@ class GroupMatch {
     required this.slots,
     required this.matchedDays,
     required this.totalDays,
+    this.branchId,
+    this.branchName,
   });
 
   final int groupId;
+
+  /// The branch it is in (shown while looking at every branch).
+  final int? branchId;
+  final String? branchName;
   final String name;
   final String? subjectName;
   final String? level;
@@ -50,6 +56,8 @@ class GroupMatch {
 
   factory GroupMatch.fromJson(Map<String, dynamic> json) => GroupMatch(
     groupId: json['group_id'] as int,
+    branchId: json['branch_id'] as int?,
+    branchName: json['branch_name'] as String?,
     name: json['name'] as String,
     subjectName: json['subject_name'] as String?,
     level: json['level'] as String?,
@@ -200,6 +208,8 @@ class SimilarStudent {
     required this.fullName,
     required this.phone,
     required this.groups,
+    this.branchNames = const [],
+    this.inScope = true,
   });
 
   final int id;
@@ -207,11 +217,19 @@ class SimilarStudent {
   final String phone;
   final List<String> groups;
 
+  /// The branches they are in; for a student of ANOTHER branch ([inScope]
+  /// false) the name and these are all that is shown.
+  final List<String> branchNames;
+  final bool inScope;
+
   factory SimilarStudent.fromJson(Map<String, dynamic> json) => SimilarStudent(
     id: json['student_id'] as int,
     fullName: json['full_name'] as String,
     phone: json['phone'] as String,
     groups: (json['group_names'] as List<dynamic>).cast<String>(),
+    branchNames: (json['branch_names'] as List<dynamic>? ?? const [])
+        .cast<String>(),
+    inScope: json['in_scope'] as bool? ?? true,
   );
 }
 
