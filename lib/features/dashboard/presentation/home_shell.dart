@@ -71,8 +71,10 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     // Any change to a lead moves the sidebar numbers (and Bugun's).
     _admissionsRefresh.addListener(_onAdmissionsChanged);
     _openStudent.addListener(_onOpenStudentRequest);
-    // A new session starts looking at every branch.
-    Future.microtask(() => ref.read(branchViewProvider.notifier).reset());
+    // A new session starts looking at every branch -- and the branch list
+    // kept from the previous account (an admin's has just their own) is
+    // thrown away.
+    Future.microtask(_newAccountBranches);
     _branchListener = ref.listenManual<int?>(
       branchViewProvider,
       (_, _) => _onBranchChanged(),
@@ -118,8 +120,23 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     _dashboardKey.currentState?.reload();
   }
 
+  String? _accountId = _kNoAccount;
+
+  static const _kNoAccount = '\u0000';
+
+  /// The account changed (another login, or the account switcher): look at
+  /// every branch again and load that account's branches.
+  void _newAccountBranches() {
+    if (!mounted) return;
+    _accountId = _session.user?.id;
+    ref.read(branchViewProvider.notifier).reset();
+    ref.invalidate(branchListProvider);
+  }
+
   void _onSessionChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    if (_session.user?.id != _accountId) _newAccountBranches();
+    setState(() {});
   }
 
   final _dashboardKey = GlobalKey<DashboardScreenState>();
