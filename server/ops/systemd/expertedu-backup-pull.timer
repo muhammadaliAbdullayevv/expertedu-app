@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily pull of the Expert Edu server backups
+
+[Timer]
+# After the server's 03:00 backup; Persistent=true runs it as soon as the laptop is on if it was off at 09:00.
+OnCalendar=*-*-* 09:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

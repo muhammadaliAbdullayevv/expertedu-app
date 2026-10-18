@@ -1,0 +1,6 @@
+[Unit]
+Description=Copy the Expert Edu server backups and photos to this laptop
+
+[Service]
+Type=oneshot
+ExecStart=%h/Documents/expertedu-app/server/ops/pull-backups.sh
