@@ -14,14 +14,7 @@ import '../../students/data/students_repository.dart';
 import 'desktop_dashboard.dart';
 
 class DashboardScreen extends ConsumerStatefulWidget {
-  const DashboardScreen({
-    super.key,
-    required this.onOpenDebtors,
-    required this.onOpenAdmissions,
-  });
-
-  /// Switches HomeShell to the (desktop-only) Qarzdorlar tab.
-  final VoidCallback onOpenDebtors;
+  const DashboardScreen({super.key, required this.onOpenAdmissions});
 
   /// Switches HomeShell to the (desktop-only) Qabul tab.
   final VoidCallback onOpenAdmissions;
@@ -122,7 +115,6 @@ class DashboardScreenState extends ConsumerState<DashboardScreen> {
       return DesktopDashboard(
         key: _desktopKey,
         onOpenAdmissions: widget.onOpenAdmissions,
-        onOpenDebtors: widget.onOpenDebtors,
       );
     }
 

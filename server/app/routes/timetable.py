@@ -120,7 +120,10 @@ async def _timetable(
         """
         select l.*,
                count(a.id) as marked_count,
-               count(a.id) filter (where a.status in ('present', 'late')) as present_count
+               count(a.id) filter (where a.status in ('present', 'late')) as present_count,
+               count(a.id) filter (where a.status = 'late') as late_count,
+               count(a.id) filter (where a.status = 'absent') as absent_count,
+               count(a.id) filter (where a.status = 'excused') as excused_count
         from lessons l
         left join attendance a on a.lesson_id = l.id
         where (l.starts_at at time zone $1)::date between $2 and $3
@@ -200,6 +203,9 @@ async def _timetable(
                 student_count=students,
                 marked_count=row["marked_count"] if row is not None else 0,
                 present_count=row["present_count"] if row is not None else 0,
+                late_count=row["late_count"] if row is not None else 0,
+                absent_count=row["absent_count"] if row is not None else 0,
+                excused_count=row["excused_count"] if row is not None else 0,
             )
         )
     result.sort(key=lambda lesson: (lesson.starts_at, lesson.group_name))

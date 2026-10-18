@@ -382,15 +382,94 @@ def branches_demo() -> None:
     chilonzor.post(f"/enrollments/{added['enrollment_id']}/payments", json={"amount": 100000, "method": "cash"})
 
 
+async def today_demo_db() -> None:
+    """Gives today something to show on Bugun even on a day without schedule:
+    lessons spread around the clock (some marked, one over and unmarked, some
+    still to come), a request nobody answered, and two payment days."""
+    conn = await asyncpg.connect(DATABASE_URL)
+    if await conn.fetchval(
+        "select count(*) from lessons where (starts_at at time zone 'Asia/Tashkent')::date = $1", TODAY
+    ):
+        await conn.close()
+        return
+    print("Bugun: darslar, davomat, javobsiz so'rov, to'lov kunlari...")
+    now = datetime.now()
+    groups = await conn.fetch("select id, teacher_id from groups where is_active order by branch_id, id")
+    # hours from now: past marked, past marked, past unmarked, running, future...
+    plan = [(-6, True), (-4, True), (-2.5, False), (-0.5, False), (1.5, False), (3.5, False)]
+    for i, g in enumerate(groups):
+        offset, marked = plan[i % len(plan)]
+        start = (now + timedelta(hours=offset)).replace(second=0, microsecond=0)
+        start += timedelta(minutes=10 * (i // len(plan)))
+        if start.date() != TODAY:  # keep it inside today
+            start = datetime.combine(TODAY, datetime.min.time()) + timedelta(hours=8 + i % 10)
+        lesson = await conn.fetchval(
+            """
+            insert into lessons (group_id, starts_at, ends_at, teacher_id)
+            values ($1, $2::timestamp at time zone 'Asia/Tashkent', ($2::timestamp + interval '90 minutes') at time zone 'Asia/Tashkent', $3)
+            on conflict (group_id, starts_at) do update set group_id = excluded.group_id returning id
+            """,
+            g["id"], start, g["teacher_id"],
+        )
+        if not marked:
+            continue
+        for e in await conn.fetch("select id from enrollments where group_id = $1 and status = 'active'", g["id"]):
+            r = (e["id"] * 31 + i * 17) % 100
+            status = "absent" if r < 22 else "late" if r < 32 else "excused" if r < 36 else "present"
+            await conn.execute(
+                "insert into attendance (lesson_id, enrollment_id, status) values ($1, $2, $3) on conflict do nothing",
+                lesson, e["id"], status,
+            )
+    # A request that has waited three days.
+    await conn.execute(
+        "update leads set created_at = now() - interval '3 days' "
+        "where id = (select id from leads where stage = 'new' order by id limit 1)"
+    )
+    # Two students whose payment day is today (and who still owe).
+    for row in await conn.fetch(
+        "select cb.charge_id from charge_balances cb where cb.status = 'active' and cb.owed > 0 "
+        "order by cb.charge_id limit 2"
+    ):
+        await conn.execute(
+            "update charges set period_start = $1, due_date = $1, period_end = $1::date + 30 where id = $2",
+            TODAY, row["charge_id"],
+        )
+    await conn.close()
+
+
+def today_demo_api() -> None:
+    """Calls to make today, for every admin that has a request to follow up."""
+    for login in ("998900000002", "998900000003"):
+        api = Api()
+        api.login(login)
+        leads = api.get("/leads")
+        items = leads["items"] if isinstance(leads, dict) else leads
+        for lead in items[:2]:
+            api.post(
+                "/follow-up-tasks",
+                json={
+                    "lead_id": lead["id"],
+                    "title": "Qayta qo'ng'iroq",
+                    "due_at": (datetime.now() - timedelta(hours=2)).astimezone().isoformat(),
+                },
+            )
+
+
 def main() -> None:
     asyncio.run(create_users())
     ids = main_api()
     asyncio.run(charges_attendance_payments(ids))
     payments_and_rest(ids)
     branches_demo()
+    asyncio.run(today_demo_db())
+    today_demo_api()
     print("\nTayyor. Kirish: 90 000 00 01 / demo1234 (egasi), 90 000 00 02 / demo1234 (Bosh ofis admini),")
     print("90 000 00 03 (Chilonzor admini), 90 000 00 04 (Yunusobod admini) -- hammasi demo1234.")
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["today"]:
+        asyncio.run(today_demo_db())
+        today_demo_api()
+    else:
+        main()

@@ -89,6 +89,9 @@ class TimetableLesson {
     required this.studentCount,
     required this.markedCount,
     required this.presentCount,
+    this.lateCount = 0,
+    this.absentCount = 0,
+    this.excusedCount = 0,
   });
 
   final int groupId;
@@ -107,7 +110,12 @@ class TimetableLesson {
   final bool isExtra;
   final int studentCount;
   final int markedCount;
+
+  /// Came: on time or late (late is also counted in [lateCount]).
   final int presentCount;
+  final int lateCount;
+  final int absentCount;
+  final int excusedCount;
 
   bool get isCancelled => status == 'cancelled';
   bool get hasStarted => !startsAt.isAfter(DateTime.now());
@@ -130,6 +138,9 @@ class TimetableLesson {
         studentCount: json['student_count'] as int,
         markedCount: json['marked_count'] as int,
         presentCount: json['present_count'] as int,
+        lateCount: json['late_count'] as int? ?? 0,
+        absentCount: json['absent_count'] as int? ?? 0,
+        excusedCount: json['excused_count'] as int? ?? 0,
       );
 }
 

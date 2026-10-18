@@ -161,7 +161,6 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   late final Map<Destination, Widget> _pages = <Destination, Widget>{
     Destination.today: DashboardScreen(
       key: _dashboardKey,
-      onOpenDebtors: () => _go(Destination.debtors),
       onOpenAdmissions: () => _go(Destination.admissions),
     ),
     Destination.admissions: AdmissionsScreen(key: _admissionsKey),

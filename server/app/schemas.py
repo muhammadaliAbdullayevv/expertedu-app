@@ -427,19 +427,93 @@ class DashboardSummary(BaseModel):
 
 
 class BranchStats(BaseModel):
-    """One branch's line on the owner's home page."""
+    """One branch's line on the owner's home page: today, not money."""
 
     branch_id: int
     name: str
     is_headquarters: bool = False
     active_students: int
-    active_groups: int
-    collected_this_month: int
-    total_debt: int
-    debtor_count: int
-    attendance_rate_7d: float | None = None
-    lessons_today: int
-    open_leads: int
+    lessons_planned: int
+    lessons_held: int
+    # Lessons already over with no attendance marked.
+    lessons_unmarked: int
+    attendance_rate: float | None = None
+    new_leads_today: int
+    trials_today: int
+    at_risk_students: int
+
+
+class AbsentToday(BaseModel):
+    student_id: int
+    full_name: str
+    phone: str
+    parent_phone: str | None = None
+    group_id: int
+    group_name: str
+    starts_at: datetime
+
+
+class TodayCall(BaseModel):
+    task_id: int
+    lead_id: int
+    lead_name: str
+    lead_phone: str
+    title: str
+    due_at: datetime
+    overdue: bool
+
+
+class TodayLead(BaseModel):
+    lead_id: int
+    full_name: str
+    phone: str
+    subject_name: str | None = None
+    created_at: datetime
+
+
+class PayToday(BaseModel):
+    student_id: int
+    full_name: str
+    group_name: str
+    amount: int
+
+
+class TodayStats(BaseModel):
+    """The owner's strip: how the day is going (no money)."""
+
+    active_students: int
+    lessons_planned: int
+    lessons_held: int
+    lessons_unmarked: int
+    came: int
+    absent: int
+    expected: int
+    attendance_rate: float | None = None
+    new_leads_today: int
+    trials_today: int
+    at_risk_students: int
+
+
+class TodayView(BaseModel):
+    """Bugun in one answer: what happened today and what is waiting. Nothing
+    financial except who has to pay."""
+
+    today: date
+    # The owner also gets the stats strip and the branch table.
+    is_owner: bool = False
+    lessons: list["TimetableLesson"]
+    absentees: list[AbsentToday]
+    calls: list[TodayCall]
+    calls_total: int
+    unanswered: list[TodayLead]
+    unanswered_total: int
+    trials_today: list[TrialToday]
+    pay_today: list[PayToday]
+    pay_today_total: int
+    pay_today_amount: int
+    tomorrow_lessons: int
+    tomorrow_trials: int
+    stats: TodayStats
 
 
 class CreateStudentWithEnrollmentRequest(BaseModel):
@@ -944,7 +1018,14 @@ class TimetableLesson(BaseModel):
     is_extra: bool = False
     student_count: int = 0
     marked_count: int = 0
+    # Came: present or late (late is counted in both this and late_count).
     present_count: int = 0
+    late_count: int = 0
+    absent_count: int = 0
+    excused_count: int = 0
+
+
+TodayView.model_rebuild()
 
 
 class SheetStudent(BaseModel):

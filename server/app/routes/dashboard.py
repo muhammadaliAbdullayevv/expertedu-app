@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends
 
@@ -6,7 +6,19 @@ from .. import clock, db, funnel
 from ..money import service as money
 from ..config import settings
 from ..deps import Scope, get_current_user, get_scope, require_owner
-from ..schemas import BranchStats, DashboardSummary, MonthlyRevenue, RecentPayment, TrialToday
+from ..schemas import (
+    AbsentToday,
+    BranchStats,
+    DashboardSummary,
+    MonthlyRevenue,
+    PayToday,
+    RecentPayment,
+    TodayCall,
+    TodayLead,
+    TodayStats,
+    TodayView,
+    TrialToday,
+)
 from .debtors import list_debtors
 from .timetable import _timetable
 
@@ -70,37 +82,219 @@ async def _debt(conn, ids: list[int] | None) -> tuple[int, int]:
     return row["total_debt"], row["debtor_count"]
 
 
+_AT_RISK_BELOW = 0.75
+
+
+async def _at_risk_count(conn, ids: list[int] | None) -> int:
+    """Active students whose last ten marked lessons were attended less than
+    75% (and at least three were marked) -- the same "Xavf ostida" rule as the
+    students table."""
+    return await conn.fetchval(
+        """
+        with marks as (
+          select e.student_id, a.status,
+                 row_number() over (partition by e.student_id order by l.starts_at desc, a.id desc) as n
+          from attendance a
+          join lessons l on l.id = a.lesson_id
+          join enrollments e on e.id = a.enrollment_id
+          join groups g on g.id = e.group_id
+          where ($1::bigint[] is null or g.branch_id = any($1::bigint[]))
+        ), recent as (
+          select student_id,
+                 count(*) as total,
+                 count(*) filter (where status in ('present', 'late')) as came,
+                 count(*) filter (where status <> 'excused') as expected
+          from marks where n <= 10 group by student_id
+        )
+        select count(*) from recent r
+        where r.total >= 3 and r.expected > 0 and r.came::float / r.expected < $2
+          and exists (
+            select 1 from enrollments e join groups g on g.id = e.group_id
+            where e.student_id = r.student_id and e.status = 'active'
+              and ($1::bigint[] is null or g.branch_id = any($1::bigint[])))
+        """,
+        ids,
+        _AT_RISK_BELOW,
+    )
+
+
+def _day_counts(lessons: list, now: datetime) -> dict:
+    """How today's lessons stand: planned (not cancelled), held (attendance
+    marked), over-but-unmarked, and how many came / were absent."""
+    live = [l for l in lessons if l.status != "cancelled"]
+    came = sum(l.present_count for l in live)
+    absent = sum(l.absent_count for l in live)
+    expected = sum(l.marked_count - l.excused_count for l in live)
+    return {
+        "lessons_planned": len(live),
+        "lessons_held": sum(1 for l in live if l.marked_count > 0),
+        "lessons_unmarked": sum(1 for l in live if l.marked_count == 0 and l.ends_at <= now),
+        "came": came,
+        "absent": absent,
+        "expected": expected,
+        "attendance_rate": round(came / expected, 4) if expected else None,
+    }
+
+
+async def _stats(conn, today: date, ids: list[int] | None, lessons: list) -> TodayStats:
+    tz = settings.center_timezone
+    counts = _day_counts(lessons, datetime.now(timezone.utc))
+    students = await funnel.student_counts(conn, today, ids)
+    new_leads = await conn.fetchval(
+        "select count(*) from leads l where (l.created_at at time zone $1)::date = $2 "
+        "and ($3::bigint[] is null or l.branch_id = any($3::bigint[]))",
+        tz, today, ids,
+    )
+    trials = await conn.fetchval(
+        """
+        select count(distinct b.lead_id) from trial_bookings b join trial_sessions ts on ts.id = b.session_id
+        where b.status in ('scheduled', 'attended') and (ts.starts_at at time zone $1)::date = $2
+          and ($3::bigint[] is null or ts.branch_id = any($3::bigint[]))
+        """,
+        tz, today, ids,
+    )
+    return TodayStats(
+        active_students=students["active_students"],
+        new_leads_today=new_leads,
+        trials_today=trials,
+        at_risk_students=await _at_risk_count(conn, ids),
+        **counts,
+    )
+
+
 @router.get("/branches", response_model=list[BranchStats], dependencies=[Depends(require_owner)])
 async def branch_stats():
-    """OWNER ONLY: every branch side by side -- students, what it collected this
-    month, what is owed, how lessons are attended, today's lessons, open requests."""
+    """OWNER ONLY: every branch side by side, for today: lessons held, how they
+    were attended, requests and trials. No money -- that is Moliya's."""
     today = clock.today()
     result = []
     async with db.pool().acquire() as conn:
         for b in await conn.fetch("select id, name, is_headquarters from branches where is_active order by is_headquarters desc, name"):
             ids = [b["id"]]
-            students = await funnel.student_counts(conn, today, ids)
-            leads = await funnel.lead_counts(conn, ids)
-            debt, debtors = await _debt(conn, ids)
             lessons = await _timetable(conn, today, today, ids=ids)
+            st = await _stats(conn, today, ids, lessons)
             result.append(
                 BranchStats(
                     branch_id=b["id"],
                     name=b["name"],
                     is_headquarters=b["is_headquarters"],
-                    active_students=students["active_students"],
-                    active_groups=await conn.fetchval(
-                        "select count(*) from groups where is_active and branch_id = $1", b["id"]
-                    ),
-                    collected_this_month=await _collected_this_month(conn, today.replace(day=1), ids),
-                    total_debt=debt,
-                    debtor_count=debtors,
-                    attendance_rate_7d=await _attendance_rate_7d(conn, today, ids),
-                    lessons_today=sum(1 for l in lessons if l.status != "cancelled"),
-                    open_leads=leads["open_leads"],
+                    active_students=st.active_students,
+                    lessons_planned=st.lessons_planned,
+                    lessons_held=st.lessons_held,
+                    lessons_unmarked=st.lessons_unmarked,
+                    attendance_rate=st.attendance_rate,
+                    new_leads_today=st.new_leads_today,
+                    trials_today=st.trials_today,
+                    at_risk_students=st.at_risk_students,
                 )
             )
     return result
+
+
+@router.get("/today", response_model=TodayView)
+async def today_view(scope: Scope = Depends(get_scope)):
+    """Bugun: today's lessons with how they were attended, who did not come,
+    and what is waiting (calls, requests, trials, who pays today). Scoped to
+    the branch in view; nothing here is money except who has to pay."""
+    today = clock.today()
+    tz = settings.center_timezone
+    ids = scope.ids
+    async with db.pool().acquire() as conn:
+        lessons = await _timetable(conn, today, today, ids=ids)
+        tomorrow = await _timetable(conn, today + timedelta(days=1), today + timedelta(days=1), ids=ids)
+
+        absentees = await conn.fetch(
+            """
+            select s.id as student_id, s.full_name, s.phone, s.parent_phone, g.id as group_id, g.name as group_name,
+                   l.starts_at
+            from attendance a
+            join lessons l on l.id = a.lesson_id
+            join enrollments e on e.id = a.enrollment_id
+            join students s on s.id = e.student_id
+            join groups g on g.id = e.group_id
+            where a.status = 'absent' and l.status = 'active' and (l.starts_at at time zone $1)::date = $2
+              and ($3::bigint[] is null or g.branch_id = any($3::bigint[]))
+            order by l.starts_at, s.full_name
+            """,
+            tz, today, ids,
+        )
+
+        call_rows = await conn.fetch(
+            """
+            select t.id as task_id, t.title, t.due_at, l.id as lead_id, l.full_name as lead_name, l.phone as lead_phone
+            from follow_up_tasks t join leads l on l.id = t.lead_id
+            where t.status = 'open' and (t.due_at at time zone $1)::date <= $2
+              and ($3::bigint[] is null or l.branch_id = any($3::bigint[]))
+            order by t.due_at
+            """,
+            tz, today, ids,
+        )
+        now = datetime.now(timezone.utc)
+        lead_rows = await conn.fetch(
+            """
+            select l.id as lead_id, l.full_name, l.phone, l.created_at, sub.name as subject_name
+            from leads l left join subjects sub on sub.id = l.subject_id
+            where l.stage = 'new' and l.created_at < now() - interval '24 hours'
+              and ($1::bigint[] is null or l.branch_id = any($1::bigint[]))
+            order by l.created_at
+            """,
+            ids,
+        )
+        trial_rows = await conn.fetch(
+            """
+            select l.id as inquiry_id, l.full_name, l.phone, s.name as subject_name, ts.starts_at
+            from trial_bookings b
+            join trial_sessions ts on ts.id = b.session_id
+            join leads l on l.id = b.lead_id
+            left join subjects s on s.id = coalesce(ts.subject_id, l.subject_id)
+            where b.status = 'scheduled' and (ts.starts_at at time zone $1)::date = $2
+              and ($3::bigint[] is null or ts.branch_id = any($3::bigint[]))
+            order by ts.starts_at, l.full_name
+            """,
+            tz, today, ids,
+        )
+        trials_tomorrow = await conn.fetchval(
+            """
+            select count(*) from trial_bookings b join trial_sessions ts on ts.id = b.session_id
+            where b.status = 'scheduled' and (ts.starts_at at time zone $1)::date = $2
+              and ($3::bigint[] is null or ts.branch_id = any($3::bigint[]))
+            """,
+            tz, today + timedelta(days=1), ids,
+        )
+        pay_rows = await conn.fetch(
+            """
+            select s.id as student_id, s.full_name, g.name as group_name, cb.owed as amount
+            from charge_balances cb
+            join enrollments e on e.id = cb.enrollment_id
+            join students s on s.id = e.student_id
+            join groups g on g.id = e.group_id
+            where cb.status = 'active' and cb.due_date = $1 and cb.owed > 0 and e.status = 'active'
+              and ($2::bigint[] is null or g.branch_id = any($2::bigint[]))
+            order by s.full_name
+            """,
+            today, ids,
+        )
+        stats = await _stats(conn, today, ids, lessons)
+
+    return TodayView(
+        today=today,
+        is_owner=scope.user.is_owner,
+        lessons=lessons,
+        absentees=[AbsentToday(**r) for r in absentees],
+        calls=[
+            TodayCall(**r, overdue=r["due_at"] < now) for r in call_rows[:8]
+        ],
+        calls_total=len(call_rows),
+        unanswered=[TodayLead(**r) for r in lead_rows[:4]],
+        unanswered_total=len(lead_rows),
+        trials_today=[TrialToday(**r) for r in trial_rows],
+        pay_today=[PayToday(**r) for r in pay_rows[:8]],
+        pay_today_total=len(pay_rows),
+        pay_today_amount=sum(r["amount"] for r in pay_rows),
+        tomorrow_lessons=sum(1 for l in tomorrow if l.status != "cancelled"),
+        tomorrow_trials=trials_tomorrow,
+        stats=stats,
+    )
 
 
 @router.get("", response_model=DashboardSummary)

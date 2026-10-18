@@ -256,6 +256,12 @@ void main() {
       await settle(tester);
       await settle(tester);
       await shot(tester, 'bugun-now');
+      final chilonzor = find.byKey(const ValueKey('branch-row-3'));
+      if (chilonzor.evaluate().isNotEmpty) {
+        await tester.tap(chilonzor);
+        await settle(tester);
+        await shot(tester, 'bugun-branch');
+      }
       return;
     }
 
