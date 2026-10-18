@@ -1,33 +1,33 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/extensions/build_context_x.dart';
+import '../../../app/theme/app_theme.dart';
 import '../../../core/formatters/currency_formatter.dart';
 import '../../../core/formatters/date_formatters.dart';
-import '../../../core/formatters/phone_formatter.dart';
-import '../../../app/theme/app_theme.dart';
-import '../../students/presentation/open_student.dart';
+import '../../../core/widgets/status_chip.dart';
+import '../../admissions/presentation/admissions_ui.dart';
+import '../../branches/application/branch_view.dart';
 import '../../debtors/data/debtors_repository.dart';
 import '../../debtors/presentation/overdue_label.dart';
-import '../../admissions/data/admissions_models.dart';
-import '../../admissions/presentation/lead_card.dart';
+import '../../students/presentation/open_student.dart';
+import '../../students/presentation/student_text.dart';
+import '../../timetable/data/timetable_models.dart';
+import '../../timetable/data/timetable_repository.dart';
+import '../../timetable/presentation/attendance_sheet_dialog.dart';
 import '../data/dashboard_repository.dart';
 
-/// The home screen on wide (desktop) layouts: the center's key numbers up
-/// top, then what needs doing today and the call log on the left, money on
-/// the right. The phone layout keeps its simpler home -- see DashboardScreen.
+/// Bugun on wide layouts: four figures in one aligned row, today's lessons as
+/// a timeline, and one short list of what needs attention. The owner also gets
+/// every branch side by side (while looking at all of them) and the money; an
+/// admin sees what students owe and what happens today -- never what the
+/// center collects.
 class DesktopDashboard extends ConsumerStatefulWidget {
   const DesktopDashboard({
     super.key,
-    required this.leads,
     required this.onOpenAdmissions,
     required this.onOpenDebtors,
   });
 
-  /// Open leads, owned by DashboardScreen; they're worked in "Qabul".
-  final Future<List<Lead>> leads;
   final VoidCallback onOpenAdmissions;
   final VoidCallback onOpenDebtors;
 
@@ -35,25 +35,46 @@ class DesktopDashboard extends ConsumerStatefulWidget {
   ConsumerState<DesktopDashboard> createState() => DesktopDashboardState();
 }
 
+class _HomeData {
+  const _HomeData(this.summary, this.lessons, this.branches);
+
+  final DashboardSummary summary;
+  final List<TimetableLesson> lessons;
+
+  /// Every branch's figures: only for the owner looking at all of them.
+  final List<BranchStats> branches;
+}
+
 class DesktopDashboardState extends ConsumerState<DesktopDashboard> {
-  static const double _maxContentWidth = 1400;
+  /// Below this the timeline and the attention list stack instead of sitting
+  /// side by side.
+  static const double _twoColumnMinWidth = 1000;
 
-  /// Below this the side-by-side panels get too narrow for a debtor's name,
-  /// amount and payment button on one line -- they stack instead.
-  static const double _twoColumnMinWidth = 1100;
+  late Future<_HomeData> _data = _load();
 
-  late Future<DashboardSummary> _summary;
-
-  @override
-  void initState() {
-    super.initState();
-    _summary = ref.read(dashboardRepositoryProvider).fetch();
+  Future<_HomeData> _load() async {
+    final repo = ref.read(dashboardRepositoryProvider);
+    final summary = await repo.fetch();
+    final lessons = await ref
+        .read(timetableRepositoryProvider)
+        .lessons(summary.today, summary.today);
+    var branches = const <BranchStats>[];
+    if (summary.moneyVisible && ref.read(branchViewProvider) == null) {
+      try {
+        final all = await ref.read(branchListProvider.future);
+        if (all.length > 1) branches = await repo.branches();
+      } catch (_) {
+        // The breakdown is a bonus: the page works without it.
+      }
+    }
+    return _HomeData(summary, lessons, branches);
   }
 
+  /// Called by the shell (refresh button, branch switch).
   void reload() {
-    final next = ref.read(dashboardRepositoryProvider).fetch();
+    final next = _load();
     setState(() {
-      _summary = next;
+      _data = next;
     });
   }
 
@@ -61,149 +82,837 @@ class DesktopDashboardState extends ConsumerState<DesktopDashboard> {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Centered at a readable width on very wide screens -- padding
-        // rather than a constrained box, so the scrollbar stays at the
-        // window's edge.
-        final sidePadding = math.max(
-          24.0,
-          (constraints.maxWidth - _maxContentWidth) / 2,
-        );
-        return ListView(
-          padding: EdgeInsets.fromLTRB(sidePadding, 20, sidePadding, 32),
-          children: <Widget>[
-            FutureBuilder<DashboardSummary>(
-              future: _summary,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 64),
-                    child: Center(child: CircularProgressIndicator()),
-                  );
-                }
-                if (snapshot.hasError) {
-                  return _LoadError(error: snapshot.error!, onRetry: reload);
-                }
-                return _content(
-                  context,
-                  snapshot.data!,
-                  twoColumns:
-                      constraints.maxWidth - 2 * sidePadding >=
-                      _twoColumnMinWidth,
+        return SingleChildScrollView(
+          // The same 32 px as every other page, so the title above lines up
+          // with the first card.
+          padding: const EdgeInsets.fromLTRB(32, 8, 32, 32),
+          child: FutureBuilder<_HomeData>(
+            future: _data,
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return _LoadError(error: snapshot.error!, onRetry: reload);
+              }
+              final data = snapshot.data;
+              if (data == null) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 64),
+                  child: Center(child: CircularProgressIndicator()),
                 );
-              },
-            ),
-          ],
+              }
+              return _content(
+                data,
+                twoColumns: constraints.maxWidth - 64 >= _twoColumnMinWidth,
+              );
+            },
+          ),
         );
       },
     );
   }
 
-  Widget _content(
-    BuildContext context,
-    DashboardSummary summary, {
-    required bool twoColumns,
-  }) {
-    final planProgress = summary.monthlyPlan == 0
-        ? 0.0
-        : (summary.collectedThisMonth / summary.monthlyPlan).clamp(0.0, 1.0);
+  // --- Layout ---------------------------------------------------------------
 
-    // What needs doing (today, the call log) and money (debts, revenue,
-    // payments) -- side by side when there's room, stacked otherwise.
-    final work = <Widget>[
-      _TodayPanel(summary: summary),
-      _LeadsPanel(leads: widget.leads, onOpenAll: widget.onOpenAdmissions),
-    ];
-    final money = <Widget>[
-      _DebtorsPanel(
-        debtors: summary.topDebtors,
-        today: summary.today,
-        onOpenAll: widget.onOpenDebtors,
-        onOpenProfile: (id) => ref.read(openStudentRequestProvider).value = id,
-      ),
-      _Panel(
-        title: 'Tushum, oxirgi 6 oy',
-        child: _RevenueChart(months: summary.revenueByMonth),
-      ),
-      _RecentPaymentsPanel(payments: summary.recentPayments),
-    ];
-
+  Widget _content(_HomeData data, {required bool twoColumns}) {
+    final s = data.summary;
+    final schedule = _Timeline(
+      lessons: data.lessons,
+      onMark: (lesson) async {
+        final changed = await showAttendanceSheet(context, lesson);
+        if (changed == true && mounted) reload();
+      },
+    );
+    final attention = _Attention(items: _attentionItems(data));
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Expanded(
-                child: _KpiCard(
-                  icon: Icons.school_rounded,
-                  label: 'Faol o\'quvchilar',
-                  value: '${summary.activeStudents}',
-                  detail:
-                      '${summary.activeGroups} guruh · +${summary.newStudentsThisMonth} yangi bu oy',
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _KpiCard(
-                  icon: Icons.payments_rounded,
-                  label: 'Bu oy tushum',
-                  value: CurrencyFormatter.format(summary.collectedThisMonth),
-                  detail:
-                      'Oylik reja: ${CurrencyFormatter.format(summary.monthlyPlan)}',
-                  progress: planProgress,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _KpiCard(
-                  icon: Icons.warning_amber_rounded,
-                  label: 'Qarzdorlik',
-                  value: CurrencyFormatter.format(summary.totalDebt),
-                  detail: '${summary.debtorCount} o\'quvchi qarzdor',
-                  alert: summary.totalDebt > 0,
-                  onTap: widget.onOpenDebtors,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _KpiCard(
-                  icon: Icons.phone_in_talk_rounded,
-                  label: 'Yangi so\'rovlar (7 kun)',
-                  value: '${summary.newLeadsThisWeek}',
-                  detail: '${summary.openLeads} ta ochiq so\'rov',
-                ),
-              ),
-            ],
+        _kpis(s),
+        if (data.branches.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 16),
+          _BranchesPanel(
+            branches: data.branches,
+            onPick: (id) => ref.read(branchViewProvider.notifier).select(id),
           ),
-        ),
+        ],
         const SizedBox(height: 16),
         if (twoColumns)
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Expanded(flex: 3, child: _column(work)),
+              Expanded(flex: 3, child: schedule),
               const SizedBox(width: 16),
-              Expanded(flex: 2, child: _column(money)),
+              Expanded(flex: 2, child: attention),
             ],
           )
-        else
-          _column(<Widget>[...work, ...money]),
+        else ...<Widget>[attention, const SizedBox(height: 16), schedule],
       ],
+    );
+  }
+
+  /// Four figures, equally wide and tall, every label, number and note on the
+  /// same line from card to card.
+  Widget _kpis(DashboardSummary s) {
+    final cards = <Widget>[
+      _Kpi(
+        key: const ValueKey('kpi-students'),
+        label: 'Faol o\'quvchilar',
+        value: '${s.activeStudents}',
+        note:
+            '${s.activeGroups} guruh · +${s.newStudentsThisMonth} yangi bu oy',
+      ),
+      if (s.moneyVisible)
+        _Kpi(
+          key: const ValueKey('kpi-collected'),
+          label: 'Bu oy tushum',
+          value: CurrencyFormatter.format(s.collectedThisMonth),
+          note: s.monthlyPlan == 0
+              ? 'Reja yo\'q'
+              : 'Reja ${CurrencyFormatter.format(s.monthlyPlan)} · '
+                    '${(s.collectedThisMonth * 100 / s.monthlyPlan).round()}%',
+          progress: s.monthlyPlan == 0
+              ? null
+              : (s.collectedThisMonth / s.monthlyPlan).clamp(0.0, 1.0),
+        )
+      else
+        _Kpi(
+          key: const ValueKey('kpi-due-today'),
+          label: 'Bugun to\'lov kuni',
+          value: s.dueTodayCount == 0 ? 'Yo\'q' : '${s.dueTodayCount} ta',
+          note: s.dueTodayCount == 0
+              ? 'Bugun hech kimning to\'lov kuni emas'
+              : '${CurrencyFormatter.format(s.dueTodayAmount)} to\'lashi kerak',
+        ),
+      _Kpi(
+        key: const ValueKey('kpi-debt'),
+        label: 'Qarzdorlik',
+        value: CurrencyFormatter.format(s.totalDebt),
+        note: '${s.debtorCount} o\'quvchi qarzdor',
+        alert: s.totalDebt > 0,
+        onTap: widget.onOpenDebtors,
+      ),
+      _Kpi(
+        key: const ValueKey('kpi-attendance'),
+        label: 'Davomat',
+        value: ratePercent(s.attendanceRate7d),
+        note: s.attendanceRate7d == null
+            ? 'Oxirgi 7 kunda davomat olinmagan'
+            : 'Oxirgi 7 kun',
+      ),
+    ];
+    return SizedBox(
+      height: _Kpi.height,
+      child: Row(
+        children: <Widget>[
+          for (var i = 0; i < cards.length; i++) ...<Widget>[
+            if (i > 0) const SizedBox(width: 16),
+            Expanded(child: cards[i]),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// What needs attention, most urgent first.
+  List<_AttentionItem> _attentionItems(_HomeData data) {
+    final s = data.summary;
+    final now = DateTime.now();
+    final items = <_AttentionItem>[];
+
+    for (final l in data.lessons) {
+      if (l.isCancelled || l.isMarked || l.endsAt.isAfter(now)) continue;
+      items.add(
+        _AttentionItem(
+          key: 'unmarked-${l.groupId}-${l.startsAt.millisecondsSinceEpoch}',
+          tag: 'Davomat',
+          tone: StatusTone.warning,
+          title: l.groupName,
+          detail: '${DateFormatters.time(l.startsAt)} darsi: davomat olinmagan',
+          action: 'Olish',
+          onAction: () async {
+            final changed = await showAttendanceSheet(context, l);
+            if (changed == true && mounted) reload();
+          },
+        ),
+      );
+    }
+    for (final t in s.trialsToday) {
+      items.add(
+        _AttentionItem(
+          key: 'trial-${t.inquiryId}',
+          tag: 'Sinov',
+          tone: StatusTone.neutral,
+          title: t.fullName,
+          detail: [
+            if (t.startsAt != null) 'Bugun ${DateFormatters.time(t.startsAt!)}',
+            ?t.subjectName,
+          ].join(' · '),
+          action: 'Ko\'rish',
+          onAction: widget.onOpenAdmissions,
+        ),
+      );
+    }
+    if (s.dueTodayCount > 0) {
+      items.add(
+        _AttentionItem(
+          key: 'due-today',
+          tag: 'To\'lov',
+          tone: StatusTone.info,
+          title: '${s.dueTodayCount} ta o\'quvchining to\'lov kuni bugun',
+          detail: CurrencyFormatter.format(s.dueTodayAmount),
+          action: 'Ochish',
+          onAction: widget.onOpenDebtors,
+        ),
+      );
+    }
+    if (s.unansweredLeads > 0) {
+      items.add(
+        _AttentionItem(
+          key: 'unanswered',
+          tag: 'So\'rov',
+          tone: StatusTone.info,
+          title: '${s.unansweredLeads} ta so\'rovga javob berilmagan',
+          detail: '24 soatdan beri',
+          action: 'Qabul',
+          onAction: widget.onOpenAdmissions,
+        ),
+      );
+    }
+    if (s.tasksDueToday > 0) {
+      items.add(
+        _AttentionItem(
+          key: 'tasks',
+          tag: 'Vazifa',
+          tone: StatusTone.neutral,
+          title: '${s.tasksDueToday} ta qo\'ng\'iroq qilish kerak',
+          detail: 'Bugun yoki muddati o\'tgan',
+          action: 'Qabul',
+          onAction: widget.onOpenAdmissions,
+        ),
+      );
+    }
+    for (final d in s.topDebtors.take(4)) {
+      items.add(_debtorItem(d, s.today));
+    }
+    return items;
+  }
+
+  _AttentionItem _debtorItem(Debtor d, DateTime today) => _AttentionItem(
+    key: 'debtor-${d.enrollmentId}',
+    tag: 'Qarz',
+    tone: StatusTone.danger,
+    title: d.studentFullName,
+    detail:
+        '${CurrencyFormatter.format(d.balance)} · '
+        '${d.groupName}${d.oldestUnpaidDue == null ? '' : ' · ${overdueLabel(d.oldestUnpaidDue, today)}'}',
+    action: 'Profil',
+    onAction: () => ref.read(openStudentRequestProvider).value = d.studentId,
+  );
+}
+
+// --- Pieces -------------------------------------------------------------------
+
+BoxDecoration _cardDecoration() => BoxDecoration(
+  color: AppColors.surface,
+  borderRadius: BorderRadius.circular(AppRadius.card),
+  border: Border.all(color: AppColors.border),
+);
+
+/// One of the four figures. Fixed height; the label sits at the top, the note
+/// at the bottom and the number between, so a row of them lines up whatever
+/// each one says. The plan meter is drawn on the card's bottom edge so it
+/// never pushes the text.
+class _Kpi extends StatelessWidget {
+  const _Kpi({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.note,
+    this.progress,
+    this.alert = false,
+    this.onTap,
+  });
+
+  static const double height = 124;
+
+  final String label;
+  final String value;
+  final String note;
+  final double? progress;
+  final bool alert;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: _cardDecoration(),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: <Widget>[
+          Positioned.fill(
+            child: InkWell(
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      label,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.inkMuted,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        value,
+                        maxLines: 1,
+                        style: TextStyle(
+                          fontSize: 28,
+                          height: 1.1,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.4,
+                          color: alert ? AppColors.dangerText : AppColors.ink,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      note,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.inkMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (progress != null)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 4,
+                color: AppColors.accent,
+                backgroundColor: AppColors.divider,
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
 
-Widget _column(List<Widget> panels) {
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: <Widget>[
-      for (var i = 0; i < panels.length; i++) ...<Widget>[
-        if (i > 0) const SizedBox(height: 16),
-        panels[i],
-      ],
-    ],
+/// A card with a header row (title, note on the right) and a thin divider.
+class _Card extends StatelessWidget {
+  const _Card({required this.title, this.trailing, required this.child});
+
+  final String title;
+  final String? trailing;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: _cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+            child: Row(
+              children: <Widget>[
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (trailing != null)
+                  Text(
+                    trailing!,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: AppColors.inkMuted,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: AppColors.divider),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _Empty extends StatelessWidget {
+  const _Empty(this.text, {super.key});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: const TextStyle(color: AppColors.inkMuted),
+      ),
+    );
+  }
+}
+
+// --- Branches (owner) ----------------------------------------------------------
+
+class _BranchesPanel extends StatelessWidget {
+  const _BranchesPanel({required this.branches, required this.onPick});
+
+  final List<BranchStats> branches;
+  final ValueChanged<int> onPick;
+
+  static const _head = TextStyle(
+    fontSize: 12,
+    fontWeight: FontWeight.w600,
+    color: AppColors.inkMuted,
   );
+
+  @override
+  Widget build(BuildContext context) {
+    Widget cell(int flex, Widget child) => Expanded(flex: flex, child: child);
+    return _Card(
+      title: 'Filiallar bo\'yicha',
+      trailing: 'Filialni bosing: hamma raqamlar shu filialga o\'tadi',
+      child: Column(
+        key: const ValueKey('branch-stats'),
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+            child: Row(
+              children: <Widget>[
+                cell(24, const Text('Filial', style: _head)),
+                cell(
+                  12,
+                  const Text(
+                    'O\'quvchilar',
+                    textAlign: TextAlign.right,
+                    style: _head,
+                  ),
+                ),
+                cell(
+                  18,
+                  const Text(
+                    'Bu oy tushum',
+                    textAlign: TextAlign.right,
+                    style: _head,
+                  ),
+                ),
+                cell(
+                  18,
+                  const Text('Qarz', textAlign: TextAlign.right, style: _head),
+                ),
+                cell(
+                  12,
+                  const Text(
+                    'Davomat',
+                    textAlign: TextAlign.right,
+                    style: _head,
+                  ),
+                ),
+                cell(
+                  8,
+                  const Text(
+                    'Darslar',
+                    textAlign: TextAlign.right,
+                    style: _head,
+                  ),
+                ),
+                cell(
+                  8,
+                  const Text(
+                    'So\'rovlar',
+                    textAlign: TextAlign.right,
+                    style: _head,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          for (final b in branches) ...<Widget>[
+            const Divider(height: 1, color: AppColors.divider),
+            InkWell(
+              key: ValueKey('branch-row-${b.branchId}'),
+              onTap: () => onPick(b.branchId),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 13,
+                ),
+                child: Row(
+                  children: <Widget>[
+                    cell(
+                      24,
+                      Text(
+                        b.name,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    cell(12, _num('${b.activeStudents}')),
+                    cell(
+                      18,
+                      _num(CurrencyFormatter.format(b.collectedThisMonth)),
+                    ),
+                    cell(
+                      18,
+                      _num(
+                        b.totalDebt == 0
+                            ? '—'
+                            : CurrencyFormatter.format(b.totalDebt),
+                        color: b.totalDebt > 0 ? AppColors.dangerText : null,
+                      ),
+                    ),
+                    cell(12, _num(ratePercent(b.attendanceRate7d))),
+                    cell(8, _num('${b.lessonsToday}')),
+                    cell(8, _num('${b.openLeads}')),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _num(String text, {Color? color}) => Text(
+    text,
+    textAlign: TextAlign.right,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: TextStyle(
+      fontSize: 14,
+      fontWeight: FontWeight.w600,
+      color: color ?? AppColors.ink,
+    ),
+  );
+}
+
+// --- Today's lessons -------------------------------------------------------------
+
+class _Timeline extends StatelessWidget {
+  const _Timeline({required this.lessons, required this.onMark});
+
+  final List<TimetableLesson> lessons;
+  final ValueChanged<TimetableLesson> onMark;
+
+  @override
+  Widget build(BuildContext context) {
+    final live = lessons.where((l) => !l.isCancelled).length;
+    if (lessons.isEmpty) {
+      return const _Card(
+        title: 'Bugungi jadval',
+        child: _Empty('Bugun dars yo\'q.', key: ValueKey('timeline-empty')),
+      );
+    }
+    final now = DateTime.now();
+    final rows = <Widget>[];
+    var markerShown = false;
+    for (final l in lessons) {
+      if (!markerShown && l.startsAt.isAfter(now)) {
+        markerShown = true;
+        rows.add(_NowMarker(now: now));
+      }
+      rows.add(_LessonRow(lesson: l, now: now, onMark: () => onMark(l)));
+    }
+    if (!markerShown) rows.add(_NowMarker(now: now));
+    return _Card(
+      title: 'Bugungi jadval',
+      trailing: '$live ta dars',
+      child: Padding(
+        key: const ValueKey('timeline'),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+        child: Column(children: rows),
+      ),
+    );
+  }
+}
+
+class _NowMarker extends StatelessWidget {
+  const _NowMarker({required this.now});
+
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      key: const ValueKey('now-marker'),
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: <Widget>[
+          SizedBox(
+            width: 58,
+            child: Text(
+              DateFormatters.time(now),
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: AppColors.accentText,
+              ),
+            ),
+          ),
+          Container(
+            width: 8,
+            height: 8,
+            decoration: const BoxDecoration(
+              color: AppColors.accent,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text(
+            'Hozir',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: AppColors.accentText,
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Expanded(child: Divider(height: 1, color: AppColors.accent)),
+        ],
+      ),
+    );
+  }
+}
+
+class _LessonRow extends StatelessWidget {
+  const _LessonRow({
+    required this.lesson,
+    required this.now,
+    required this.onMark,
+  });
+
+  final TimetableLesson lesson;
+  final DateTime now;
+  final VoidCallback onMark;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = lesson;
+    final started = !l.startsAt.isAfter(now);
+    final over = !l.endsAt.isAfter(now);
+    final (String text, StatusTone tone) = l.isCancelled
+        ? ('Bekor qilingan', StatusTone.danger)
+        : l.isMarked
+        ? ('Davomat olingan', StatusTone.ok)
+        : over
+        ? ('Davomat olinmagan', StatusTone.warning)
+        : started
+        ? ('Davom etmoqda', StatusTone.info)
+        : ('Kutilmoqda', StatusTone.neutral);
+    final canMark = !l.isCancelled && started && !l.isMarked;
+    return Padding(
+      key: ValueKey('lesson-${l.groupId}-${l.startsAt.millisecondsSinceEpoch}'),
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: <Widget>[
+          SizedBox(
+            width: 58,
+            child: Text(
+              DateFormatters.time(l.startsAt),
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+            ),
+          ),
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              decoration: BoxDecoration(
+                color: l.isCancelled ? AppColors.neutralBg : AppColors.surface,
+                borderRadius: BorderRadius.circular(AppRadius.button),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          l.groupName,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            decoration: l.isCancelled
+                                ? TextDecoration.lineThrough
+                                : null,
+                          ),
+                        ),
+                        Text(
+                          <String>[
+                            ?l.teacherName,
+                            ?l.room,
+                            '${l.studentCount} o\'quvchi',
+                          ].join(' · '),
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.inkMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  StatusChip(text, tone: tone),
+                  if (canMark) ...<Widget>[
+                    const SizedBox(width: 10),
+                    FilledButton(
+                      key: ValueKey('mark-${l.groupId}'),
+                      style: FilledButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                      ),
+                      onPressed: onMark,
+                      child: const Text('Davomat olish'),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// --- Needs attention -------------------------------------------------------------
+
+class _AttentionItem {
+  const _AttentionItem({
+    required this.key,
+    required this.tag,
+    required this.tone,
+    required this.title,
+    required this.detail,
+    required this.action,
+    required this.onAction,
+  });
+
+  final String key;
+  final String tag;
+  final StatusTone tone;
+  final String title;
+  final String detail;
+  final String action;
+  final VoidCallback onAction;
+}
+
+class _Attention extends StatelessWidget {
+  const _Attention({required this.items});
+
+  final List<_AttentionItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return _Card(
+      title: 'Diqqat talab qiladi',
+      trailing: items.isEmpty ? null : '${items.length} ta',
+      child: items.isEmpty
+          ? const _Empty(
+              'Hammasi joyida: hozircha hech narsa kutmayapti.',
+              key: ValueKey('attention-empty'),
+            )
+          : Column(
+              key: const ValueKey('attention'),
+              children: <Widget>[
+                for (var i = 0; i < items.length; i++) ...<Widget>[
+                  if (i > 0) const Divider(height: 1, color: AppColors.divider),
+                  _AttentionRow(item: items[i]),
+                ],
+              ],
+            ),
+    );
+  }
+}
+
+class _AttentionRow extends StatelessWidget {
+  const _AttentionRow({required this.item});
+
+  final _AttentionItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      key: ValueKey('attention-${item.key}'),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
+      child: Row(
+        children: <Widget>[
+          SizedBox(
+            width: 70,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: StatusChip(item.tag, tone: item.tone),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  item.title,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  item.detail,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.inkMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          OutlinedButton(
+            key: ValueKey('attention-action-${item.key}'),
+            style: OutlinedButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+            ),
+            onPressed: item.onAction,
+            child: Text(item.action),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _LoadError extends StatelessWidget {
@@ -213,596 +922,6 @@ class _LoadError extends StatelessWidget {
   final VoidCallback onRetry;
 
   @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 48),
-      child: Column(
-        children: <Widget>[
-          Icon(
-            Icons.cloud_off_rounded,
-            size: 40,
-            color: context.colors.outline,
-          ),
-          const SizedBox(height: 12),
-          Text('Ma\'lumotlarni yuklab bo\'lmadi: $error'),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Qayta urinish'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// A bordered card with a title row -- every block on the desktop home.
-class _Panel extends StatelessWidget {
-  const _Panel({required this.title, required this.child, this.action});
-
-  final String title;
-  final Widget child;
-  final Widget? action;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 14, 12, 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            SizedBox(
-              height: 40,
-              child: Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Text(title, style: context.textTheme.titleMedium),
-                  ),
-                  ?action,
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-            Padding(padding: const EdgeInsets.only(right: 8), child: child),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _KpiCard extends StatelessWidget {
-  const _KpiCard({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.detail,
-    this.progress,
-    this.alert = false,
-    this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final String detail;
-
-  /// 0..1 -- drawn as a thin meter under the value when set.
-  final double? progress;
-
-  /// Debt is the one figure that's bad when it's big -- shown in the error
-  /// color (with the warning icon, so it's never color alone).
-  final bool alert;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final accent = alert ? context.colors.error : context.colors.primary;
-    return Card(
-      margin: EdgeInsets.zero,
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  CircleAvatar(
-                    radius: 18,
-                    backgroundColor: accent.withValues(alpha: 0.12),
-                    child: Icon(icon, size: 20, color: accent),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      label,
-                      style: context.textTheme.bodyMedium?.copyWith(
-                        color: context.colors.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                  if (onTap != null)
-                    Icon(
-                      Icons.chevron_right_rounded,
-                      color: context.colors.outline,
-                    ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Text(
-                value,
-                style: context.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: alert ? context.colors.error : null,
-                ),
-              ),
-              const Spacer(),
-              if (progress != null) ...<Widget>[
-                const SizedBox(height: 10),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 6,
-                    color: AppColors.accent,
-                    backgroundColor: context.colors.surfaceContainerHighest,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 8),
-              Text(
-                detail,
-                style: context.textTheme.bodySmall?.copyWith(
-                  color: context.colors.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _TodayPanel extends StatelessWidget {
-  const _TodayPanel({required this.summary});
-
-  final DashboardSummary summary;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      title: 'Bugun · ${DateFormatters.date(summary.today)}',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          _TodayRow(
-            icon: Icons.event_available_rounded,
-            label: 'Sinov darslari',
-            value: '${summary.trialsToday.length} ta',
-          ),
-          for (final trial in summary.trialsToday)
-            Padding(
-              padding: const EdgeInsets.only(left: 44, bottom: 6),
-              child: Text(
-                <String>[
-                  trial.fullName,
-                  if (trial.subjectName != null) trial.subjectName!,
-                  PhoneFormatter.display(trial.phone),
-                ].join(' · '),
-                style: context.textTheme.bodySmall,
-              ),
-            ),
-          _TodayRow(
-            icon: Icons.event_repeat_rounded,
-            label: 'To\'lov kuni bugun',
-            value: summary.dueTodayCount == 0
-                ? 'yo\'q'
-                : '${summary.dueTodayCount} ta · ${CurrencyFormatter.format(summary.dueTodayAmount)}',
-          ),
-          _TodayRow(
-            icon: Icons.phone_missed_rounded,
-            label: '24 soatdan beri javobsiz so\'rovlar',
-            value: '${summary.unansweredLeads} ta',
-            alert: summary.unansweredLeads > 0,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _TodayRow extends StatelessWidget {
-  const _TodayRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.alert = false,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final bool alert;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = alert ? context.colors.error : context.colors.primary;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: <Widget>[
-          Icon(icon, size: 22, color: color),
-          const SizedBox(width: 22),
-          Expanded(child: Text(label, style: context.textTheme.bodyMedium)),
-          Text(
-            value,
-            style: context.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.w600,
-              color: alert ? context.colors.error : null,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LeadsPanel extends StatelessWidget {
-  const _LeadsPanel({required this.leads, required this.onOpenAll});
-
-  static const int _shown = 6;
-
-  final Future<List<Lead>> leads;
-  final VoidCallback onOpenAll;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      title: 'So\'nggi so\'rovlar',
-      action: TextButton(
-        onPressed: onOpenAll,
-        child: const Text('Qabul bo\'limi'),
-      ),
-      child: FutureBuilder<List<Lead>>(
-        future: leads,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Center(child: CircularProgressIndicator()),
-            );
-          }
-          if (snapshot.hasError) {
-            return Text('Xatolik: ${snapshot.error}');
-          }
-          final list = snapshot.data ?? const <Lead>[];
-          if (list.isEmpty) {
-            return const _EmptyNote('Ochiq so\'rovlar yo\'q');
-          }
-          return Column(
-            children: <Widget>[
-              for (final lead in list.take(_shown)) LeadCard(lead: lead),
-            ],
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _DebtorsPanel extends StatelessWidget {
-  const _DebtorsPanel({
-    required this.debtors,
-    required this.today,
-    required this.onOpenAll,
-    required this.onOpenProfile,
-  });
-
-  final List<Debtor> debtors;
-  final DateTime today;
-  final VoidCallback onOpenAll;
-  final ValueChanged<int> onOpenProfile;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      title: 'Eng katta qarzdorlar',
-      action: TextButton(onPressed: onOpenAll, child: const Text('Hammasi')),
-      child: debtors.isEmpty
-          ? const _EmptyNote('Hech kim qarzdor emas')
-          : Column(
-              children: <Widget>[
-                for (final debtor in debtors)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Text(
-                                debtor.studentFullName,
-                                style: context.textTheme.bodyMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              Text(
-                                <String>[
-                                  debtor.groupName,
-                                  if (debtor.isWithdrawn) 'chiqib ketgan',
-                                  overdueLabel(debtor.oldestUnpaidDue, today),
-                                ].where((part) => part.isNotEmpty).join(' · '),
-                                style: context.textTheme.bodySmall?.copyWith(
-                                  color: context.colors.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Text(
-                          CurrencyFormatter.format(debtor.balance),
-                          style: context.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: context.colors.error,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        OutlinedButton(
-                          style: OutlinedButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          // Payments are taken on the profile only.
-                          onPressed: () => onOpenProfile(debtor.studentId),
-                          child: const Text('Profil'),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-    );
-  }
-}
-
-class _RecentPaymentsPanel extends StatelessWidget {
-  const _RecentPaymentsPanel({required this.payments});
-
-  final List<RecentPayment> payments;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      title: 'So\'nggi to\'lovlar',
-      child: payments.isEmpty
-          ? const _EmptyNote('Hali to\'lovlar yo\'q')
-          : Column(
-              children: <Widget>[
-                for (final payment in payments)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Text(
-                                payment.studentFullName,
-                                style: context.textTheme.bodyMedium,
-                              ),
-                              Text(
-                                '${payment.groupName} · ${DateFormatters.dateTime(payment.occurredAt)}',
-                                style: context.textTheme.bodySmall?.copyWith(
-                                  color: context.colors.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Text(
-                          '+${CurrencyFormatter.format(payment.amount)}',
-                          style: context.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: Colors.green.shade700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-    );
-  }
-}
-
-class _EmptyNote extends StatelessWidget {
-  const _EmptyNote(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 16),
-      child: Center(
-        child: Text(
-          text,
-          style: context.textTheme.bodyMedium?.copyWith(
-            color: context.colors.onSurfaceVariant,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Monthly payments as columns, one series in the primary color. Only the
-/// current month and the best month carry a value label; every column has
-/// a hover tooltip with the exact amount, and the whole series is read out
-/// to screen readers -- so no value is reachable by hover alone.
-class _RevenueChart extends StatelessWidget {
-  const _RevenueChart({required this.months});
-
-  final List<MonthlyRevenue> months;
-
-  static const double _plotHeight = 150;
-  static const double _labelRoom = 20; // above the tallest column
-  static const double _tickWidth = 56;
-  static const double _columnWidth = 24;
-
-  /// Rounds up to 1/2/2.5/5 x 10^n, so the axis ticks are clean numbers.
-  static int _niceCeil(int value) {
-    if (value <= 0) return 1000000;
-    final magnitude = math.pow(10, (math.log(value) / math.ln10).floor());
-    for (final step in const <double>[1, 2, 2.5, 5, 10]) {
-      final candidate = (step * magnitude).round();
-      if (candidate >= value) return candidate;
-    }
-    return (10 * magnitude).round();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final peak = months.fold<int>(0, (best, m) => math.max(best, m.amount));
-    final top = _niceCeil(peak);
-    final ticks = <int>[0, top ~/ 2, top];
-    final labelled = <int>{
-      months.length - 1,
-      if (peak > 0) months.indexWhere((m) => m.amount == peak),
-    };
-    final mutedText = context.textTheme.labelSmall?.copyWith(
-      color: context.colors.onSurfaceVariant,
-    );
-
-    return Semantics(
-      label:
-          'Oylik tushum: ${months.map((m) => '${DateFormatters.monthYearLabel(m.month)} ${CurrencyFormatter.format(m.amount)}').join(', ')}',
-      child: ExcludeSemantics(
-        child: Column(
-          children: <Widget>[
-            SizedBox(
-              height: _plotHeight + _labelRoom,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  SizedBox(
-                    width: _tickWidth,
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: <Widget>[
-                        for (final tick in ticks)
-                          Positioned(
-                            right: 8,
-                            bottom: _plotHeight * tick / top - 7,
-                            child: Text(
-                              tick == 0 ? '0' : CurrencyFormatter.compact(tick),
-                              style: mutedText,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: Stack(
-                      children: <Widget>[
-                        for (final tick in ticks)
-                          Positioned(
-                            left: 0,
-                            right: 0,
-                            bottom: _plotHeight * tick / top,
-                            child: Container(
-                              height: 1,
-                              color: context.colors.outlineVariant,
-                            ),
-                          ),
-                        Positioned.fill(
-                          child: Row(
-                            children: <Widget>[
-                              for (var i = 0; i < months.length; i++)
-                                Expanded(
-                                  // The whole slot is the hover target,
-                                  // not just the thin column inside it.
-                                  child: Tooltip(
-                                    message:
-                                        '${DateFormatters.monthYearLabel(months[i].month)}: ${CurrencyFormatter.format(months[i].amount)}',
-                                    child: Container(
-                                      color: Colors.transparent,
-                                      child: Column(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.end,
-                                        children: <Widget>[
-                                          if (labelled.contains(i) &&
-                                              months[i].amount > 0)
-                                            Padding(
-                                              padding: const EdgeInsets.only(
-                                                bottom: 4,
-                                              ),
-                                              child: Text(
-                                                CurrencyFormatter.compact(
-                                                  months[i].amount,
-                                                ),
-                                                style: context
-                                                    .textTheme
-                                                    .labelSmall
-                                                    ?.copyWith(
-                                                      fontWeight:
-                                                          FontWeight.w600,
-                                                    ),
-                                              ),
-                                            ),
-                                          Container(
-                                            width: _columnWidth,
-                                            height:
-                                                _plotHeight *
-                                                months[i].amount /
-                                                top,
-                                            decoration: BoxDecoration(
-                                              color: context.colors.primary,
-                                              borderRadius:
-                                                  const BorderRadius.vertical(
-                                                    top: Radius.circular(4),
-                                                  ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: <Widget>[
-                const SizedBox(width: _tickWidth),
-                for (final month in months)
-                  Expanded(
-                    child: Text(
-                      DateFormatters.monthName(month.month),
-                      textAlign: TextAlign.center,
-                      style: mutedText,
-                    ),
-                  ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) =>
+      LoadFailed(error: error, onRetry: onRetry);
 }

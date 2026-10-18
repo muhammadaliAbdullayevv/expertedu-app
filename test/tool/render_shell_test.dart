@@ -252,6 +252,13 @@ void main() {
       return;
     }
 
+    if (_only == 'bugun') {
+      await settle(tester);
+      await settle(tester);
+      await shot(tester, 'bugun-now');
+      return;
+    }
+
     if (_only == 'branches') {
       await tester.tap(find.text('O\'quvchilar').first);
       await settle(tester);

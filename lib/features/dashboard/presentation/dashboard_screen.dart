@@ -121,7 +121,6 @@ class DashboardScreenState extends ConsumerState<DashboardScreen> {
     if (isWideLayout(context)) {
       return DesktopDashboard(
         key: _desktopKey,
-        leads: _leadsFuture,
         onOpenAdmissions: widget.onOpenAdmissions,
         onOpenDebtors: widget.onOpenDebtors,
       );

@@ -13,18 +13,23 @@ class TrialToday {
     required this.fullName,
     required this.phone,
     this.subjectName,
+    this.startsAt,
   });
 
   final int inquiryId;
   final String fullName;
   final String phone;
   final String? subjectName;
+  final DateTime? startsAt;
 
   factory TrialToday.fromJson(Map<String, dynamic> json) => TrialToday(
     inquiryId: json['inquiry_id'] as int,
     fullName: json['full_name'] as String,
     phone: json['phone'] as String,
     subjectName: json['subject_name'] as String?,
+    startsAt: json['starts_at'] == null
+        ? null
+        : DateTime.parse(json['starts_at'] as String),
   );
 }
 
@@ -89,6 +94,9 @@ class DashboardSummary {
     required this.revenueByMonth,
     required this.recentPayments,
     required this.topDebtors,
+    this.moneyVisible = true,
+    this.attendanceRate7d,
+    this.tasksDueToday = 0,
   });
 
   final DateTime today;
@@ -116,6 +124,16 @@ class DashboardSummary {
   final List<RecentPayment> recentPayments;
   final List<Debtor> topDebtors;
 
+  /// False for an admin: what the center collects is the owner's to see (the
+  /// server sends zero / nothing for it); admins only collect from students.
+  final bool moneyVisible;
+
+  /// The last 7 days of marked lessons: share that came; null = none marked.
+  final double? attendanceRate7d;
+
+  /// Calls to make today (follow-up tasks due).
+  final int tasksDueToday;
+
   factory DashboardSummary.fromJson(Map<String, dynamic> json) {
     List<T> list<T>(String key, T Function(Map<String, dynamic>) parse) =>
         (json[key] as List<dynamic>)
@@ -140,14 +158,68 @@ class DashboardSummary {
       revenueByMonth: list('revenue_by_month', MonthlyRevenue.fromJson),
       recentPayments: list('recent_payments', RecentPayment.fromJson),
       topDebtors: list('top_debtors', Debtor.fromJson),
+      moneyVisible: json['money_visible'] as bool? ?? true,
+      attendanceRate7d: (json['attendance_rate_7d'] as num?)?.toDouble(),
+      tasksDueToday: json['tasks_due_today'] as int? ?? 0,
     );
   }
+}
+
+/// One branch's line on the owner's home page.
+class BranchStats {
+  const BranchStats({
+    required this.branchId,
+    required this.name,
+    this.isHeadquarters = false,
+    required this.activeStudents,
+    required this.activeGroups,
+    required this.collectedThisMonth,
+    required this.totalDebt,
+    required this.debtorCount,
+    this.attendanceRate7d,
+    required this.lessonsToday,
+    required this.openLeads,
+  });
+
+  final int branchId;
+  final String name;
+  final bool isHeadquarters;
+  final int activeStudents;
+  final int activeGroups;
+  final int collectedThisMonth;
+  final int totalDebt;
+  final int debtorCount;
+  final double? attendanceRate7d;
+  final int lessonsToday;
+  final int openLeads;
+
+  factory BranchStats.fromJson(Map<String, dynamic> json) => BranchStats(
+    branchId: json['branch_id'] as int,
+    name: json['name'] as String,
+    isHeadquarters: json['is_headquarters'] as bool? ?? false,
+    activeStudents: json['active_students'] as int,
+    activeGroups: json['active_groups'] as int,
+    collectedThisMonth: json['collected_this_month'] as int,
+    totalDebt: json['total_debt'] as int,
+    debtorCount: json['debtor_count'] as int,
+    attendanceRate7d: (json['attendance_rate_7d'] as num?)?.toDouble(),
+    lessonsToday: json['lessons_today'] as int,
+    openLeads: json['open_leads'] as int,
+  );
 }
 
 class DashboardRepository {
   DashboardRepository(this._api);
 
   final ApiClient _api;
+
+  /// OWNER ONLY: every branch side by side.
+  Future<List<BranchStats>> branches() async {
+    final json = await _api.get('/dashboard/branches') as List<dynamic>;
+    return [
+      for (final b in json) BranchStats.fromJson(b as Map<String, dynamic>),
+    ];
+  }
 
   Future<DashboardSummary> fetch() async {
     final json = await _api.get('/dashboard') as Map<String, dynamic>;
