@@ -17,6 +17,9 @@ class Settings:
     # Where profile photos are kept. Not under uploads/, which is public.
     photos_dir: str = os.environ.get("PHOTOS_DIR") or str(Path(__file__).resolve().parent.parent / "photos")
 
+    # The Telegram bot's key for /bot/*. Unset = the bot API is off (503).
+    bot_api_key: str | None = os.environ.get("BOT_API_KEY") or None
+
     public_base_url: str = os.environ.get("PUBLIC_BASE_URL", "https://expertedu-api.ai-student-helper.site")
 
     # Whose calendar "today" means for due dates, withdrawals and monthly

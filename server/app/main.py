@@ -9,10 +9,11 @@ from fastapi.staticfiles import StaticFiles
 
 from . import db
 from .deps import get_scope
-from .jobs import housekeeping, recurring_charges
+from .jobs import housekeeping, recurring_charges, telegram_notifier
 from .routes import (
     admissions_report,
     auth,
+    bot,
     branches,
     counts,
     dashboard,
@@ -44,6 +45,7 @@ async def lifespan(app: FastAPI):
     jobs = [
         asyncio.create_task(recurring_charges.run_forever()),
         asyncio.create_task(housekeeping.run_forever()),
+        asyncio.create_task(telegram_notifier.run_forever()),
     ]
     yield
     for job in jobs:
@@ -76,6 +78,8 @@ app.mount("/uploads", StaticFiles(directory=str(_UPLOADS_DIR)), name="uploads")
 app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(branches.router)
+# The Telegram bot has its own key, not a login or a branch (see routes/bot.py).
+app.include_router(bot.router)
 # Everything below runs inside a branch scope: get_scope is a dependency of
 # every one of these routers, so the scope is always known while the request
 # is served (tests/test_branches.py checks no route escapes this).

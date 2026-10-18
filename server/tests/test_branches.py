@@ -143,7 +143,7 @@ async def test_every_route_is_inside_a_branch_scope(world):
     missing = []
     for route in app.routes:
         dependant = getattr(route, "dependant", None)
-        if dependant is None or route.path in open_paths or route.path.startswith("/uploads"):
+        if dependant is None or route.path in open_paths or route.path.startswith(("/uploads", "/bot")):
             continue
 
         def uses_scope(dep) -> bool:

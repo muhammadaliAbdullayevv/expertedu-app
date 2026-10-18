@@ -155,6 +155,27 @@ PLAN = {
 ALSO_IN = {"Sardor Aliyev": "Mirzo Ulug'bek", "Olga Petrova": "Sergeli", "Dilnoza Karimova": "Bosh ofis"}
 
 
+# SEED_SHAPE=prod: the same center on the four branches that exist on the real
+# server (same ids, names and admin ids), so the data can be carried over there.
+SHAPE_PROD = os.environ.get("SEED_SHAPE") == "prod"
+if SHAPE_PROD:
+    BRANCHES = [  # name, local stand-in admin phone, admin name; ids as on the real server
+        ("Bosh ofis", "998900000002", "Bosh ofis admini"),
+        ("Turon", "998900000003", "Turon admini"),
+        ("Iqro", "998900000004", "Iqro admini"),
+        ("Ziyo", "998900000005", "Ziyo admini"),
+    ]
+    PROD_IDS = {"Bosh ofis": 1, "Turon": 2, "Iqro": 3, "Ziyo": 4}
+    PROD_ADMIN_IDS = {"Bosh ofis": 3, "Turon": 4, "Iqro": 5, "Ziyo": 6}
+    PLAN = {
+        "Bosh ofis": PLAN["Bosh ofis"] + [PLAN["Sergeli"][2]],
+        "Turon": PLAN["Chilonzor"] + [PLAN["Sergeli"][3]],
+        "Iqro": PLAN["Yunusobod"] + [PLAN["Sergeli"][0]],
+        "Ziyo": PLAN["Mirzo Ulug'bek"] + [PLAN["Sergeli"][1]],
+    }
+    ALSO_IN = {"Sardor Aliyev": "Ziyo", "Olga Petrova": "Iqro", "Dilnoza Karimova": "Turon"}
+
+
 def sizes() -> list[int]:
     out = [rng.randint(15, 25) for _ in range(20)]
     while sum(out) != 400:
@@ -187,6 +208,39 @@ def wipe() -> None:
                 f.unlink()
 
 
+async def reset_prod_shape() -> None:
+    """Empties every table and recreates exactly the real server's accounts
+    and branches (same ids), with stand-in logins, so what is seeded can be
+    moved there as it is."""
+    from app.security import hash_password
+
+    step("Mahalliy baza haqiqiy serverning tuzilmasiga keltiriladi")
+    conn = await asyncpg.connect(DATABASE_URL)
+    tables = [r["tablename"] for r in await conn.fetch("select tablename from pg_tables where schemaname = 'public'")]
+    await conn.execute("truncate table " + ", ".join(f'"{t}"' for t in tables) + " restart identity cascade")
+    pw = hash_password(PASSWORD)
+    for name, bid in PROD_IDS.items():
+        await conn.execute("insert into branches (id, name, is_headquarters) values ($1, $2, $3)", bid, name, bid == 1)
+    await conn.execute(
+        "insert into users (id, phone, password_hash, full_name, role) values (1, '998900000001', $1, 'Madina Karimova', 'owner')",
+        pw,
+    )
+    for name, phone_, admin_name in BRANCHES:
+        uid = PROD_ADMIN_IDS[name]
+        await conn.execute(
+            "insert into users (id, phone, password_hash, full_name, role) values ($1, $2, $3, $4, 'admin')",
+            uid, phone_, pw, admin_name,
+        )
+        await conn.execute("insert into user_branches (user_id, branch_id) values ($1, $2)", uid, PROD_IDS[name])
+    await conn.execute("select setval('users_id_seq', 6), setval('branches_id_seq', 4)")
+    await conn.close()
+    photos = ROOT / "photos"
+    if photos.exists():
+        for f in photos.iterdir():
+            if f.is_file():
+                f.unlink()
+
+
 # --- 2. branches, admins, subjects, teachers, groups -------------------------------------------------------------
 
 
@@ -198,7 +252,9 @@ def build_center() -> dict:
     admins: dict[str, Api] = {}
     ids: dict[str, int] = {}
     for name, ph, admin_name in BRANCHES:
-        if name in existing:
+        if SHAPE_PROD:
+            ids[name] = existing[name]["id"]
+        elif name in existing:
             ids[name] = existing[name]["id"]
             owner.post("/staff", json={"phone": ph, "full_name": admin_name, "password": PASSWORD, "branch_id": ids[name]})
         else:
@@ -512,7 +568,10 @@ def pictures(c: dict, students: list[dict]) -> None:
 
 
 def main() -> None:
-    wipe()
+    if SHAPE_PROD:
+        asyncio.run(reset_prod_shape())
+    else:
+        wipe()
     c = build_center()
     students = build_students(c)
     asyncio.run(money_and_attendance(c))
