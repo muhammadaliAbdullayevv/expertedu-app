@@ -2,8 +2,8 @@
 -- exists today goes to branch 1, "Bosh ofis", so nothing changes for anyone
 -- until the owner adds the other branches.
 --
--- The defaults of 1 below are a bridge while the code is moved over; they are
--- removed again by the last branch migration.
+-- A record created without naming a branch belongs to Bosh ofis (the column
+-- default of 1): the API always names one, so this only catches hand-made SQL.
 
 create table branches (
   id bigserial primary key,

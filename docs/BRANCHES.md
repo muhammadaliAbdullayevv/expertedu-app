@@ -32,6 +32,13 @@ branch and **the server** decides what each login may see -- never the app.
 3. Every query filters by the scope (`branch_id = any($ids)` / `$ids is null` for all) and every lookup by id returns **404** for a record outside the scope -- never 403, so existence does not leak.
 4. Writes put the record in the scope's branch (an owner in "Hammasi" must choose a branch when creating).
 
+## What was built on the server (phases 1-4, tested)
+
+- Tables and backfill: migration `0022_branches.sql` (everything existing -> Bosh ofis, admins -> their branch, teachers and students linked to Bosh ofis; students' archive and note moved onto the link; payments, pay lines, events, expenses, trial sessions, leads and groups carry `branch_id`; a record made without a branch is Bosh ofis).
+- `deps.get_scope` is a dependency of every router (see `main.py`); `tests/test_branches.py::test_every_route_is_inside_a_branch_scope` fails if a route escapes it. Helpers in `scope.py`; deep helpers (`lock_lead`, `fetch_lead`, trial fetches) read the request's ambient scope.
+- Money: payments carry the branch, a payment only pays that branch's charges (`apply_credit`), balances come from `student_branch_balances`. Teacher pay lines carry the branch; payouts are made in, and capped by, one branch.
+- A teacher with a fixed salary is counted in their first branch.
+
 ## Phases (nothing is deployed until all are done and tested)
 
 1. Foundation: tables, backfill, Scope, `/branches`, staff with a branch, `/me`.

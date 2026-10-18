@@ -94,7 +94,7 @@ create table if not exists groups (
   level text,
   start_date date,
   prorate_first_period boolean not null default true,
-  -- The branch it belongs to (0022); the default bridges the move to branches.
+  -- The branch it belongs to (0022). Without one it is Bosh ofis; the API always names it.
   branch_id bigint not null default 1 references branches(id),
   -- This group's own pay rule; null salary_method = the teacher's (0014).
   salary_method text check (salary_method in ('percent', 'fixed')),
