@@ -11,6 +11,7 @@ import 'package:expert_edu_center/features/groups/presentation/groups_breadcrumb
 import 'package:expert_edu_center/features/students/data/student_models.dart';
 import 'package:expert_edu_center/features/students/data/students_repository.dart';
 import 'package:expert_edu_center/features/timetable/data/timetable_models.dart';
+import 'package:expert_edu_center/services/api/api_client.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -99,6 +100,8 @@ class FakeGroups implements GroupsRepository {
   GroupProfileData profileData;
   final List<RosterEntry> rosterList;
   int profileCalls = 0;
+  final deleted = <int>[];
+  ApiException? deleteError;
 
   static final defaultRoster = [
     RosterEntry(
@@ -121,6 +124,12 @@ class FakeGroups implements GroupsRepository {
       balance: 100000,
     ),
   ];
+
+  @override
+  Future<void> delete(int id) async {
+    if (deleteError != null) throw deleteError!;
+    deleted.add(id);
+  }
 
   @override
   Future<GroupProfileData> profile(int groupId) async {
@@ -477,5 +486,77 @@ void main() {
     await tester.tap(find.text('Eski Odam'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('panel-name')), findsOneWidget);
+  });
+
+  Widget opener(FakeGroups groups) => app(
+    groups,
+    rig(),
+    home: Builder(
+      builder: (context) => Center(
+        child: FilledButton(
+          key: const ValueKey('open-group'),
+          onPressed: () => Navigator.of(context).push<void>(
+            MaterialPageRoute(
+              builder: (_) => Scaffold(
+                body: GroupDetailScreen(
+                  group: group(),
+                  courseName: 'Ingliz tili',
+                ),
+              ),
+            ),
+          ),
+          child: const Text('open'),
+        ),
+      ),
+    ),
+  );
+
+  Future<void> openMenu(WidgetTester tester) async {
+    await tester.tap(find.byKey(const ValueKey('open-group')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('group-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('group-delete')));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets(
+    'deleting: after a confirmation the group goes and the page closes',
+    (tester) async {
+      final groups = FakeGroups(data());
+      await pump(tester, opener(groups));
+      await openMenu(tester);
+      expect(find.textContaining('guruhini o\'chirasizmi'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('group-delete-confirm')));
+      await tester.pumpAndSettle();
+      expect(groups.deleted, [1]);
+      expect(find.byKey(const ValueKey('group-title')), findsNothing);
+    },
+  );
+
+  testWidgets('deleting: cancelling keeps the group', (tester) async {
+    final groups = FakeGroups(data());
+    await pump(tester, opener(groups));
+    await openMenu(tester);
+    await tester.tap(find.text('Bekor qilish'));
+    await tester.pumpAndSettle();
+    expect(groups.deleted, isEmpty);
+    expect(find.byKey(const ValueKey('group-title')), findsOneWidget);
+  });
+
+  testWidgets('deleting: a group with history says why it stays', (
+    tester,
+  ) async {
+    final groups = FakeGroups(data())
+      ..deleteError = ApiException(
+        409,
+        'Guruhda o\'quvchilar, darslar yoki to\'lovlar tarixi bor: o\'chirib bo\'lmaydi.',
+      );
+    await pump(tester, opener(groups));
+    await openMenu(tester);
+    await tester.tap(find.byKey(const ValueKey('group-delete-confirm')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('tarixi bor'), findsOneWidget);
+    expect(find.byKey(const ValueKey('group-title')), findsOneWidget);
   });
 }

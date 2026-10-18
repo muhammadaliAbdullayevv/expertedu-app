@@ -449,6 +449,40 @@ async def update_group(group_id: int, payload: UpdateGroupRequest, scope: Scope 
     return await _fetch_group(group_id, scope)
 
 
+@router.delete("/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_group(group_id: int, scope: Scope = Depends(get_scope)):
+    """Removes a group that never had anything happen in it (made by mistake):
+    no students, lessons, trial lessons, pay lines or student history. A group
+    with history stays: its money and attendance must not disappear. The owner
+    and the admin of the group's branch may do it; another branch's group is
+    not found."""
+    await _fetch_group(group_id, scope)
+    async with db.pool().acquire() as conn:
+        async with conn.transaction():
+            await conn.fetchval("select id from groups where id = $1 for update", group_id)
+            used = await conn.fetchval(
+                """
+                select
+                  exists (select 1 from enrollments where group_id = $1)
+                  or exists (select 1 from lessons where group_id = $1)
+                  or exists (select 1 from trial_sessions where group_id = $1)
+                  or exists (select 1 from student_events where group_id = $1 or to_group_id = $1)
+                  or exists (select 1 from payment_allocations where group_id = $1)
+                  or exists (select 1 from salary_run_lines where group_id = $1)
+                """,
+                group_id,
+            )
+            if used:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "Guruhda o'quvchilar, darslar yoki to'lovlar tarixi bor: o'chirib bo'lmaydi.",
+                )
+            # A request that was offered this group is no longer tied to it.
+            await conn.execute("update leads set group_id = null where group_id = $1", group_id)
+            await conn.execute("delete from group_schedules where group_id = $1", group_id)
+            await conn.execute("delete from groups where id = $1", group_id)
+
+
 @router.get("/{group_id}/roster", response_model=list[RosterEntry])
 async def get_roster(group_id: int, include_withdrawn: bool = False, scope: Scope = Depends(get_scope)):
     await require_group(db.pool(), scope, group_id)

@@ -245,6 +245,10 @@ class GroupsRepository {
     return Group.fromJson(json);
   }
 
+  /// Removes a group that never had anything happen in it; the server refuses
+  /// (409, with the reason) when it has students, lessons or payments.
+  Future<void> delete(int id) => _api.delete('/groups/$id');
+
   /// The group's profile page in one request.
   Future<GroupProfileData> profile(int groupId) async {
     final json =

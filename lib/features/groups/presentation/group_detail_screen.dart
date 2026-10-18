@@ -7,6 +7,7 @@ import '../../../core/formatters/currency_formatter.dart';
 import '../../../core/formatters/phone_formatter.dart';
 import '../../../core/widgets/person_avatar.dart';
 import '../../../core/widgets/status_chip.dart';
+import '../../../services/api/api_client.dart';
 import '../../admissions/data/admissions_models.dart';
 import '../../admissions/presentation/admissions_ui.dart';
 import '../../admissions/presentation/qabul_text.dart';
@@ -83,6 +84,40 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
   Future<void> _edit(Group group) async {
     final saved = await showGroupFormDialog(context, group: group);
     if (saved == true && mounted) _reload();
+  }
+
+  /// Deletes a group made by mistake (no students, lessons or payments yet);
+  /// otherwise says why it stays.
+  Future<void> _delete(Group group) async {
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('"${group.name}" guruhini o\'chirasizmi?'),
+        content: const Text(
+          'Faqat o\'quvchisi, darsi va to\'lovi bo\'lmagan guruhni '
+          'o\'chirish mumkin. Bu amalni qaytarib bo\'lmaydi.',
+        ),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Bekor qilish'),
+          ),
+          FilledButton(
+            key: const ValueKey('group-delete-confirm'),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('O\'chirish'),
+          ),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) return;
+    try {
+      await ref.read(groupsRepositoryProvider).delete(group.id);
+      if (mounted) Navigator.of(context).pop();
+    } on ApiException catch (e) {
+      if (mounted) showSnack(context, e.message);
+    }
   }
 
   Future<void> _addStudent() async {
@@ -233,7 +268,20 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
           onPressed: () => _edit(g),
           child: const Text('Tahrirlash'),
         ),
-        const SizedBox(width: 10),
+        PopupMenuButton<String>(
+          key: const ValueKey('group-menu'),
+          tooltip: 'Boshqa amallar',
+          icon: const Icon(Icons.more_vert_rounded),
+          onSelected: (_) => _delete(g),
+          itemBuilder: (context) => const <PopupMenuEntry<String>>[
+            PopupMenuItem<String>(
+              key: ValueKey('group-delete'),
+              value: 'delete',
+              child: Text('Guruhni o\'chirish'),
+            ),
+          ],
+        ),
+        const SizedBox(width: 4),
         FilledButton.icon(
           key: const ValueKey('group-add-student'),
           onPressed: _addStudent,
