@@ -252,6 +252,35 @@ void main() {
       return;
     }
 
+    if (_only == 'branches') {
+      await tester.tap(find.text('O\'quvchilar').first);
+      await settle(tester);
+      await shot(tester, 'branches-students-all');
+      await tester.tap(find.byKey(const ValueKey('branch-switcher')));
+      await settle(tester);
+      await shot(tester, 'branches-switcher');
+      await tester.tap(find.byKey(const ValueKey('branch-option-2')));
+      await settle(tester);
+      await shot(tester, 'branches-students-chilonzor');
+      await tester.tap(find.text('O\'qituvchilar').first);
+      await settle(tester);
+      await shot(tester, 'branches-teachers-chilonzor');
+      return;
+    }
+
+    if (_only == 'branchadmin') {
+      await tester.tap(find.text('O\'quvchilar').first);
+      await settle(tester);
+      await shot(tester, 'branchadmin-students');
+      await tester.tap(find.text('Guruhlar').first);
+      await settle(tester);
+      await shot(tester, 'branchadmin-groups');
+      await tester.tap(find.text('O\'qituvchilar').first);
+      await settle(tester);
+      await shot(tester, 'branchadmin-teachers');
+      return;
+    }
+
     if (_only == 'actions') {
       await tester.tap(find.text('O\'quvchilar').first);
       await settle(tester);

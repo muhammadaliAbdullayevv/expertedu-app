@@ -375,7 +375,7 @@ class StudentsListScreenState extends ConsumerState<StudentsListScreen> {
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: <Widget>[
-          const _TableHeader(),
+          _TableHeader(showBranch: ref.watch(showBranchLabelsProvider)),
           const Divider(height: 1, color: AppColors.divider),
           Expanded(
             child: shown.isEmpty
@@ -486,25 +486,54 @@ const _head = TextStyle(
   color: AppColors.inkMuted,
 );
 
+/// The column weights: with every branch in view a "Filial" column is added
+/// and the others give up a little room.
+({int name, int group, int branch, int marks, int balance, int status}) _widths(
+  bool showBranch,
+) => showBranch
+    ? (name: 28, group: 22, branch: 12, marks: 21, balance: 12, status: 16)
+    : (name: 32, group: 27, branch: 0, marks: 21, balance: 12, status: 18);
+
 class _TableHeader extends StatelessWidget {
-  const _TableHeader();
+  const _TableHeader({this.showBranch = false});
+
+  final bool showBranch;
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+    final w = _widths(showBranch);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       child: Row(
         children: <Widget>[
-          Expanded(flex: 32, child: Text('O\'quvchi', style: _head)),
-          Expanded(flex: 27, child: Text('Guruh va o\'qituvchi', style: _head)),
-          Expanded(flex: 21, child: Text('Davomat (10 dars)', style: _head)),
           Expanded(
-            flex: 12,
-            child: Text('Balans', textAlign: TextAlign.right, style: _head),
+            flex: w.name,
+            child: const Text('O\'quvchi', style: _head),
           ),
           Expanded(
-            flex: 18,
-            child: Padding(
+            flex: w.group,
+            child: const Text('Guruh va o\'qituvchi', style: _head),
+          ),
+          if (showBranch)
+            Expanded(
+              flex: w.branch,
+              child: const Text('Filial', style: _head),
+            ),
+          Expanded(
+            flex: w.marks,
+            child: const Text('Davomat (10 dars)', style: _head),
+          ),
+          Expanded(
+            flex: w.balance,
+            child: const Text(
+              'Balans',
+              textAlign: TextAlign.right,
+              style: _head,
+            ),
+          ),
+          Expanded(
+            flex: w.status,
+            child: const Padding(
               padding: EdgeInsets.only(left: 14),
               child: Text('Holat', style: _head),
             ),
@@ -532,6 +561,7 @@ class _StudentRowView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final w = _widths(showBranch);
     final status = statusOf(row);
     final first = row.groups.isEmpty ? null : row.groups.first;
     final balanceColor = row.balance > 0
@@ -547,52 +577,56 @@ class _StudentRowView extends StatelessWidget {
         child: Row(
           children: <Widget>[
             Expanded(
-              flex: 32,
-              child: Row(
-                children: <Widget>[
-                  PersonAvatar(name: row.fullName, photo: row.photo),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Row(
-                          children: <Widget>[
-                            Flexible(
-                              child: Text(
-                                row.fullName,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
+              flex: w.name,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Row(
+                  children: <Widget>[
+                    PersonAvatar(name: row.fullName, photo: row.photo),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Row(
+                            children: <Widget>[
+                              Flexible(
+                                child: Text(
+                                  row.fullName,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
                               ),
-                            ),
-                            if (row.isNew) ...<Widget>[
-                              const SizedBox(width: 6),
-                              const StatusChip('Yangi', tone: StatusTone.info),
+                              if (row.isNew) ...<Widget>[
+                                const SizedBox(width: 6),
+                                const StatusChip(
+                                  'Yangi',
+                                  tone: StatusTone.info,
+                                ),
+                              ],
                             ],
-                          ],
-                        ),
-                        Text(
-                          showBranch && row.branches.isNotEmpty
-                              ? '${PhoneFormatter.display(row.phone)} · ${row.branches.join(', ')}'
-                              : PhoneFormatter.display(row.phone),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: AppColors.inkMuted,
                           ),
-                        ),
-                      ],
+                          Text(
+                            PhoneFormatter.display(row.phone),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.inkMuted,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
             Expanded(
-              flex: 27,
+              flex: w.group,
               child: first == null
                   ? const Text(
                       'Guruhsiz',
@@ -622,8 +656,22 @@ class _StudentRowView extends StatelessWidget {
                       ],
                     ),
             ),
+            if (showBranch)
+              Expanded(
+                flex: w.branch,
+                child: Text(
+                  row.branches.join(', '),
+                  key: ValueKey('student-branch-${row.id}'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.inkSecondary,
+                  ),
+                ),
+              ),
             Expanded(
-              flex: 21,
+              flex: w.marks,
               child: Row(
                 children: <Widget>[
                   AttendanceBars(row.attendanceRecent),
@@ -639,7 +687,7 @@ class _StudentRowView extends StatelessWidget {
               ),
             ),
             Expanded(
-              flex: 12,
+              flex: w.balance,
               child: Text(
                 signedBalance(row.balance),
                 textAlign: TextAlign.right,
@@ -651,7 +699,7 @@ class _StudentRowView extends StatelessWidget {
               ),
             ),
             Expanded(
-              flex: 18,
+              flex: w.status,
               child: Padding(
                 padding: const EdgeInsets.only(left: 14),
                 child: Align(

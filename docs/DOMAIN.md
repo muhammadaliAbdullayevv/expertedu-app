@@ -241,6 +241,12 @@ with the comment, the group(s), who did it and what he still owed at the time.
   only archived. Archived people who still owe stay in Qarzdorlar and can still be
   paid.
 
+## 3e. Branches
+
+The center has Bosh ofis and filiallar; one server and database, every record in a
+branch, and the **server** filters by the account's branch (admin) or the branch in
+view (owner). Full design, decisions and what is built: `docs/BRANCHES.md`.
+
 ## 4. Settings
 
 `app_settings` (one row, owner-only edit, audited): `trial_limit_per_person` (1). The time zone is `Asia/Tashkent` from server config. Billing and pay rules are per group / per teacher, not settings.

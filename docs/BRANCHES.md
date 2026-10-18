@@ -49,3 +49,22 @@ branch and **the server** decides what each login may see -- never the app.
 6. Docs, migration rehearsal on a copy of production, deploy.
 
 Every phase has tests proving an admin of branch A can never read or change branch B's data, directly or by id.
+
+## What was built in the app (phase 5, tested)
+
+- **Owner**: a switcher under the logo -- *Hammasi* or one branch. Every request carries it (`X-Branch`); changing it reloads every page and closes a course/group left open. Lists show a **Filial** column/label only when every branch is in view. A new teacher, group, expense or salary payout first asks *which branch* (and switches the view to it); Qabul says where a group-less request goes.
+- **Admin**: the branch name under the logo, nothing to choose; no Moliya in the menu.
+- **Same person in two branches**: typing a number that belongs to another branch shows "Bu raqam bilan o'quvchi allaqachon *Filial* filialida mavjud" with **Shu o'quvchini mening filialimga qo'shish** (no duplicate); that branch then sees only the shared details and keeps its own groups, payments, attendance, notes and archive.
+- **Moving a student to another branch** is the owner's: the new-group search has Filial pills (Hammasi / each branch) and labels each group.
+- **Teachers** can work in several branches (owner: *Filiallarni o'zgartirish*); pay is worked out and paid per branch.
+- **Settings**: *Filiallar* (add, rename, switch off; never Bosh ofis) and *Xodimlar* with the admin's branch.
+
+Local demo (after `expertedu-local.sh reset` or `seed`): owner `90 000 00 01`, Bosh ofis admin `…02`, Chilonzor admin `…03`, Yunusobod admin `…04`, all `demo1234`; one Bosh ofis student also studies in Chilonzor.
+
+## Deploy checklist (not done yet)
+
+1. Back up the database (`pg_dump -Fc`), as before.
+2. Apply `0020_photos.sql`, `0021_student_actions.sql`, `0022_branches.sql` in order (`psql -1 -v ON_ERROR_STOP=1`); they never ALTER `users` (the branch of an admin is in `user_branches`).
+3. Create `/opt/expertedu/photos`, set `PHOTOS_DIR` in `/etc/expertedu.env`, include it in backups; exclude `photos/` from the code rsync.
+4. Rehearse the migrations on a restored copy of production (real table owners), then deploy and restart.
+5. In the app: Settings -> Filiallar (add the four), Xodimlar (put each admin in a branch), then move each branch's groups and teachers over (owner moves a group's branch by creating it in the right branch -- there is no bulk move yet).

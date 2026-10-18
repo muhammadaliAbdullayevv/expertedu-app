@@ -357,9 +357,16 @@ void main() {
         }
 
         await pumpStudents(true);
-        expect(find.textContaining('Bosh ofis, Chilonzor'), findsOneWidget);
+        expect(find.text('Filial'), findsOneWidget);
+        expect(
+          tester
+              .widget<Text>(find.byKey(const ValueKey('student-branch-1')))
+              .data,
+          'Bosh ofis, Chilonzor',
+        );
         await pumpStudents(false);
-        expect(find.textContaining('Bosh ofis, Chilonzor'), findsNothing);
+        expect(find.text('Filial'), findsNothing);
+        expect(find.byKey(const ValueKey('student-branch-1')), findsNothing);
       },
     );
   });
