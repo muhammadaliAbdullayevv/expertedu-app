@@ -39,10 +39,24 @@ class BranchesRepository {
     return [for (final b in json) Branch.fromJson(b as Map<String, dynamic>)];
   }
 
-  /// OWNER ONLY.
-  Future<Branch> create(String name) async {
+  /// OWNER ONLY. With [adminName], [adminPhone] and [adminPassword] the
+  /// branch's first admin is made in the same step.
+  Future<Branch> create(
+    String name, {
+    String? adminName,
+    String? adminPhone,
+    String? adminPassword,
+  }) async {
     final json =
-        await _api.post('/branches', body: {'name': name})
+        await _api.post(
+              '/branches',
+              body: <String, dynamic>{
+                'name': name,
+                'admin_full_name': ?adminName,
+                'admin_phone': ?adminPhone,
+                'admin_password': ?adminPassword,
+              },
+            )
             as Map<String, dynamic>;
     return Branch.fromJson(json);
   }

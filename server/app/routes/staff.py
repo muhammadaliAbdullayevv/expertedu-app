@@ -46,6 +46,28 @@ async def _fetch(conn, staff_id: int) -> StaffMember:
     return StaffMember(**row)
 
 
+async def insert_admin(conn, *, full_name: str, phone: str, password: str, branch_id: int) -> int:
+    """Validates and adds an admin to a branch; returns their id. Shared with
+    creating a branch together with its first admin."""
+    full_name = full_name.strip()
+    if not full_name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ism kiritilishi shart.")
+    phone = normalize(phone)
+    if not is_valid_uzbek_phone(phone):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Telefon noto'g'ri: +998 dan keyin 9 ta raqam bo'lishi kerak.")
+    try:
+        staff_id = await conn.fetchval(
+            "insert into users (phone, full_name, password_hash, role) values ($1, $2, $3, 'admin') returning id",
+            phone,
+            full_name,
+            hash_password(_password(password)),
+        )
+    except asyncpg.UniqueViolationError:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Bu raqam bilan xodim allaqachon bor.")
+    await conn.execute("insert into user_branches (user_id, branch_id) values ($1, $2)", staff_id, branch_id)
+    return staff_id
+
+
 @router.get("", response_model=list[StaffMember])
 async def list_staff():
     rows = await db.pool().fetch(
@@ -57,29 +79,12 @@ async def list_staff():
 @router.post("", response_model=StaffMember, status_code=status.HTTP_201_CREATED)
 async def create_staff(payload: CreateStaffRequest):
     """Adds an admin -- there's only ever one owner."""
-    full_name = payload.full_name.strip()
-    if not full_name:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ism kiritilishi shart.")
-    phone = normalize(payload.phone)
-    if not is_valid_uzbek_phone(phone):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Telefon noto'g'ri: +998 dan keyin 9 ta raqam bo'lishi kerak.")
     async with db.pool().acquire() as conn:
         async with conn.transaction():
             branch_id = await _branch(conn, payload.branch_id)
-            try:
-                staff_id = await conn.fetchval(
-                    """
-                    insert into users (phone, full_name, password_hash, role)
-                    values ($1, $2, $3, 'admin')
-                    returning id
-                    """,
-                    phone,
-                    full_name,
-                    hash_password(_password(payload.password)),
-                )
-            except asyncpg.UniqueViolationError:
-                raise HTTPException(status.HTTP_409_CONFLICT, "Bu raqam bilan xodim allaqachon bor.")
-            await conn.execute("insert into user_branches (user_id, branch_id) values ($1, $2)", staff_id, branch_id)
+            staff_id = await insert_admin(
+                conn, full_name=payload.full_name, phone=payload.phone, password=payload.password, branch_id=branch_id
+            )
             return await _fetch(conn, staff_id)
 
 
@@ -102,6 +107,24 @@ async def update_staff(staff_id: int, payload: UpdateStaffRequest, user: Current
                 if not full_name:
                     raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ism kiritilishi shart.")
                 await conn.execute("update users set full_name = $2 where id = $1", staff_id, full_name)
+            if payload.phone is not None:
+                if row["role"] == "owner":
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST, "Egasining raqamini o'zgartirib bo'lmaydi.")
+                phone = normalize(payload.phone)
+                if not is_valid_uzbek_phone(phone):
+                    raise HTTPException(
+                        status.HTTP_400_BAD_REQUEST, "Telefon noto'g'ri: +998 dan keyin 9 ta raqam bo'lishi kerak."
+                    )
+                if phone != row["phone"]:
+                    try:
+                        # The old number stops working: sign out of every device.
+                        await conn.execute(
+                            "update users set phone = $2, token_version = token_version + 1 where id = $1",
+                            staff_id,
+                            phone,
+                        )
+                    except asyncpg.UniqueViolationError:
+                        raise HTTPException(status.HTTP_409_CONFLICT, "Bu raqam bilan xodim allaqachon bor.")
             if payload.branch_id is not None:
                 if row["role"] == "owner":
                     raise HTTPException(status.HTTP_400_BAD_REQUEST, "Egasi hamma filialni ko'radi.")
@@ -144,4 +167,16 @@ async def reset_password(
                 staff_id,
                 hash_password(_password(payload.password)),
             )
+            return await _fetch(conn, staff_id)
+
+
+@router.post("/{staff_id}/sign-out", response_model=StaffMember)
+async def sign_out_everywhere(staff_id: int, user: CurrentUser = Depends(require_owner)):
+    """Signs an admin out of every device (a lost or handed-over laptop)."""
+    async with db.pool().acquire() as conn:
+        async with conn.transaction():
+            row = await _lock_admin(conn, staff_id, user)
+            if row["role"] == "owner":
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Egasini bu yerdan chiqarib bo'lmaydi.")
+            await conn.execute("update users set token_version = token_version + 1 where id = $1", staff_id)
             return await _fetch(conn, staff_id)

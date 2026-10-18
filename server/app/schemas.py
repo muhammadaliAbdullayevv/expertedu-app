@@ -38,6 +38,10 @@ class Branch(BaseModel):
 
 class CreateBranchRequest(BaseModel):
     name: str
+    # The branch's first admin, made in the same step (all three or none).
+    admin_full_name: str | None = None
+    admin_phone: str | None = None
+    admin_password: str | None = None
 
 
 class UpdateBranchRequest(BaseModel):
@@ -971,6 +975,8 @@ class CreateStaffRequest(BaseModel):
 
 class UpdateStaffRequest(BaseModel):
     full_name: str | None = None
+    # A new login number (signs the account out of every device).
+    phone: str | None = None
     is_active: bool | None = None
     branch_id: int | None = None
 

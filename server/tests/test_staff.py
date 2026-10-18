@@ -78,3 +78,63 @@ async def test_the_owner_account_is_protected(api):
     assert off.status_code == 400
     renamed = await api.client.patch(f"/staff/{api.owner_id}", json={"full_name": "Egasi"})
     assert renamed.status_code == 200 and renamed.json()["full_name"] == "Egasi"
+
+
+# --- a branch and its admin, managed together by the owner ------------------------------------------
+
+
+async def test_a_branch_is_made_together_with_its_admin(api):
+    made = await api.client.post(
+        "/branches",
+        json={"name": "Yunusobod", "admin_full_name": "Hilola", "admin_phone": "+998 93 111 22 33", "admin_password": "secret1"},
+    )
+    assert made.status_code == 201, made.text
+    branch_id = made.json()["id"]
+    admin = next(s for s in (await api.client.get("/staff")).json() if s["full_name"] == "Hilola")
+    assert (admin["role"], admin["branch_id"], admin["phone"]) == ("admin", branch_id, "998931112233")
+    login = await _login(api, "931112233", "secret1")
+    assert login.status_code == 200
+
+
+async def test_a_branch_needs_all_admin_fields_or_none_and_leaves_nothing_behind(api):
+    half = await api.client.post("/branches", json={"name": "Yarim", "admin_full_name": "Hilola"})
+    assert half.status_code == 400
+    # The admin's number is taken: the branch is not created either.
+    taken = await api.client.post(
+        "/branches",
+        json={"name": "Band", "admin_full_name": "X", "admin_phone": "998900000002", "admin_password": "secret1"},
+    )
+    assert taken.status_code == 409
+    weak = await api.client.post(
+        "/branches",
+        json={"name": "Zaif", "admin_full_name": "X", "admin_phone": "931112244", "admin_password": "123"},
+    )
+    assert weak.status_code == 400
+    names = {b["name"] for b in (await api.client.get("/branches")).json()}
+    assert names.isdisjoint({"Yarim", "Band", "Zaif"})
+    bare = await api.client.post("/branches", json={"name": "Adminsiz"})
+    assert bare.status_code == 201
+
+
+async def test_the_owner_changes_an_admins_phone_and_the_old_login_stops(api):
+    async with api.as_admin() as admin:
+        assert (await admin.get("/me")).status_code == 200
+        moved = await api.client.patch(f"/staff/{api.admin_id}", json={"phone": "+998 94 555 66 77"})
+        assert moved.status_code == 200 and moved.json()["phone"] == "998945556677"
+        assert (await admin.get("/me")).status_code == 401  # signed out of the old session
+    await api.client.post(f"/staff/{api.admin_id}/password", json={"password": "secret1"})
+    assert (await _login(api, "945556677", "secret1")).status_code == 200
+    assert (await _login(api, "900000002", "secret1")).status_code == 401
+    assert (await api.client.patch(f"/staff/{api.admin_id}", json={"phone": "998900000001"})).status_code == 409
+    assert (await api.client.patch(f"/staff/{api.admin_id}", json={"phone": "123"})).status_code == 400
+    assert (await api.client.patch(f"/staff/{api.owner_id}", json={"phone": "931112255"})).status_code == 400
+
+
+async def test_the_owner_signs_an_admin_out_of_every_device(api):
+    async with api.as_admin() as admin:
+        assert (await admin.get("/me")).status_code == 200
+        out = await api.client.post(f"/staff/{api.admin_id}/sign-out")
+        assert out.status_code == 200 and out.json()["is_active"] is True
+        assert (await admin.get("/me")).status_code == 401
+        assert (await admin.post(f"/staff/{api.admin_id}/sign-out")).status_code in (401, 403)
+    assert (await api.client.post(f"/staff/{api.owner_id}/sign-out")).status_code == 400

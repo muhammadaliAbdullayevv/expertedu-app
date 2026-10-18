@@ -57,7 +57,7 @@ Every phase has tests proving an admin of branch A can never read or change bran
 - **Same person in two branches**: typing a number that belongs to another branch shows "Bu raqam bilan o'quvchi allaqachon *Filial* filialida mavjud" with **Shu o'quvchini mening filialimga qo'shish** (no duplicate); that branch then sees only the shared details and keeps its own groups, payments, attendance, notes and archive.
 - **Moving a student to another branch** is the owner's: the new-group search has Filial pills (Hammasi / each branch) and labels each group.
 - **Teachers** can work in several branches (owner: *Filiallarni o'zgartirish*); pay is worked out and paid per branch.
-- **Settings**: *Filiallar* (add, rename, switch off; never Bosh ofis) and *Xodimlar* with the admin's branch.
+- **Settings**: *Filiallar* (add with its first admin's name, login number and password in one step; open a branch to rename it and manage its admins: change number or password, sign out of every device, switch off, add another; switch a branch off, never Bosh ofis) and *Xodimlar* (all accounts, with the admin's branch). Changing an admin's number, password, or switching them off signs them out everywhere.
 
 Local demo (after `expertedu-local.sh reset` or `seed`): owner `90 000 00 01`, Bosh ofis admin `…02`, Chilonzor admin `…03`, Yunusobod admin `…04`, all `demo1234`; one Bosh ofis student also studies in Chilonzor.
 

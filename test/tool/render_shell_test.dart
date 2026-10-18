@@ -281,6 +281,28 @@ void main() {
       return;
     }
 
+    if (_only == 'branchsettings') {
+      await tester.tap(find.text('Sozlamalar').first);
+      await settle(tester);
+      await tester.tap(find.text('Filiallar').last);
+      await settle(tester);
+      await shot(tester, 'branchsettings-list');
+      await tester.tap(find.text('Chilonzor').first);
+      await settle(tester);
+      await shot(tester, 'branchsettings-open');
+      await tester.tap(find.byKey(const ValueKey('add-admin')));
+      await settle(tester);
+      await shot(tester, 'branchsettings-add-admin');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await settle(tester);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await settle(tester);
+      await tester.tap(find.byKey(const ValueKey('new-branch')));
+      await settle(tester);
+      await shot(tester, 'branchsettings-new');
+      return;
+    }
+
     if (_only == 'branchadmin') {
       await tester.tap(find.text('O\'quvchilar').first);
       await settle(tester);

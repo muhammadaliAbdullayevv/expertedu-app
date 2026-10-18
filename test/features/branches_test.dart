@@ -17,6 +17,7 @@ import 'package:expert_edu_center/features/students/presentation/student_panel.d
 import 'package:expert_edu_center/features/students/presentation/students_list_screen.dart';
 import 'package:expert_edu_center/features/billing/data/transactions_repository.dart';
 import 'package:expert_edu_center/features/photos/photos_repository.dart';
+import 'package:expert_edu_center/features/staff/data/staff_repository.dart';
 import 'package:expert_edu_center/features/teachers/data/teachers_repository.dart';
 import 'package:expert_edu_center/features/teachers/presentation/teacher_branches_dialog.dart';
 import 'package:expert_edu_center/services/api/api_client.dart';
@@ -42,6 +43,7 @@ class FakeBranches implements BranchesRepository {
 
   List<Branch> branches;
   final created = <String>[];
+  final createdAdmins = <({String? name, String? phone, String? password})>[];
   final updates = <({int id, String? name, bool? active})>[];
   ApiException? error;
 
@@ -49,9 +51,19 @@ class FakeBranches implements BranchesRepository {
   Future<List<Branch>> list() async => branches;
 
   @override
-  Future<Branch> create(String name) async {
+  Future<Branch> create(
+    String name, {
+    String? adminName,
+    String? adminPhone,
+    String? adminPassword,
+  }) async {
     if (error != null) throw error!;
     created.add(name);
+    createdAdmins.add((
+      name: adminName,
+      phone: adminPhone,
+      password: adminPassword,
+    ));
     final b = Branch(id: 100 + created.length, name: name);
     branches = [...branches, b];
     return b;
@@ -93,9 +105,81 @@ class FakeSession extends ChangeNotifier implements SessionController {
 
 const hq = Branch(id: 1, name: 'Bosh ofis', isHeadquarters: true);
 const chilonzor = Branch(id: 2, name: 'Chilonzor');
+
+class FakeStaff implements StaffRepository {
+  FakeStaff(this.members);
+
+  List<StaffMember> members;
+  final updates = <({int id, String? name, String? phone, bool? active})>[];
+  final created =
+      <({String phone, String name, String password, int? branch})>[];
+  final signedOut = <int>[];
+  final passwords = <int, String>{};
+
+  @override
+  Future<List<StaffMember>> list() async => members;
+
+  @override
+  Future<StaffMember> create({
+    required String phone,
+    required String fullName,
+    required String password,
+    int? branchId,
+  }) async {
+    created.add((
+      phone: phone,
+      name: fullName,
+      password: password,
+      branch: branchId,
+    ));
+    final m = StaffMember(
+      id: 900 + created.length,
+      phone: phone.replaceAll('+', ''),
+      fullName: fullName,
+      role: 'admin',
+      isActive: true,
+      branchId: branchId,
+    );
+    members = [...members, m];
+    return m;
+  }
+
+  @override
+  Future<StaffMember> update(
+    int id, {
+    String? fullName,
+    String? phone,
+    bool? isActive,
+    int? branchId,
+  }) async {
+    updates.add((id: id, name: fullName, phone: phone, active: isActive));
+    return members.firstWhere((m) => m.id == id);
+  }
+
+  @override
+  Future<void> resetPassword(int id, String password) async =>
+      passwords[id] = password;
+
+  @override
+  Future<void> signOutEverywhere(int id) async => signedOut.add(id);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+StaffMember admin(int id, String name, String phone, int branch) => StaffMember(
+  id: id,
+  phone: phone,
+  fullName: name,
+  role: 'admin',
+  isActive: true,
+  branchId: branch,
+);
+
 const yunusobod = Branch(id: 3, name: 'Yunusobod');
 
 ProviderContainer? _container;
+late FakeStaff staff;
 
 Future<FakeBranches> pumpWidget(
   WidgetTester tester,
@@ -104,12 +188,15 @@ Future<FakeBranches> pumpWidget(
   bool owner = true,
   String? branchName,
   List<Override> extra = const [],
+  List<StaffMember> members = const [],
 }) async {
   final fake = FakeBranches(branches);
+  staff = FakeStaff(members);
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
         branchesRepositoryProvider.overrideWithValue(fake),
+        staffRepositoryProvider.overrideWithValue(staff),
         sessionControllerProvider.overrideWithValue(
           FakeSession(owner: owner, branchName: branchName),
         ),
@@ -472,6 +559,234 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('toggle-branch-2')));
       await tester.pumpAndSettle();
       expect(fake.updates, [(id: 2, name: null, active: false)]);
+    });
+
+    testWidgets('each branch shows who runs it, or that nobody does', (
+      tester,
+    ) async {
+      await pumpWidget(
+        tester,
+        const SizedBox(width: 1000, height: 600, child: BranchesTab()),
+        branches: const [hq, chilonzor],
+        members: [admin(11, 'Dilfuza Hamidova', '998900000003', 2)],
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('branch-admins-2')),
+          matching: find.text('Dilfuza Hamidova · +998 90 000 00 03'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('branch-no-admin-1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('branch-no-admin-2')), findsNothing);
+    });
+
+    testWidgets('a new branch is made with its admin\'s login in one step', (
+      tester,
+    ) async {
+      final fake = await pumpWidget(
+        tester,
+        const SizedBox(width: 1000, height: 700, child: BranchesTab()),
+        branches: const [hq],
+      );
+      await tester.tap(find.byKey(const ValueKey('new-branch')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('branch-name')),
+        'Yunusobod',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('admin-name')),
+        'Hilola',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('admin-phone')),
+        '931112233',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('admin-password')),
+        'secret1',
+      );
+      await tester.tap(find.byKey(const ValueKey('branch-save')));
+      await tester.pumpAndSettle();
+      expect(fake.created, ['Yunusobod']);
+      expect(fake.createdAdmins.single, (
+        name: 'Hilola',
+        phone: '+998931112233',
+        password: 'secret1',
+      ));
+    });
+
+    testWidgets('half an admin is refused; none at all is fine', (
+      tester,
+    ) async {
+      final fake = await pumpWidget(
+        tester,
+        const SizedBox(width: 1000, height: 700, child: BranchesTab()),
+        branches: const [hq],
+      );
+      await tester.tap(find.byKey(const ValueKey('new-branch')));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('branch-name')),
+        'Yunusobod',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('admin-name')),
+        'Hilola',
+      );
+      await tester.tap(find.byKey(const ValueKey('branch-save')));
+      await tester.pumpAndSettle();
+      expect(fake.created, isEmpty);
+      expect(find.textContaining('+998 dan keyin 9 ta raqam'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('admin-phone')),
+        '931112233',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('admin-password')),
+        '123',
+      );
+      await tester.tap(find.byKey(const ValueKey('branch-save')));
+      await tester.pumpAndSettle();
+      expect(find.text('Parol kamida 6 belgi bo\'lsin.'), findsOneWidget);
+      expect(fake.created, isEmpty);
+      // Blank admin: the branch alone.
+      await tester.enterText(find.byKey(const ValueKey('admin-name')), '');
+      await tester.enterText(find.byKey(const ValueKey('admin-phone')), '');
+      await tester.enterText(find.byKey(const ValueKey('admin-password')), '');
+      await tester.tap(find.byKey(const ValueKey('branch-save')));
+      await tester.pumpAndSettle();
+      expect(fake.created, ['Yunusobod']);
+      expect(fake.createdAdmins.single.name, isNull);
+    });
+
+    group('managing a branch\'s admins', () {
+      Future<void> open(
+        WidgetTester tester, {
+        List<StaffMember>? members,
+      }) async {
+        await pumpWidget(
+          tester,
+          const SizedBox(width: 1000, height: 800, child: BranchesTab()),
+          branches: const [hq, chilonzor],
+          members:
+              members ?? [admin(11, 'Dilfuza Hamidova', '998900000003', 2)],
+        );
+        await tester.tap(find.text('Chilonzor').first);
+        await tester.pumpAndSettle();
+      }
+
+      testWidgets('the branch dialog lists its admins', (tester) async {
+        await open(tester);
+        expect(find.byKey(const ValueKey('admin-11')), findsOneWidget);
+        expect(
+          find.textContaining('+998 90 000 00 03 · hali kirmagan'),
+          findsOneWidget,
+        );
+        expect(find.byKey(const ValueKey('edit-admin-11')), findsOneWidget);
+      });
+
+      testWidgets('a branch with nobody says so and offers to add one', (
+        tester,
+      ) async {
+        await open(tester, members: const []);
+        expect(find.byKey(const ValueKey('no-admins')), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('add-admin')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.byKey(const ValueKey('staff-phone')),
+          '935550000',
+        );
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Ism'),
+          'Yangi Admin',
+        );
+        await tester.enterText(
+          find.byKey(const ValueKey('staff-password')),
+          'secret1',
+        );
+        await tester.tap(find.text('Qo\'shish').last);
+        await tester.pumpAndSettle();
+        expect(staff.created.single, (
+          phone: '+998935550000',
+          name: 'Yangi Admin',
+          password: 'secret1',
+          branch: 2,
+        ));
+        // The list in the dialog follows.
+        expect(find.text('Yangi Admin'), findsWidgets);
+      });
+
+      testWidgets('the login number and password can be changed', (
+        tester,
+      ) async {
+        await open(tester);
+        await tester.tap(find.byKey(const ValueKey('edit-admin-11')));
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<TextFormField>(
+                find.descendant(
+                  of: find.byKey(const ValueKey('staff-phone')),
+                  matching: find.byType(TextFormField),
+                ),
+              )
+              .controller!
+              .text,
+          '900000003',
+        );
+        await tester.enterText(
+          find.byKey(const ValueKey('staff-phone')),
+          '945556677',
+        );
+        await tester.enterText(
+          find.byKey(const ValueKey('staff-password')),
+          'newpass1',
+        );
+        await tester.tap(find.text('Saqlash').last);
+        await tester.pumpAndSettle();
+        expect(staff.updates.single, (
+          id: 11,
+          name: null,
+          phone: '+998945556677',
+          active: null,
+        ));
+        expect(staff.passwords, {11: 'newpass1'});
+      });
+
+      testWidgets('an unchanged number is not sent again', (tester) async {
+        await open(tester);
+        await tester.tap(find.byKey(const ValueKey('edit-admin-11')));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.widgetWithText(TextFormField, 'Ism'),
+          'Dilfuza H.',
+        );
+        await tester.tap(find.text('Saqlash').last);
+        await tester.pumpAndSettle();
+        expect(staff.updates.single.phone, isNull);
+        expect(staff.updates.single.name, 'Dilfuza H.');
+      });
+
+      testWidgets(
+        'an admin can be signed out of every device, or switched off',
+        (tester) async {
+          await open(tester);
+          await tester.tap(find.byKey(const ValueKey('edit-admin-11')));
+          await tester.pumpAndSettle();
+          await tester.tap(find.byKey(const ValueKey('staff-sign-out')));
+          await tester.pumpAndSettle();
+          expect(staff.signedOut, [11]);
+
+          await tester.tap(find.byKey(const ValueKey('edit-admin-11')));
+          await tester.pumpAndSettle();
+          await tester.tap(find.byType(Switch));
+          await tester.tap(find.text('Saqlash').last);
+          await tester.pumpAndSettle();
+          expect(staff.updates.last.active, false);
+        },
+      );
     });
 
     testWidgets('a name that is taken is refused with the server\'s words', (

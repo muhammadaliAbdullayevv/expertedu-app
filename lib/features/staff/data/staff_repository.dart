@@ -81,6 +81,7 @@ class StaffRepository {
   Future<StaffMember> update(
     int id, {
     String? fullName,
+    String? phone,
     bool? isActive,
     int? branchId,
   }) async {
@@ -88,6 +89,7 @@ class StaffRepository {
       '/staff/$id',
       body: <String, dynamic>{
         'full_name': ?fullName,
+        'phone': ?phone,
         'is_active': ?isActive,
         'branch_id': ?branchId,
       },
@@ -97,4 +99,7 @@ class StaffRepository {
 
   Future<void> resetPassword(int id, String password) =>
       _api.post('/staff/$id/password', body: {'password': password});
+
+  /// Signs the account out of every device.
+  Future<void> signOutEverywhere(int id) => _api.post('/staff/$id/sign-out');
 }
