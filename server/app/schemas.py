@@ -1414,6 +1414,9 @@ class TeacherProfile(BaseModel):
     """A teacher's page in one answer."""
 
     teacher: Teacher
+    # False for an admin: pay is the owner's alone, so none of the salary
+    # fields below (or the history) are sent to them.
+    salary_visible: bool = True
     # The teacher's own pay rule (a group's own rule wins for that group).
     salary_method: str | None = None
     salary_percent: float | None = None

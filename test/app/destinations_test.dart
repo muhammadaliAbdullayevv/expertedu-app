@@ -24,20 +24,18 @@ void main() {
     expect(menuFor(AppRole.owner), contains(Destination.settings));
   });
 
-  test(
-    'the admin sees Moliya too (paying and salary pages are open to them)',
-    () {
-      expect(menuFor(AppRole.admin), contains(Destination.finance));
-      expect(Destination.finance.allowedFor(AppRole.admin), isTrue);
-      expect(Destination.finance.allowedFor(AppRole.teacher), isFalse);
-      expect(labels(sectionFor(AppRole.admin, NavSection.manage)), [
-        'Guruhlar',
-        'O\'qituvchilar',
-        'Moliya',
-        'Hisobotlar',
-      ]);
-    },
-  );
+  test('Moliya is the owner\'s alone: the admin has no Moliya', () {
+    expect(menuFor(AppRole.admin), isNot(contains(Destination.finance)));
+    expect(Destination.finance.allowedFor(AppRole.admin), isFalse);
+    expect(Destination.finance.allowedFor(AppRole.teacher), isFalse);
+    expect(Destination.finance.allowedFor(AppRole.owner), isTrue);
+    expect(reachableFor(AppRole.admin), isNot(contains(Destination.finance)));
+    expect(labels(sectionFor(AppRole.admin, NavSection.manage)), [
+      'Guruhlar',
+      'O\'qituvchilar',
+      'Hisobotlar',
+    ]);
+  });
 
   test('a teacher gets Bugun, Jadval and Sozlamalar only', () {
     expect(menuFor(AppRole.teacher), [
@@ -55,14 +53,14 @@ void main() {
     expect(reachableFor(AppRole.admin), contains(Destination.debtors));
   });
 
-  test('the phone bar: owner and admin Moliya, teacher two items', () {
+  test('the phone bar: Moliya for the owner only, teacher two items', () {
     final owner = phoneBarFor(AppRole.owner);
     expect(labels(owner.left), ['Bugun', 'O\'quvchilar']);
     expect(labels(owner.right), ['Jadval', 'Moliya']);
     expect(owner.left[1].shortLabel(s), 'O\'quvchi');
 
     final admin = phoneBarFor(AppRole.admin);
-    expect(labels(admin.right), ['Jadval', 'Moliya']);
+    expect(labels(admin.right), ['Jadval', 'Hisobotlar']);
 
     final teacher = phoneBarFor(AppRole.teacher);
     expect(teacher.all, [Destination.today, Destination.timetable]);

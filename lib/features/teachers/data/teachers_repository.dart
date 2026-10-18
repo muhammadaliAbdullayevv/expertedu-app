@@ -113,6 +113,7 @@ class TeacherMonthPoint {
 class TeacherProfileData {
   const TeacherProfileData({
     required this.teacher,
+    this.salaryVisible = true,
     this.salaryMethod,
     this.salaryPercent,
     this.salaryFixed,
@@ -129,6 +130,9 @@ class TeacherProfileData {
   });
 
   final Teacher teacher;
+
+  /// False for an admin: pay is the owner's alone, the server sends none of it.
+  final bool salaryVisible;
 
   /// The teacher's own pay rule (a group's own rule wins for that group).
   final String? salaryMethod;
@@ -154,6 +158,7 @@ class TeacherProfileData {
   factory TeacherProfileData.fromJson(Map<String, dynamic> json) =>
       TeacherProfileData(
         teacher: Teacher.fromJson(json['teacher'] as Map<String, dynamic>),
+        salaryVisible: json['salary_visible'] as bool? ?? true,
         salaryMethod: json['salary_method'] as String?,
         salaryPercent: (json['salary_percent'] as num?)?.toDouble(),
         salaryFixed: json['salary_fixed'] as int?,

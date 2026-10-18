@@ -129,3 +129,23 @@ async def test_the_list_has_groups_and_students_but_no_money(api):
     await api.pool.execute("update teachers set is_active = false where id = $1", school.t2)
     assert [t["id"] for t in (await api.client.get("/teachers")).json()] == [school.t1]
     assert len((await api.client.get("/teachers", params={"include_inactive": "true"})).json()) == 2
+
+
+async def test_an_admin_gets_the_page_without_any_pay(api):
+    school = await School(api).build()
+    await percent_teacher(api, school)
+    e = await school.join(await school.student(name="A", phone="998901110301"), school.g1, FIRST)
+    await school.pay(e, 300000)
+    async with api.as_admin() as admin:
+        r = await admin.get(f"/teachers/{school.t1}/profile")
+    assert r.status_code == 200
+    p = r.json()
+    # Groups and lessons are there; every pay figure is gone.
+    assert [g["name"] for g in p["groups"]] == ["Beginner A"]
+    assert p["salary_visible"] is False
+    assert (p["salary_method"], p["salary_percent"], p["salary_fixed"]) == (None, None, None)
+    assert (p["collected"], p["earned"], p["paid"], p["remaining"]) == (0, 0, 0, 0)
+    assert p["history"] == []
+    # The owner still gets it.
+    owner = await profile(api, school.t1)
+    assert owner["salary_visible"] is True and owner["earned"] == 120000 and len(owner["history"]) == 6

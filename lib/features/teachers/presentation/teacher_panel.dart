@@ -162,8 +162,11 @@ class _TeacherPanelState extends ConsumerState<TeacherPanel> {
               children: <Widget>[
                 _header(p),
                 const SizedBox(height: 16),
-                _salaryCard(p),
-                const SizedBox(height: 22),
+                // Pay is the owner's alone: an admin gets no salary card.
+                if (p.salaryVisible) ...<Widget>[
+                  _salaryCard(p),
+                  const SizedBox(height: 22),
+                ],
                 const Text('Guruhlari', style: _caption),
                 const SizedBox(height: 8),
                 if (p.groups.isEmpty)
@@ -180,10 +183,12 @@ class _TeacherPanelState extends ConsumerState<TeacherPanel> {
                 const Text('Bugun va ertaga', style: _caption),
                 const SizedBox(height: 8),
                 _Lessons(lessons: p.lessons),
-                const SizedBox(height: 22),
-                const Text('So\'nggi 6 oy', style: _caption),
-                const SizedBox(height: 8),
-                _History(points: p.history),
+                if (p.salaryVisible) ...<Widget>[
+                  const SizedBox(height: 22),
+                  const Text('So\'nggi 6 oy', style: _caption),
+                  const SizedBox(height: 8),
+                  _History(points: p.history),
+                ],
               ],
             ),
           );

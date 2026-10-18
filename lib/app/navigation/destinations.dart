@@ -70,7 +70,7 @@ enum Destination {
     Icons.credit_card_outlined,
     NavSection.manage,
     phoneReady: false,
-    roles: {AppRole.owner, AppRole.admin},
+    roles: {AppRole.owner},
   ),
   reports(
     Icons.bar_chart_rounded,
@@ -157,7 +157,7 @@ List<Destination> reachableFor(AppRole role) => [
 ];
 
 /// The phone's bottom bar: two destinations, the payment button in the
-/// middle, two more. Owner and admin both get Moliya in the last slot.
+/// middle, two more. Only the owner gets Moliya in the last slot.
 /// Teachers have no payment button and no slots beyond these two.
 class PhoneBarLayout {
   const PhoneBarLayout({required this.left, required this.right});
@@ -173,9 +173,10 @@ PhoneBarLayout phoneBarFor(AppRole role) => switch (role) {
     left: [Destination.today, Destination.students],
     right: [Destination.timetable, Destination.finance],
   ),
+  // Moliya is the owner's alone: an admin's bar ends with Hisobotlar.
   AppRole.admin => const PhoneBarLayout(
     left: [Destination.today, Destination.students],
-    right: [Destination.timetable, Destination.finance],
+    right: [Destination.timetable, Destination.reports],
   ),
   AppRole.teacher => const PhoneBarLayout(
     left: [Destination.today],

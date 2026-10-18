@@ -25,10 +25,10 @@ from ..schemas import (
     VoidExpenseRequest,
 )
 
-# The owner and the admin both see Moliya, take payments and record
-# expenses and payouts. Only the owner closes a salary month or changes how
-# anyone is paid (see the endpoints marked require_owner below).
-router = APIRouter(tags=["finance"], dependencies=[Depends(get_current_user)])
+# Moliya -- expenses, salaries, payouts, profit -- is the OWNER's alone: an
+# admin neither sees nor changes any of it. (Admins still take and cancel
+# payments on a student's profile; that is in routes/transactions.py.)
+router = APIRouter(tags=["finance"], dependencies=[Depends(require_owner)])
 
 CATEGORIES = ("salary", "rent", "utilities", "marketing", "supplies", "tax", "other")
 _METHODS = ("cash", "card", "click_payme")

@@ -443,9 +443,10 @@ async def test_pay_rules_are_validated_and_owner_only(c):
         assert (await admin.put(f"/finance/teachers/{c.teacher}/salary", json={"method": None})).status_code == 403
         assert (await admin.put(f"/finance/groups/{g}/salary", json={"method": None})).status_code == 403
         assert (await admin.post("/finance/salaries/close", params={"month": this_month().isoformat()})).status_code == 403
-        # Seeing the pay is open to the admin.
-        shown = (await admin.get("/finance/salaries")).json()
-        assert next(t for t in shown["teachers"] if t["teacher_id"] == c.teacher)["salary_fixed"] == 1_500_000
+        # Seeing the pay is not: Moliya is the owner's alone.
+        assert (await admin.get("/finance/salaries")).status_code == 403
+    shown = (await c.api.client.get("/finance/salaries")).json()
+    assert next(t for t in shown["teachers"] if t["teacher_id"] == c.teacher)["salary_fixed"] == 1_500_000
     assert await c.pool.fetchval("select count(*) from audit_log where action = 'set_salary_rule'") == 2
 
 
@@ -577,26 +578,28 @@ async def payout(client, teacher, amount, month=None, **extra):
 async def test_payouts_need_a_closed_month_and_cannot_exceed_what_is_left(c):
     g = await c.group()
     await pay_for(c, c.s1, g, FEE)  # earns 120 000
+    owner = c.api.client
+    # An admin cannot pay a teacher at all.
     async with c.api.as_admin() as admin:
-        # The month is still open: nothing to pay yet.
-        early = await payout(admin, c.teacher, 1000)
-        assert early.status_code == 409 and "yoping" in early.json()["detail"]
-        # Closing is the owner's.
+        assert (await payout(admin, c.teacher, 1000)).status_code == 403
         assert (await admin.post("/finance/salaries/close", params={"month": this_month().isoformat()})).status_code == 403
-        assert (await c.api.client.post("/finance/salaries/close", params={"month": this_month().isoformat()})).status_code == 200
+    # The month is still open: nothing to pay yet.
+    early = await payout(owner, c.teacher, 1000)
+    assert early.status_code == 409 and "yoping" in early.json()["detail"]
+    assert (await owner.post("/finance/salaries/close", params={"month": this_month().isoformat()})).status_code == 200
 
-        # The admin can pay, up to what is owed...
-        assert (await payout(admin, c.teacher, 120_001)).status_code == 409
-        first = await payout(admin, c.teacher, 70_000)
-        assert first.status_code == 201, first.text
-        # ...and 50 000 is left, not more.
-        over = await payout(admin, c.teacher, 50_001)
-        assert over.status_code == 409 and "50000" in over.json()["detail"]
-        assert (await payout(admin, c.teacher, 50_000)).status_code == 201
-        assert (await payout(admin, c.teacher, 1)).status_code == 409
-        # A teacher nobody owes anything is refused too.
-        other = await c.pool.fetchval("insert into teachers (full_name) values ('Boshqa') returning id")
-        assert (await payout(admin, other, 1)).status_code == 409
+    # The owner can pay, up to what is owed...
+    assert (await payout(owner, c.teacher, 120_001)).status_code == 409
+    first = await payout(owner, c.teacher, 70_000)
+    assert first.status_code == 201, first.text
+    # ...and 50 000 is left, not more.
+    over = await payout(owner, c.teacher, 50_001)
+    assert over.status_code == 409 and "50000" in over.json()["detail"]
+    assert (await payout(owner, c.teacher, 50_000)).status_code == 201
+    assert (await payout(owner, c.teacher, 1)).status_code == 409
+    # A teacher nobody owes anything is refused too.
+    other = await c.pool.fetchval("insert into teachers (full_name) values ('Boshqa') returning id")
+    assert (await payout(owner, other, 1)).status_code == 409
     assert await c.pool.fetchval("select sum(amount) from salary_payouts where voided_at is null") == 120_000
 
 
@@ -604,10 +607,10 @@ async def test_voiding_an_expense_or_payout_is_owner_only_and_frees_the_balance(
     g = await c.group()
     await pay_for(c, c.s1, g, FEE)
     await c.api.client.post("/finance/salaries/close", params={"month": this_month().isoformat()})
+    paid = await payout(c.api.client, c.teacher, 120_000)
+    rent = await c.api.client.post("/expenses", json={"category": "rent", "amount": 5_000, "spent_on": clock.today().isoformat()})
+    assert paid.status_code == 201 and rent.status_code == 201
     async with c.api.as_admin() as admin:
-        paid = await payout(admin, c.teacher, 120_000)
-        rent = await admin.post("/expenses", json={"category": "rent", "amount": 5_000, "spent_on": clock.today().isoformat()})
-        assert paid.status_code == 201 and rent.status_code == 201
         for expense in (paid, rent):
             denied = await admin.post(f"/expenses/{expense.json()['id']}/void", json={"reason": "Xato"})
             assert denied.status_code == 403
@@ -633,16 +636,15 @@ async def test_expenses_and_payouts_are_audit_logged(c):
     g = await c.group()
     await pay_for(c, c.s1, g, FEE)
     await c.api.client.post("/finance/salaries/close", params={"month": this_month().isoformat()})
-    async with c.api.as_admin() as admin:
-        rent = await admin.post("/expenses", json={"category": "rent", "amount": 5_000, "spent_on": clock.today().isoformat()})
-        paid = await payout(admin, c.teacher, 100_000)
+    rent = await c.api.client.post("/expenses", json={"category": "rent", "amount": 5_000, "spent_on": clock.today().isoformat()})
+    paid = await payout(c.api.client, c.teacher, 100_000)
     await c.api.client.post(f"/expenses/{rent.json()['id']}/void", json={"reason": "Xato"})
     await c.api.client.post(f"/expenses/{paid.json()['id']}/void", json={"reason": "Noto'g'ri"})
     rows = await c.pool.fetch("select entity, action, user_id, reason from audit_log where entity in ('expense', 'salary_payout') order by id")
     got = [(r["entity"], r["action"], r["user_id"]) for r in rows]
     assert got == [
-        ("expense", "create", c.api.admin_id),
-        ("salary_payout", "create", c.api.admin_id),
+        ("expense", "create", c.api.owner_id),
+        ("salary_payout", "create", c.api.owner_id),
         ("expense", "void", c.api.owner_id),
         ("salary_payout", "void", c.api.owner_id),
         ("expense", "void", c.api.owner_id),

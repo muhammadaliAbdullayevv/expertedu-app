@@ -56,20 +56,21 @@ async def charge(api, enrollment: int, month: date, amount: int) -> None:
         )
 
 
-async def test_the_admin_sees_finance_but_only_the_owner_changes_pay(api):
+async def test_finance_and_pay_belong_to_the_owner_alone(api):
     ids = await seed(api)
     today = clock.today().isoformat()
     async with api.as_admin() as admin:
-        # Moliya, salary pages and expenses are open to the admin...
+        # An admin neither sees nor changes anything in Moliya: not the
+        # summary, not the salaries, not the expenses...
         for path in ("/finance/summary", "/finance/salaries"):
-            assert (await admin.get(path)).status_code == 200
+            assert (await admin.get(path)).status_code == 403, path
         assert (
             await admin.get("/expenses", params={"date_from": "2026-01-01", "date_to": "2026-12-31"})
-        ).status_code == 200
+        ).status_code == 403
         assert (
             await admin.post("/expenses", json={"category": "rent", "amount": 1000, "spent_on": today})
-        ).status_code == 201
-        # ...but closing a month and changing how anyone is paid are owner only.
+        ).status_code == 403
+        # ...and cannot close a month or change how anyone is paid.
         assert (await admin.post("/finance/salaries/close", params={"month": today})).status_code == 403
         percent = {"salary_percent": 40}
         assert (await admin.put(f"/finance/teachers/{ids['dilnoza']}/percent", json=percent)).status_code == 403
@@ -80,7 +81,9 @@ async def test_the_admin_sees_finance_but_only_the_owner_changes_pay(api):
         # Staff accounts are the owner's too.
         assert (await admin.get("/staff")).status_code == 403
     assert await api.pool.fetchval("select salary_method from teachers where id = $1", ids["dilnoza"]) is None
-    # The owner can.
+    # The owner can do all of it.
+    assert (await api.client.get("/finance/summary")).status_code == 200
+    assert (await api.client.get("/finance/salaries")).status_code == 200
     assert (await api.client.put(f"/finance/teachers/{ids['dilnoza']}/percent", json={"salary_percent": 40})).status_code == 200
 
 

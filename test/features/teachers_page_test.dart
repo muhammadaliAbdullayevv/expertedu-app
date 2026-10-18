@@ -52,11 +52,13 @@ TeacherProfileData profileOf(
   int paid = 0,
   String? method = 'percent',
   double? percent = 40,
+  bool salaryVisible = true,
   List<TimetableLesson> lessons = const [],
 }) {
   final m = month ?? DateTime(DateTime.now().year, DateTime.now().month);
   return TeacherProfileData(
     teacher: t,
+    salaryVisible: salaryVisible,
     salaryMethod: method,
     salaryPercent: percent,
     groups: groups,
@@ -456,12 +458,28 @@ void main() {
       expect(find.byKey(const ValueKey('teacher-rule-edit')), findsOneWidget);
     });
 
-    testWidgets('an admin sees the agreement but cannot change it', (
+    testWidgets('an admin sees no pay at all: no card, no rule, no history', (
       tester,
     ) async {
-      await pump(tester, Rig(owner: false));
+      final rig = Rig(owner: false);
+      // What the server sends an admin: groups yes, pay figures none.
+      rig.teachers.profiles[1] = profileOf(
+        rig.teachers.all.first,
+        groups: [beginner, french],
+        salaryVisible: false,
+        method: null,
+        percent: null,
+      );
+      await pump(tester, rig);
+      expect(find.byKey(const ValueKey('teacher-salary')), findsNothing);
+      expect(find.byKey(const ValueKey('teacher-earned')), findsNothing);
+      expect(find.byKey(const ValueKey('teacher-rule')), findsNothing);
       expect(find.byKey(const ValueKey('teacher-rule-edit')), findsNothing);
-      expect(find.byKey(const ValueKey('teacher-rule')), findsOneWidget);
+      expect(find.byKey(const ValueKey('teacher-history')), findsNothing);
+      expect(find.text('So\'nggi 6 oy'), findsNothing);
+      // The groups and today's lessons are still there.
+      expect(find.byKey(const ValueKey('teacher-group-1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('teacher-lessons')), findsOneWidget);
     });
 
     testWidgets('the month can be moved back; this month has no way forward', (

@@ -65,10 +65,9 @@ Fixed pay accrues for the current and past months from the month the teacher (or
 
 | | Owner | Admin |
 |---|---|---|
-| See Moliya, salary pages, payments, expenses | yes | yes |
-| Take and cancel payments, record expenses | yes | yes |
-| Record a salary payout — **only for a closed month, never above what is still owed** (for both roles) | yes | yes |
-| **Void an expense or a salary payout** | yes | **no** |
+| **Moliya** (expenses, salaries, payouts, profit) and a teacher's pay on their page | yes | **no** -- the server refuses (403) and never sends it |
+| Take and cancel a student's payments (on the student's profile only) | yes | yes |
+| Record an expense, pay a teacher, **void** either | yes | **no** |
 | **Close a salary month** | yes | **no** |
 | **Edit a teacher's or group's percent / fixed amount** | yes | **no** |
 | **Manage users and roles** (Xodimlar) | yes | **no** |

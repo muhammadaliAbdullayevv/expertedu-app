@@ -98,7 +98,9 @@ def _months_back(month: date, count: int) -> list[date]:
 
 
 @router.get("/{teacher_id}/profile", response_model=TeacherProfile)
-async def teacher_profile(teacher_id: int, month: date | None = None):
+async def teacher_profile(
+    teacher_id: int, month: date | None = None, user: CurrentUser = Depends(get_current_user)
+):
     """The teacher's page: their groups (name, students, days, times), what
     they earn this month, today and tomorrow, and six months of pay. The pay is
     the share of what ALL their groups collected (or their fixed amount), worked
@@ -124,22 +126,23 @@ async def teacher_profile(teacher_id: int, month: date | None = None):
         slots = await schedule.load_slots(conn, group_ids=[g["id"] for g in groups], active_only=False)
         lessons = await _timetable(conn, today, today + timedelta(days=1), teacher_id=teacher_id)
 
-        report = await money.salary_month(conn, month)
-        mine = next((t for t in report["teachers"] if t["teacher_id"] == teacher_id), None)
-
-        history = []
-        for m in _months_back(month, 6):
-            r = report if m == month else await money.salary_month(conn, m)
-            row = next((t for t in r["teachers"] if t["teacher_id"] == teacher_id), None)
-            history.append(
-                TeacherMonthPoint(
-                    month=m,
-                    collected=row["collected"] if row else 0,
-                    earned=row["earned"] if row else 0,
-                    paid=row["paid"] if row else 0,
-                    closed=r["closed"],
+        # Pay is the owner's alone: an admin's request never even computes it.
+        report, mine, history = None, None, []
+        if user.is_owner:
+            report = await money.salary_month(conn, month)
+            mine = next((t for t in report["teachers"] if t["teacher_id"] == teacher_id), None)
+            for m in _months_back(month, 6):
+                r = report if m == month else await money.salary_month(conn, m)
+                row = next((t for t in r["teachers"] if t["teacher_id"] == teacher_id), None)
+                history.append(
+                    TeacherMonthPoint(
+                        month=m,
+                        collected=row["collected"] if row else 0,
+                        earned=row["earned"] if row else 0,
+                        paid=row["paid"] if row else 0,
+                        closed=r["closed"],
+                    )
                 )
-            )
 
     cards = [
         TeacherGroupCard(
@@ -159,13 +162,16 @@ async def teacher_profile(teacher_id: int, month: date | None = None):
     ]
     return TeacherProfile(
         teacher=Teacher(**teacher),
-        salary_method=teacher["salary_method"],
-        salary_percent=None if teacher["salary_percent"] is None else float(teacher["salary_percent"]),
-        salary_fixed=teacher["salary_fixed"],
+        salary_visible=user.is_owner,
+        salary_method=teacher["salary_method"] if user.is_owner else None,
+        salary_percent=(
+            float(teacher["salary_percent"]) if user.is_owner and teacher["salary_percent"] is not None else None
+        ),
+        salary_fixed=teacher["salary_fixed"] if user.is_owner else None,
         groups=cards,
         student_total=sum(g["students"] for g in groups),
         month=month,
-        month_closed=report["closed"],
+        month_closed=report["closed"] if report else False,
         collected=mine["collected"] if mine else 0,
         earned=mine["earned"] if mine else 0,
         paid=mine["paid"] if mine else 0,
