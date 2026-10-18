@@ -329,12 +329,67 @@ def payments_and_rest(ids: dict) -> None:
         print("  (oylik oyi yopilmadi:", str(e)[:120], ")")
 
 
+def branches_demo() -> None:
+    """Two more branches with their own admin, teacher, groups and students, and
+    one person who studies in two branches (to try the shared-identity flow)."""
+    owner = Api()
+    owner.login("998900000001")
+    if len(owner.get("/branches")) > 1:
+        return
+    print("Filiallar: Chilonzor va Yunusobod (admin, o'qituvchi, guruhlar, o'quvchilar)...")
+    subjects = {s["name"]: s["id"] for s in owner.get("/subjects")}
+    plan = [
+        ("Chilonzor", "998900000003", "Chilonzor admini", "Dilfuza Hamidova", 8100000,
+         [("Ingliz tili", "Beginner B", 280000, [1, 3, 5], "09:00", "10:30"), ("Matematika", "Algebra 8", 240000, [2, 4], "15:00", "16:30")]),
+        ("Yunusobod", "998900000004", "Yunusobod admini", "Rustam Qodirov", 8200000,
+         [("Ingliz tili", "Speaking club", 300000, [2, 4, 6], "18:00", "19:30"), ("IELTS", "IELTS 7", 520000, [1, 3, 5], "18:30", "20:00")]),
+    ]
+    first_names = ["Aziza", "Bobur", "Kamola", "Sherzod", "Nilufar", "Doston", "Mohira", "Jamshid"]
+    number = 3_000_000
+    for branch, admin_phone, admin_name, teacher_name, base, groups in plan:
+        b = owner.post("/branches", json={"name": branch})
+        owner.post("/staff", json={"phone": admin_phone, "full_name": admin_name, "password": PASSWORD, "branch_id": b["id"]})
+        admin = Api()
+        admin.login(admin_phone)
+        teacher = admin.post("/teachers", json={"full_name": teacher_name, "phone": phone(base)})
+        for gi, (subject, gname, fee, days, start, end) in enumerate(groups):
+            g = admin.post("/groups", json={
+                "subject_id": subjects[subject], "name": gname, "teacher_id": teacher["id"], "fee_amount": fee,
+                "billing_day": 1, "capacity": 12, "level": gname, "start_date": str(TODAY - timedelta(days=60)),
+            })
+            admin.put(f"/groups/{g['id']}/schedule",
+                      json={"slots": [{"weekday": d, "starts_at": start, "ends_at": end} for d in days]})
+            for i in range(6):
+                st = admin.post("/students/with-enrollment", json={
+                    "full_name": f"{first_names[(i + gi) % 8]} {LAST[(i * 3 + gi) % len(LAST)]}",
+                    "phone": phone(number), "group_id": g["id"],
+                    "joined_at": str(TODAY.replace(day=1)),
+                })
+                number += 1
+                enrollment = st["enrollment_id"]
+                if i % 3 != 2:  # two of three pay; the rest owe
+                    admin.post(f"/enrollments/{enrollment}/payments", json={"amount": fee, "method": "cash"})
+        admin.post("/leads", json={"full_name": f"{branch} so'rovi", "phone": phone(base + 1), "source": "instagram"})
+    # One student of Bosh ofis also studies in Chilonzor.
+    students = owner.get("/students")
+    shared = students[3]
+    chilonzor = Api()
+    chilonzor.login("998900000003")
+    chilonzor.post(f"/students/{shared['id']}/join-branch", json={"phone": shared["phone"]})
+    target = next(g for g in chilonzor.get("/groups") if g["name"] == "Algebra 8")
+    added = chilonzor.post(f"/students/{shared['id']}/add-to-group",
+                           json={"group_id": target["id"], "joined_at": str(TODAY.replace(day=1))})
+    chilonzor.post(f"/enrollments/{added['enrollment_id']}/payments", json={"amount": 100000, "method": "cash"})
+
+
 def main() -> None:
     asyncio.run(create_users())
     ids = main_api()
     asyncio.run(charges_attendance_payments(ids))
     payments_and_rest(ids)
-    print("\nTayyor. Kirish: 90 000 00 01 / demo1234 (egasi), 90 000 00 02 / demo1234 (admin).")
+    branches_demo()
+    print("\nTayyor. Kirish: 90 000 00 01 / demo1234 (egasi), 90 000 00 02 / demo1234 (Bosh ofis admini),")
+    print("90 000 00 03 (Chilonzor admini), 90 000 00 04 (Yunusobod admini) -- hammasi demo1234.")
 
 
 if __name__ == "__main__":
