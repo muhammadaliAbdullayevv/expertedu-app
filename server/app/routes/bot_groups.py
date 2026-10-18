@@ -28,6 +28,9 @@ HOMEWORK = ("great", "good", "weak", "bad", "none", "skipped")
 # The bot asks this long before a lesson ends, and still may for this long after.
 ASK_BEFORE_END = timedelta(minutes=5)
 ASK_UNTIL_AFTER_END = timedelta(hours=2)
+# A question still unanswered this long after it was posted is brought up once more (and never after a day).
+REMIND_AFTER = timedelta(minutes=30)
+REMIND_UNTIL = timedelta(hours=24)
 
 
 # --- who is allowed ------------------------------------------------------------------------------------------
@@ -399,3 +402,47 @@ async def feedback_answer(payload: FeedbackAnswer):
             if question is None:
                 await conn.execute("update telegram_prompts set status = 'done' where lesson_id = $1", payload.lesson_id)
     return FeedbackNext(group_name=group["name"], done=question is None, question=question, answered=answered, total=total)
+
+
+class Reminder(BaseModel):
+    lesson_id: int
+    chat_id: int
+    # The posted question: the reminder is a reply to it.
+    message_id: int | None = None
+    group_name: str
+    remaining: int
+
+
+@router.get("/feedback/reminders", response_model=list[Reminder])
+async def feedback_reminders(limit: int = Query(10, ge=1, le=50)):
+    """Questions posted a while ago that still have students nobody has answered about -- once each."""
+    out = []
+    async with db.pool().acquire() as conn:
+        for p in await conn.fetch(
+            """
+            select p.lesson_id, p.chat_id, p.message_id, g.name as group_name
+            from telegram_prompts p
+            join lessons l on l.id = p.lesson_id
+            join groups g on g.id = l.group_id
+            where p.status = 'asked' and p.reminded_at is null
+              and p.created_at < now() - $1::interval and p.created_at > now() - $2::interval
+            order by p.created_at limit $3
+            """,
+            REMIND_AFTER, REMIND_UNTIL, limit,
+        ):
+            question, answered, total = await next_question(conn, p["lesson_id"])
+            if question is None:  # everyone got answered in the meantime
+                await conn.execute("update telegram_prompts set status = 'done' where lesson_id = $1", p["lesson_id"])
+                continue
+            out.append(
+                Reminder(
+                    lesson_id=p["lesson_id"], chat_id=p["chat_id"], message_id=p["message_id"],
+                    group_name=p["group_name"], remaining=total - answered,
+                )
+            )
+    return out
+
+
+@router.post("/feedback/{lesson_id}/reminded", status_code=status.HTTP_204_NO_CONTENT)
+async def feedback_reminded(lesson_id: int):
+    await db.pool().execute("update telegram_prompts set reminded_at = now() where lesson_id = $1", lesson_id)

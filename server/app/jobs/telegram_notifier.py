@@ -210,6 +210,23 @@ async def _weekly(conn, now: datetime, iso) -> int:
         now - timedelta(days=7),
         now,
     )
+    # How the homework went this week: the average of the teacher's answers (skipped ones do not count).
+    homework = {
+        r["student_id"]: r
+        for r in await conn.fetch(
+            """
+            select e.student_id, count(*) as n,
+                   avg(case f.homework when 'great' then 4 when 'good' then 3 when 'weak' then 2 when 'bad' then 1 else 0 end) as score
+            from lesson_feedback f
+            join lessons l on l.id = f.lesson_id
+            join enrollments e on e.id = f.enrollment_id
+            where f.homework <> 'skipped' and l.starts_at > $1 and l.starts_at <= $2
+            group by e.student_id
+            """,
+            now - timedelta(days=7),
+            now,
+        )
+    }
     out = []
     for r in rows:
         total = r["present"] + r["late"] + r["absent"] + r["excused"]
@@ -221,6 +238,11 @@ async def _weekly(conn, now: datetime, iso) -> int:
                 {
                     "attended": attended, "late": r["late"], "absent": r["absent"], "excused": r["excused"],
                     "total": total, "rate": round(attended / expected, 4) if expected else None,
+                    **(
+                        {"homework_total": homework[r["student_id"]]["n"], "homework_score": round(float(homework[r["student_id"]]["score"]), 2)}
+                        if r["student_id"] in homework
+                        else {}
+                    ),
                 },
                 f"week:{r['student_id']}:{iso.year}-{iso.week}:{r['chat_id']}",
             )

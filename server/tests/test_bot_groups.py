@@ -344,3 +344,120 @@ async def test_another_branch_does_not_see_the_homework(world, bot):
     (round_,) = await pending(bot)
     await answer(bot, world, round_["question"]["enrollment_id"], "good", lesson=round_["lesson_id"])
     assert (await world.a2.get(f"/students/{world.s1b}/profile")).status_code == 404
+
+
+# --- reminding the teacher about unanswered questions -----------------------------------------------------------------
+
+
+async def posted_question(bot, world):
+    await connect(bot, world)
+    await run_job(world, ending_soon())
+    (round_,) = await pending(bot)
+    await bot.post(f"/bot/feedback/{round_['lesson_id']}/asked", json={"message_id": 55})
+    return round_
+
+
+async def age_prompt(world, minutes):
+    await world.pool.execute("update telegram_prompts set created_at = now() - make_interval(mins => $1)", minutes)
+
+
+async def test_an_unanswered_question_is_brought_up_once_after_half_an_hour(world, bot):
+    round_ = await posted_question(bot, world)
+    assert (await bot.get("/bot/feedback/reminders")).json() == []  # too soon
+    await age_prompt(world, 45)
+    (reminder,) = (await bot.get("/bot/feedback/reminders")).json()
+    assert reminder == {"lesson_id": round_["lesson_id"], "chat_id": CHAT, "message_id": 55, "group_name": "Beginner A", "remaining": 2}
+    assert (await bot.post(f"/bot/feedback/{round_['lesson_id']}/reminded")).status_code == 204
+    assert (await bot.get("/bot/feedback/reminders")).json() == []  # once only
+
+
+async def test_the_reminder_counts_only_who_is_still_waiting(world, bot):
+    round_ = await posted_question(bot, world)
+    await answer(bot, world, round_["question"]["enrollment_id"], "good", lesson=round_["lesson_id"])
+    await age_prompt(world, 45)
+    (reminder,) = (await bot.get("/bot/feedback/reminders")).json()
+    assert reminder["remaining"] == 1
+
+
+async def test_a_finished_or_day_old_question_is_not_reminded(world, bot):
+    round_ = await posted_question(bot, world)
+    first = round_["question"]["enrollment_id"]
+    second = (await answer(bot, world, first, "good", lesson=round_["lesson_id"])).json()["question"]["enrollment_id"]
+    await age_prompt(world, 45)
+    await answer(bot, world, second, "good", lesson=round_["lesson_id"])  # everyone answered
+    assert (await bot.get("/bot/feedback/reminders")).json() == []
+    # a question nobody touched for a day is let go
+    await world.pool.execute("update telegram_prompts set status = 'asked', reminded_at = null")
+    await world.pool.execute("delete from lesson_feedback")
+    await age_prompt(world, 60 * 25)
+    assert (await bot.get("/bot/feedback/reminders")).json() == []
+
+
+async def test_a_question_not_yet_posted_is_not_reminded(world, bot):
+    await connect(bot, world)
+    await run_job(world, ending_soon())
+    await age_prompt(world, 45)
+    assert (await bot.get("/bot/feedback/reminders")).json() == []
+
+
+# --- the student's own homework view ---------------------------------------------------------------------------------
+
+
+async def test_a_linked_student_sees_their_homework_in_me_and_the_week_summary(world, bot):
+    await connect(bot, world)
+    await run_job(world, ending_soon())
+    (round_,) = await pending(bot)
+    aziza = round_["question"]["enrollment_id"]
+    botir = (await answer(bot, world, aziza, "great", lesson=round_["lesson_id"])).json()["question"]["enrollment_id"]
+    await answer(bot, world, botir, "weak", lesson=round_["lesson_id"])
+    await bot.post("/bot/link", json={"chat_id": 555, "phone": "998901110001"})
+    me = (await bot.get("/bot/me/555")).json()
+    assert me["homework"]["weak"] == 1 and me["homework"]["total"] == 1 and me["homework"]["score"] == 2.0
+    assert [(h["group_name"], h["homework"]) for h in me["homework"]["recent"]] == [("Beginner A", "weak")]
+    # a student with no answers has an empty block
+    await bot.post("/bot/link", json={"chat_id": 556, "phone": "998901110002"})
+    assert (await bot.get("/bot/me/556")).json()["homework"] == {
+        "great": 0, "good": 0, "weak": 0, "bad": 0, "none": 0, "total": 0, "score": None, "recent": [],
+    }
+
+
+async def test_the_sunday_message_carries_the_weeks_homework_average(world, bot):
+    import json
+
+    today = date.today()
+    sunday = today - timedelta(days=(today.isoweekday() % 7))
+    now = datetime.combine(sunday, time(19), tzinfo=TZ)
+    e = await world.enrollment(world.s1, world.g1)
+    for days_ago, rating in ((1, "great"), (2, "weak"), (3, "skipped")):
+        start = now - timedelta(days=days_ago)
+        lesson = await world.pool.fetchval(
+            "insert into lessons (group_id, starts_at, ends_at) values ($1, $2, $3) returning id",
+            world.g1, start, start + timedelta(hours=1),
+        )
+        await world.pool.execute("insert into attendance (lesson_id, enrollment_id, status) values ($1, $2, 'present')", lesson, e)
+        await world.pool.execute("insert into lesson_feedback (lesson_id, enrollment_id, homework) values ($1, $2, $3)", lesson, e, rating)
+    await bot.post("/bot/link", json={"chat_id": 555, "phone": "998901110001"})
+    await run_job(world, now)
+    (weekly,) = [r for r in await world.pool.fetch("select * from telegram_outbox where kind = 'weekly'")]
+    data = weekly["payload"] if isinstance(weekly["payload"], dict) else json.loads(weekly["payload"])
+    assert data["homework_total"] == 2 and data["homework_score"] == 3.0  # (4 + 2) / 2; the skipped one is not counted
+    assert data["attended"] == 3
+
+
+async def test_a_week_without_homework_answers_has_no_homework_line(world, bot):
+    import json
+
+    today = date.today()
+    sunday = today - timedelta(days=(today.isoweekday() % 7))
+    now = datetime.combine(sunday, time(19), tzinfo=TZ)
+    e = await world.enrollment(world.s1, world.g1)
+    start = now - timedelta(days=1)
+    lesson = await world.pool.fetchval(
+        "insert into lessons (group_id, starts_at, ends_at) values ($1, $2, $3) returning id", world.g1, start, start + timedelta(hours=1)
+    )
+    await world.pool.execute("insert into attendance (lesson_id, enrollment_id, status) values ($1, $2, 'present')", lesson, e)
+    await bot.post("/bot/link", json={"chat_id": 555, "phone": "998901110001"})
+    await run_job(world, now)
+    (weekly,) = [r for r in await world.pool.fetch("select * from telegram_outbox where kind = 'weekly'")]
+    data = weekly["payload"] if isinstance(weekly["payload"], dict) else json.loads(weekly["payload"])
+    assert "homework_total" not in data

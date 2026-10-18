@@ -354,6 +354,30 @@ class NextLesson(BaseModel):
     starts_at: datetime
 
 
+class MeHomeworkEntry(BaseModel):
+    group_name: str
+    at: datetime
+    # 'great' | 'good' | 'weak' | 'bad' | 'none'
+    homework: str
+
+
+class MeHomework(BaseModel):
+    """How well they prepared for lessons, from the teacher's answers to the bot's question."""
+
+    great: int = 0
+    good: int = 0
+    weak: int = 0
+    bad: int = 0
+    none: int = 0
+    total: int = 0
+    # 0 (no homework at all) .. 4 (great); null until there is an answer.
+    score: float | None = None
+    recent: list[MeHomeworkEntry] = []
+
+
+_HOMEWORK_SCORE = {"great": 4, "good": 3, "weak": 2, "bad": 1, "none": 0}
+
+
 class Me(BaseModel):
     student_name: str
     language: str
@@ -362,6 +386,7 @@ class Me(BaseModel):
     total_owed: int
     week: MeWeek
     next_lessons: list[NextLesson]
+    homework: MeHomework = MeHomework()
 
 
 def week_numbers(rows) -> MeWeek:
@@ -428,6 +453,18 @@ async def me(chat_id: int):
             """,
             student_id,
         )
+        homework_rows = await conn.fetch(
+            """
+            select f.homework, l.starts_at, g.name as group_name
+            from lesson_feedback f
+            join lessons l on l.id = f.lesson_id
+            join enrollments e on e.id = f.enrollment_id
+            join groups g on g.id = e.group_id
+            where e.student_id = $1 and f.homework <> 'skipped'
+            order by l.starts_at desc, f.id desc
+            """,
+            student_id,
+        )
     slots: dict[int, list[Slot]] = {}
     for r in slot_rows:
         slots.setdefault(r["group_id"], []).append(
@@ -453,6 +490,17 @@ async def me(chat_id: int):
         total_owed=sum(g.owed for g in groups),
         week=week_numbers(week_rows),
         next_lessons=_next_lessons(group_rows, slot_rows),
+        homework=_homework(homework_rows),
+    )
+
+
+def _homework(rows) -> MeHomework:
+    ratings = [r["homework"] for r in rows if r["homework"] in _HOMEWORK_SCORE]
+    return MeHomework(
+        **{key: ratings.count(key) for key in _HOMEWORK_SCORE},
+        total=len(ratings),
+        score=round(sum(_HOMEWORK_SCORE[r] for r in ratings) / len(ratings), 2) if ratings else None,
+        recent=[MeHomeworkEntry(group_name=r["group_name"], at=r["starts_at"], homework=r["homework"]) for r in rows[:5]],
     )
 
 

@@ -818,3 +818,6 @@ create table if not exists lesson_feedback (
   constraint uq_lesson_feedback unique (lesson_id, enrollment_id)
 );
 create index if not exists idx_lesson_feedback_enrollment on lesson_feedback (enrollment_id);
+
+-- ---- 0026: reminding the teacher about unanswered homework questions ----
+alter table telegram_prompts add column if not exists reminded_at timestamptz;
