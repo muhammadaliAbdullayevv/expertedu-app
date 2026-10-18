@@ -41,6 +41,9 @@ class GroupDetailScreen extends ConsumerStatefulWidget {
 class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
   /// Below this width the student's profile does not fit beside the list.
   static const double _splitWidth = 1100;
+  // Below this the Telegram section goes under the facts instead of beside them.
+  static const double _sideBySideWidth = 820;
+  static const double _telegramWidth = 320;
 
   late Future<({GroupProfileData profile, List<RosterEntry> roster})> _data =
       _load();
@@ -304,12 +307,7 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
       children: <Widget>[
         _stats(p),
         const SizedBox(height: 14),
-        _details(p),
-        const SizedBox(height: 14),
-        TelegramSection(
-          key: ValueKey('telegram-${p.group.id}'),
-          groupId: p.group.id,
-        ),
+        _detailsRow(p),
         if (p.waiting.isNotEmpty) ...<Widget>[
           const SizedBox(height: 14),
           _waiting(p),
@@ -518,6 +516,39 @@ class _GroupDetailScreenState extends ConsumerState<GroupDetailScreen> {
   String _millions(int amount) => CurrencyFormatter.compact(amount);
 
   /// Teacher, days and times, payment day, price, start, next lessons.
+  /// The group's facts, with the Telegram connection beside them in the room they leave free (stacked
+  /// when the page is narrow).
+  Widget _detailsRow(GroupProfileData p) {
+    final telegram = TelegramSection(
+      key: ValueKey('telegram-${p.group.id}'),
+      groupId: p.group.id,
+    );
+    return LayoutBuilder(
+      builder: (context, box) {
+        if (box.maxWidth < _sideBySideWidth) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              _details(p),
+              const SizedBox(height: 14),
+              telegram,
+            ],
+          );
+        }
+        return IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Expanded(child: _details(p)),
+              const SizedBox(width: 14),
+              SizedBox(width: _telegramWidth, child: telegram),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _details(GroupProfileData p) {
     final g = p.group;
     const caption = TextStyle(

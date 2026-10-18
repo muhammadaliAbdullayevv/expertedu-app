@@ -1,3 +1,4 @@
+import 'package:expert_edu_center/app/theme/app_theme.dart';
 import 'package:expert_edu_center/features/groups/data/groups_repository.dart';
 import 'package:expert_edu_center/features/groups/presentation/telegram_section.dart';
 import 'package:expert_edu_center/services/api/api_client.dart';
@@ -5,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+import '../helpers/load_fonts.dart';
 
 class _FakeGroups implements GroupsRepository {
   _FakeGroups(this.status);
@@ -55,7 +58,81 @@ Future<void> _pump(WidgetTester tester, _FakeGroups groups) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> _pumpNarrow(WidgetTester tester, _FakeGroups groups) async {
+  // The group page puts this section beside the group's facts, in a column this wide.
+  await tester.pumpWidget(
+    ProviderScope(
+      overrides: [groupsRepositoryProvider.overrideWithValue(groups)],
+      child: MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 320,
+              child: SingleChildScrollView(child: TelegramSection(groupId: 7)),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
 void main() {
+  setUpAll(
+    loadAppFonts,
+  ); // real glyph widths: the test font is much wider than the app's
+
+  // The group page puts this section beside the group's facts, in a column 320 wide: no state may overflow it.
+  testWidgets('narrow column: an open code with its link fits', (tester) async {
+    await _pumpNarrow(
+      tester,
+      _FakeGroups(
+        TelegramGroupStatus(
+          connected: false,
+          code: 'K7M4QXPA',
+          codeExpiresAt: DateTime(2030, 1, 2, 9, 30),
+          link: 'https://t.me/Expert_AI_Admin_bot?startgroup=K7M4QXPA',
+        ),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('telegram-code')), findsOneWidget);
+    expect(find.byKey(const ValueKey('telegram-copy-link')), findsOneWidget);
+  });
+
+  testWidgets('narrow column: not connected, no code yet, fits', (
+    tester,
+  ) async {
+    await _pumpNarrow(
+      tester,
+      _FakeGroups(const TelegramGroupStatus(connected: false)),
+    );
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('telegram-new-code')), findsOneWidget);
+  });
+
+  testWidgets('narrow column: connected, with a long chat name, fits', (
+    tester,
+  ) async {
+    await _pumpNarrow(
+      tester,
+      _FakeGroups(
+        TelegramGroupStatus(
+          connected: true,
+          chatTitle:
+              'Ingliz tili Beginner A — kechki guruh (o\'quvchilar chati)',
+          connectedBy: 'Administrator Adminovich',
+          connectedAt: DateTime(2030, 1, 1),
+        ),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('telegram-disconnect')), findsOneWidget);
+  });
+
   testWidgets('not connected: says so, and a code is made on request', (
     tester,
   ) async {

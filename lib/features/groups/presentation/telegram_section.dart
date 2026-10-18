@@ -173,8 +173,8 @@ class _TelegramSectionState extends ConsumerState<TelegramSection> {
     return <Widget>[
       const Text(
         '1. Botni Telegram guruhiga admin qilib qo\'shing.\n'
-        '2. Guruhda kodni yuboring: /connect KOD',
-        style: TextStyle(height: 1.5),
+        '2. Guruhda yuboring: /connect KOD',
+        style: TextStyle(height: 1.5, fontSize: 13),
       ),
       const SizedBox(height: 10),
       if (code == null)
@@ -195,23 +195,34 @@ class _TelegramSectionState extends ConsumerState<TelegramSection> {
       else ...<Widget>[
         Row(
           children: <Widget>[
-            SelectableText(
-              code,
-              key: const ValueKey('telegram-code'),
-              style: const TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 3,
+            Flexible(
+              child: SelectableText(
+                code,
+                key: const ValueKey('telegram-code'),
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 3,
+                ),
               ),
             ),
-            const SizedBox(width: 10),
             IconButton(
               key: const ValueKey('telegram-copy-command'),
               tooltip: '/connect $code ni nusxalash',
               onPressed: () => _copy('/connect $code'),
               icon: const Icon(Icons.copy_rounded, size: 18),
             ),
-            const Spacer(),
+          ],
+        ),
+        if (status.codeExpiresAt != null)
+          Text(
+            'Bir marta ishlaydi, ${_until(status.codeExpiresAt!)} gacha.',
+            style: const TextStyle(color: AppColors.inkMuted, fontSize: 12),
+          ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 8,
+          children: <Widget>[
             TextButton(
               key: const ValueKey('telegram-new-code'),
               onPressed: _busy
@@ -223,32 +234,20 @@ class _TelegramSectionState extends ConsumerState<TelegramSection> {
                     ),
               child: const Text('Yangi kod'),
             ),
-          ],
-        ),
-        if (status.codeExpiresAt != null)
-          Text(
-            'Bir marta ishlaydi, ${_until(status.codeExpiresAt!)} gacha.',
-            style: const TextStyle(color: AppColors.inkMuted, fontSize: 13),
-          ),
-        if (status.link != null) ...<Widget>[
-          const SizedBox(height: 8),
-          Row(
-            children: <Widget>[
-              const Expanded(
-                child: Text(
-                  'Yoki havola: botni guruhga qo\'shadi va kodni o\'zi yuboradi.',
-                  style: TextStyle(color: AppColors.inkMuted, fontSize: 13),
-                ),
-              ),
+            if (status.link != null)
               TextButton.icon(
                 key: const ValueKey('telegram-copy-link'),
                 onPressed: () => _copy(status.link!),
                 icon: const Icon(Icons.link_rounded, size: 18),
                 label: const Text('Havolani nusxalash'),
               ),
-            ],
+          ],
+        ),
+        if (status.link != null)
+          const Text(
+            'Havola botni guruhga qo\'shadi va kodni o\'zi yuboradi.',
+            style: TextStyle(color: AppColors.inkMuted, fontSize: 12),
           ),
-        ],
       ],
     ];
   }
