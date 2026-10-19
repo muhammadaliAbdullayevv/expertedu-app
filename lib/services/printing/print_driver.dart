@@ -5,10 +5,21 @@ import 'package:flutter/foundation.dart';
 
 /// A printer the computer knows.
 class PrinterInfo {
-  const PrinterInfo(this.name, {this.isDefault = false, this.uri});
+  const PrinterInfo(
+    this.name, {
+    this.isDefault = false,
+    this.uri,
+    this.color,
+    this.duplex,
+  });
 
   final String name;
   final bool isDefault;
+
+  /// What the printer can do, when it could be found out (null = not known;
+  /// an unknown ability is offered, never hidden).
+  final bool? color;
+  final bool? duplex;
 
   /// Set for a printer found on the network that has no system queue: its IPP
   /// address, which the direct route prints to.
@@ -128,7 +139,7 @@ class WindowsPrintDriver implements PrintDriver {
       '-NonInteractive',
       '-Command',
       '[Console]::OutputEncoding=[Text.Encoding]::UTF8; '
-          'Get-CimInstance Win32_Printer | Select-Object Name,Default | '
+          'Get-CimInstance Win32_Printer | Select-Object Name,Default,Capabilities | '
           'ConvertTo-Json -Compress',
     ]);
     if (result.exitCode != 0) {
@@ -145,12 +156,25 @@ class WindowsPrintDriver implements PrintDriver {
     final items = decoded is List ? decoded : <dynamic>[decoded];
     return <PrinterInfo>[
       for (final item in items)
-        if (item is Map && item['Name'] is String)
-          PrinterInfo(
-            item['Name'] as String,
-            isDefault: item['Default'] == true,
-          ),
+        if (item is Map && item['Name'] is String) _windowsPrinter(item),
     ];
+  }
+
+  /// Win32_Printer.Capabilities lists what the driver says it can do: 2 =
+  /// colour, 3 = two-sided. A driver that lists nothing tells us nothing.
+  static PrinterInfo _windowsPrinter(Map<dynamic, dynamic> item) {
+    final raw = item['Capabilities'];
+    final caps = raw is List
+        ? raw.whereType<num>().toList()
+        : raw is num
+        ? <num>[raw]
+        : <num>[];
+    return PrinterInfo(
+      item['Name'] as String,
+      isDefault: item['Default'] == true,
+      color: caps.isEmpty ? null : caps.contains(2),
+      duplex: caps.isEmpty ? null : caps.contains(3),
+    );
   }
 
   /// SumatraPDF's `-print-settings` for a request: copies, sides, colour.
@@ -230,11 +254,49 @@ class CupsPrintDriver implements PrintDriver {
       r':\s*(\S.*)$',
     ).firstMatch('${d?.stdout ?? ''}'.trim());
     if (match != null) defaultName = match.group(1)!.trim();
-    return <PrinterInfo>[
-      for (final line in LineSplitter.split('${list.stdout}'))
-        if (RegExp(r'^printer\s+(\S+)').firstMatch(line) case final m?)
-          PrinterInfo(m.group(1)!, isDefault: m.group(1) == defaultName),
-    ];
+    final printers = <PrinterInfo>[];
+    for (final line in LineSplitter.split('${list.stdout}')) {
+      final m = RegExp(r'^printer\s+(\S+)').firstMatch(line);
+      if (m == null) continue;
+      final name = m.group(1)!;
+      final options = await _try('lpoptions', <String>['-p', name, '-l']);
+      final caps = options == null || options.exitCode != 0
+          ? (color: null, duplex: null)
+          : parseOptions('${options.stdout}');
+      printers.add(
+        PrinterInfo(
+          name,
+          isDefault: name == defaultName,
+          color: caps.color,
+          duplex: caps.duplex,
+        ),
+      );
+    }
+    return printers;
+  }
+
+  /// What `lpoptions -p NAME -l` says: a two-sided option, a colour-model
+  /// option with more than grey in it. Nothing listed at all = not known.
+  static ({bool? color, bool? duplex}) parseOptions(String output) {
+    final lines = LineSplitter.split(
+      output,
+    ).where((l) => l.contains(':')).toList();
+    if (lines.isEmpty) return (color: null, duplex: null);
+    bool? color;
+    var duplex = false;
+    for (final line in lines) {
+      final key = line.split('/').first.split(':').first.toLowerCase();
+      final values = line.substring(line.indexOf(':') + 1).toLowerCase();
+      if (key == 'duplex' || key == 'sides') duplex = true;
+      if (key == 'colormodel' ||
+          key == 'print-color-mode' ||
+          key == 'colormode') {
+        color = RegExp(
+          r'\b(rgb|color|colour|cmyk|auto|cmy)\b',
+        ).hasMatch(values);
+      }
+    }
+    return (color: color, duplex: duplex);
   }
 
   /// The arguments of `lp` for a request.
@@ -323,12 +385,73 @@ class DirectIppPrintDriver implements PrintDriver {
       final shown = '$name (tarmoq)';
       if (_uris.containsKey(shown)) continue;
       _uris[shown] = uri;
-      list.add(PrinterInfo(shown, uri: uri));
+      final caps = await _capabilities(uri);
+      list.add(
+        PrinterInfo(shown, uri: uri, color: caps.color, duplex: caps.duplex),
+      );
     }
     return list;
   }
 
   bool owns(String printer) => _uris.containsKey(printer);
+
+  /// `ipptool` output: "color-supported (boolean) = false", "sides-supported
+  /// (keyword) = one-sided,two-sided-long-edge".
+  static ({bool? color, bool? duplex}) parseCapabilities(String output) {
+    final color = RegExp(
+      r'color-supported \(boolean\) = (true|false)',
+    ).firstMatch(output);
+    final sides = RegExp(
+      r'sides-supported \(keyword\) = (\S+)',
+    ).firstMatch(output);
+    return (
+      color: switch (color?.group(1)) {
+        'true' => true,
+        'false' => false,
+        _ => null,
+      },
+      duplex: sides?.group(1)?.contains('two-sided'),
+    );
+  }
+
+  /// Asks the printer a short question (some answer nothing to a long one).
+  Future<({bool? color, bool? duplex})> _capabilities(String uri) async {
+    final file = File(
+      '${Directory.systemTemp.path}/expertedu_caps_${uri.hashCode.abs()}.test',
+    );
+    try {
+      file.writeAsStringSync(_capabilitiesTest);
+      final result = await _try('ipptool', <String>[
+        '-tv',
+        '-T',
+        '5',
+        uri,
+        file.path,
+      ]);
+      if (result == null || result.exitCode != 0) {
+        return (color: null, duplex: null);
+      }
+      return parseCapabilities('${result.stdout}');
+    } catch (_) {
+      return (color: null, duplex: null);
+    } finally {
+      try {
+        file.deleteSync();
+      } catch (_) {}
+    }
+  }
+
+  static const _capabilitiesTest = '''
+{
+  OPERATION Get-Printer-Attributes
+  GROUP operation-attributes-tag
+  ATTR charset attributes-charset utf-8
+  ATTR language attributes-natural-language en
+  ATTR uri printer-uri \$uri
+  ATTR keyword requested-attributes color-supported,sides-supported
+  STATUS successful-ok
+}
+''';
 
   @override
   Future<String?> problem() async {

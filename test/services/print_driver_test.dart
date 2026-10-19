@@ -399,6 +399,85 @@ void main() {
     );
   });
 
+  group('what a printer can do', () {
+    test(
+      'Windows: the driver\'s capability list says colour (2) and two-sided (3); nothing listed = not known',
+      () {
+        final printers = WindowsPrintDriver.parsePrinters(
+          '[{"Name":"Mono","Default":false,"Capabilities":[4,5]},'
+          '{"Name":"Full","Default":true,"Capabilities":[2,3,4]},'
+          '{"Name":"Silent","Default":false,"Capabilities":null},'
+          '{"Name":"One","Default":false,"Capabilities":2}]',
+        );
+        expect(printers.map((p) => (p.name, p.color, p.duplex)), [
+          ('Mono', false, false),
+          ('Full', true, true),
+          ('Silent', null, null),
+          ('One', true, false),
+        ]);
+      },
+    );
+
+    test('CUPS: options with a two-sided and a colour-model choice', () {
+      final full = CupsPrintDriver.parseOptions(
+        'PageSize/Media Size: *A4 Letter\nDuplex/Double-Sided Printing: *None DuplexNoTumble\nColorModel/Color Model: Gray *RGB\n',
+      );
+      expect((full.color, full.duplex), (true, true));
+      final mono = CupsPrintDriver.parseOptions(
+        'PageSize/Media Size: *A4\nColorModel/Color Model: *Gray\n',
+      );
+      expect((mono.color, mono.duplex), (false, false));
+      final none = CupsPrintDriver.parseOptions('');
+      expect((none.color, none.duplex), (null, null));
+      // No colour option listed at all is not "no colour": it is not known.
+      expect(
+        CupsPrintDriver.parseOptions('PageSize/Media Size: *A4\n').color,
+        isNull,
+      );
+    });
+
+    test('direct IPP: the printer\'s own answer', () {
+      const mono =
+          'color-supported (boolean) = false\n        sides-supported (keyword) = one-sided\n';
+      const full =
+          'color-supported (boolean) = true\n        sides-supported (1setOf keyword) = one-sided\n';
+      final a = DirectIppPrintDriver.parseCapabilities(mono);
+      expect((a.color, a.duplex), (false, false));
+      final b = DirectIppPrintDriver.parseCapabilities(
+        'color-supported (boolean) = true\nsides-supported (keyword) = one-sided,two-sided-long-edge\n',
+      );
+      expect((b.color, b.duplex), (true, true));
+      final c = DirectIppPrintDriver.parseCapabilities('');
+      expect((c.color, c.duplex), (null, null));
+      expect(full, isNotEmpty);
+    });
+
+    test('a network printer is listed with what it said it can do', () async {
+      final driver = DirectIppPrintDriver(
+        run: (exe, args) async => exe == 'ippfind'
+            ? _ok('Canon MF110/910|ipp://c.local:631/ipp/print\n')
+            : _ok(
+                'color-supported (boolean) = false\nsides-supported (keyword) = one-sided\n',
+              ),
+      );
+      final printer = (await driver.printers()).single;
+      expect((printer.color, printer.duplex), (false, false));
+    });
+
+    test(
+      'a network printer that does not answer the short question is "not known"',
+      () async {
+        final driver = DirectIppPrintDriver(
+          run: (exe, args) async => exe == 'ippfind'
+              ? _ok('X|ipp://x.local:631/ipp/print\n')
+              : _ok('', 1),
+        );
+        final printer = (await driver.printers()).single;
+        expect((printer.color, printer.duplex), (null, null));
+      },
+    );
+  });
+
   test('the test page is a well-formed one-page PDF', () {
     final bytes = testPagePdf(
       'HP LaserJet (Hall) \\ \u0416',

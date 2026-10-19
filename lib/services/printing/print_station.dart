@@ -139,6 +139,23 @@ class PrintStation extends ChangeNotifier {
   String? printer;
   List<PrinterInfo> printers = const <PrinterInfo>[];
 
+  /// What the person at the PC says the printer can do, over what was detected
+  /// (null = go by the detection).
+  bool? colorOverride;
+  bool? duplexOverride;
+
+  PrinterInfo? get selected {
+    for (final p in printers) {
+      if (p.name == printer) return p;
+    }
+    return null;
+  }
+
+  /// What the printer can do: the override, else what was detected, else not
+  /// known (null: the bot offers it).
+  bool? get color => colorOverride ?? selected?.color;
+  bool? get duplex => duplexOverride ?? selected?.duplex;
+
   /// A missing program or the like, shown in Settings.
   String? problem;
 
@@ -160,6 +177,8 @@ class PrintStation extends ChangeNotifier {
         if (json is Map) {
           enabled = json['enabled'] == true;
           printer = json['printer'] as String?;
+          colorOverride = json['color'] as bool?;
+          duplexOverride = json['duplex'] as bool?;
         }
       }
     } catch (_) {
@@ -175,7 +194,12 @@ class PrintStation extends ChangeNotifier {
       final file = await _configFile();
       await file.parent.create(recursive: true);
       await file.writeAsString(
-        jsonEncode(<String, Object?>{'enabled': enabled, 'printer': printer}),
+        jsonEncode(<String, Object?>{
+          'enabled': enabled,
+          'printer': printer,
+          'color': colorOverride,
+          'duplex': duplexOverride,
+        }),
       );
     } catch (_) {
       // Not being able to remember is not worth stopping for.
@@ -208,6 +232,18 @@ class PrintStation extends ChangeNotifier {
     _changed();
   }
 
+  Future<void> setColor(bool? value) async {
+    colorOverride = value;
+    await _save();
+    _changed();
+  }
+
+  Future<void> setDuplex(bool? value) async {
+    duplexOverride = value;
+    await _save();
+    _changed();
+  }
+
   Future<void> refreshPrinters() async {
     problem = await driver.problem();
     try {
@@ -232,9 +268,13 @@ class PrintStation extends ChangeNotifier {
     if (!running || _busy || !signedIn()) return;
     _busy = true;
     try {
-      final json = await api.post(
-        '/print/next?printer=${Uri.encodeQueryComponent(printer!)}',
-      );
+      // Every round says which printer this is and what it can do (when known).
+      final query = <String>[
+        'printer=${Uri.encodeQueryComponent(printer!)}',
+        if (color != null) 'color=$color',
+        if (duplex != null) 'duplex=$duplex',
+      ].join('&');
+      final json = await api.post('/print/next?$query');
       if (json == null) {
         if (status != 'Topshiriq kutilmoqda.') {
           status = 'Topshiriq kutilmoqda.';

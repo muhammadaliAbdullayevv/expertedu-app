@@ -41,9 +41,7 @@ class _PrintStationTabState extends ConsumerState<PrintStationTab> {
   Future<void> _test(PrintStation station) async {
     final problem = await station.printTestPage();
     if (mounted) {
-      setState(
-        () => _note = problem ?? 'Sinov varag\'i printerga yuborildi.',
-      );
+      setState(() => _note = problem ?? 'Sinov varag\'i printerga yuborildi.');
     }
   }
 
@@ -95,7 +93,11 @@ class _PrintStationTabState extends ConsumerState<PrintStationTab> {
         children: <Widget>[
           Row(
             children: <Widget>[
-              const Icon(Icons.print_rounded, size: 18, color: AppColors.inkMuted),
+              const Icon(
+                Icons.print_rounded,
+                size: 18,
+                color: AppColors.inkMuted,
+              ),
               const SizedBox(width: 8),
               const Text(
                 'Printer stansiyasi',
@@ -114,7 +116,11 @@ class _PrintStationTabState extends ConsumerState<PrintStationTab> {
             'O\'qituvchi, admin yoki ega Telegram botga PDF yoki rasm yuborsa, '
             'shu kompyuter uni printerdan chiqaradi. Buning uchun dastur ochiq '
             'va shu filial admini hisobida kirilgan bo\'lishi kerak.',
-            style: TextStyle(color: AppColors.inkMuted, fontSize: 13, height: 1.4),
+            style: TextStyle(
+              color: AppColors.inkMuted,
+              fontSize: 13,
+              height: 1.4,
+            ),
           ),
           const SizedBox(height: 8),
           Row(
@@ -158,10 +164,14 @@ class _PrintStationTabState extends ConsumerState<PrintStationTab> {
                           for (final name in names)
                             DropdownMenuItem<String>(
                               value: name,
-                              child: Text(name, overflow: TextOverflow.ellipsis),
+                              child: Text(
+                                name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                         ],
-                        onChanged: (value) => unawaited(station.setPrinter(value)),
+                        onChanged: (value) =>
+                            unawaited(station.setPrinter(value)),
                       ),
               ),
               IconButton(
@@ -173,13 +183,33 @@ class _PrintStationTabState extends ConsumerState<PrintStationTab> {
             ],
           ),
           const SizedBox(height: 8),
+          _ability(
+            station,
+            key: const ValueKey('print-color'),
+            label: 'Rangli chop etadi',
+            detected: station.selected?.color,
+            override: station.colorOverride,
+            onChanged: station.setColor,
+          ),
+          const SizedBox(height: 8),
+          _ability(
+            station,
+            key: const ValueKey('print-duplex'),
+            label: 'Ikki tomonlama chop etadi',
+            detected: station.selected?.duplex,
+            override: station.duplexOverride,
+            onChanged: station.setDuplex,
+          ),
+          const SizedBox(height: 12),
           Wrap(
             spacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: <Widget>[
               OutlinedButton.icon(
                 key: const ValueKey('print-test'),
-                onPressed: station.printer == null ? null : () => _test(station),
+                onPressed: station.printer == null
+                    ? null
+                    : () => _test(station),
                 icon: const Icon(Icons.description_outlined, size: 18),
                 label: const Text('Sinov varag\'ini chiqarish'),
               ),
@@ -187,7 +217,10 @@ class _PrintStationTabState extends ConsumerState<PrintStationTab> {
                 Text(
                   station.status,
                   key: const ValueKey('print-status'),
-                  style: const TextStyle(color: AppColors.inkMuted, fontSize: 13),
+                  style: const TextStyle(
+                    color: AppColors.inkMuted,
+                    fontSize: 13,
+                  ),
                 ),
             ],
           ),
@@ -198,6 +231,34 @@ class _PrintStationTabState extends ConsumerState<PrintStationTab> {
             ),
         ],
       ),
+    );
+  }
+
+  /// "Does the printer do colour / both sides": automatic (what was found), or yes / no
+  /// by hand. The bot offers only what the printer can do.
+  Widget _ability(
+    PrintStation station, {
+    required Key key,
+    required String label,
+    required bool? detected,
+    required bool? override,
+    required Future<void> Function(bool?) onChanged,
+  }) {
+    String word(bool? v) => v == null ? 'noma\'lum' : (v ? 'ha' : 'yo\'q');
+    return DropdownButtonFormField<bool?>(
+      key: key,
+      initialValue: override,
+      isExpanded: true,
+      decoration: InputDecoration(labelText: label, isDense: true),
+      items: <DropdownMenuItem<bool?>>[
+        DropdownMenuItem<bool?>(
+          value: null,
+          child: Text('Avtomatik (${word(detected)})'),
+        ),
+        const DropdownMenuItem<bool?>(value: true, child: Text('Ha')),
+        const DropdownMenuItem<bool?>(value: false, child: Text('Yo\'q')),
+      ],
+      onChanged: (value) => unawaited(onChanged(value)),
     );
   }
 

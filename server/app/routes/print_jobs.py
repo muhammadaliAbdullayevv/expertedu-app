@@ -57,6 +57,11 @@ class PrintBranch(BaseModel):
     id: int
     name: str
     online: bool
+    # The printer the station last reported, what it can do (None = not known) and how many jobs wait.
+    printer: str | None = None
+    color: bool | None = None
+    duplex: bool | None = None
+    queued: int = 0
 
 
 class PrintOptions(BaseModel):
@@ -64,6 +69,18 @@ class PrintOptions(BaseModel):
     name: str | None = None
     via: Literal["id", "phone"] | None = None
     branches: list[PrintBranch]
+
+
+async def _printer_info(conn, branch_id: int, name: str) -> PrintBranch:
+    row = await conn.fetchrow(
+        "select printer, color, duplex, last_seen_at > now() - $2::interval as online from print_stations where branch_id = $1",
+        branch_id, ONLINE_WITHIN,
+    )
+    waiting = await conn.fetchval("select count(*) from print_jobs where branch_id = $1 and status in ('queued', 'printing')", branch_id)
+    return PrintBranch(
+        id=branch_id, name=name, online=bool(row and row["online"]), printer=row["printer"] if row else None,
+        color=row["color"] if row else None, duplex=row["duplex"] if row else None, queued=waiting,
+    )
 
 
 async def _actor(conn, telegram_user_id: int, is_owner: bool, name: str | None, verified_phone: str | None):
@@ -96,7 +113,7 @@ async def options(
         actor, role, rows = await _actor(conn, telegram_user_id, is_owner, name, verified_phone)
         return PrintOptions(
             role=role, name=actor.name, via=actor.via,
-            branches=[PrintBranch(id=r["id"], name=r["name"], online=await _online(conn, r["id"])) for r in rows],
+            branches=[await _printer_info(conn, r["id"], r["name"]) for r in rows],
         )
 
 
@@ -129,6 +146,11 @@ async def queue(
             if branch is None:
                 raise HTTPException(status.HTTP_403_FORBIDDEN, "Bu filialning printeridan foydalana olmaysiz.")
             ahead = await conn.fetchval("select count(*) from print_jobs where branch_id = $1 and status in ('queued', 'printing')", branch_id)
+            # A printer known not to do colour / two sides is not asked to (the bot does not offer it either).
+            caps = await conn.fetchrow("select color, duplex from print_stations where branch_id = $1", branch_id)
+            if caps is not None:
+                color = color and caps["color"] is not False
+                duplex = duplex and caps["duplex"] is not False
             job_id = await conn.fetchval(
                 """
                 insert into print_jobs (branch_id, requested_by, requested_role, telegram_user_id, chat_id, title, summary,
@@ -203,15 +225,19 @@ class StationJob(BaseModel):
 
 
 @router.post("/next", response_model=StationJob | None)
-async def next_job(printer: str | None = Query(None, max_length=200), scope: Scope = Depends(get_scope)):
+async def next_job(
+    printer: str | None = Query(None, max_length=200), color: bool | None = Query(None), duplex: bool | None = Query(None),
+    scope: Scope = Depends(get_scope),
+):
     """The station's every-few-seconds call: it counts as "on", and takes the oldest waiting job (204 when none)."""
     branch = _branch(scope)
     async with db.pool().acquire() as conn:
         async with conn.transaction():
             await conn.execute(
-                "insert into print_stations (branch_id, printer, last_seen_at) values ($1, $2, now()) "
-                "on conflict (branch_id) do update set printer = excluded.printer, last_seen_at = now()",
-                branch, printer,
+                "insert into print_stations (branch_id, printer, color, duplex, last_seen_at) values ($1, $2, $3, $4, now()) "
+                "on conflict (branch_id) do update set printer = excluded.printer, color = excluded.color, "
+                "duplex = excluded.duplex, last_seen_at = now()",
+                branch, printer, color, duplex,
             )
             await _sweep(conn)
             row = await conn.fetchrow(

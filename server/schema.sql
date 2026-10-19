@@ -887,3 +887,7 @@ create table if not exists print_stations (
   printer text,
   last_seen_at timestamptz not null default now()
 );
+
+-- ---- 0029: what the printer can do ----
+alter table print_stations add column if not exists color boolean;
+alter table print_stations add column if not exists duplex boolean;

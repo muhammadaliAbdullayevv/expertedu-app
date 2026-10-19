@@ -29,21 +29,52 @@ class _NoPrinters implements PrintDriver {
 /// The station without the file system, the network or a printer: the tab is what is tested.
 class _FakeStation extends PrintStation {
   _FakeStation()
-    : super(api: ApiClient(_NoTokens()), driver: _NoPrinters(), signedIn: () => true) {
-    printers = const <PrinterInfo>[PrinterInfo('Office'), PrinterInfo('Hall', isDefault: true)];
+    : super(
+        api: ApiClient(_NoTokens()),
+        driver: _NoPrinters(),
+        signedIn: () => true,
+      ) {
+    printers = const <PrinterInfo>[
+      PrinterInfo('Office'),
+      PrinterInfo('Hall', isDefault: true, color: false, duplex: false),
+    ];
     printer = 'Hall';
     history = <PrintHistoryEntry>[
       PrintHistoryEntry(
-        id: 1, title: 'Headway Unit 3.pdf', summary: '1-5, 8', pages: 6, copies: 2, requestedBy: 'Madina Karimova',
-        role: 'teacher', status: 'done', error: null, createdAt: DateTime(2026, 10, 19, 9, 5),
+        id: 1,
+        title: 'Headway Unit 3.pdf',
+        summary: '1-5, 8',
+        pages: 6,
+        copies: 2,
+        requestedBy: 'Madina Karimova',
+        role: 'teacher',
+        status: 'done',
+        error: null,
+        createdAt: DateTime(2026, 10, 19, 9, 5),
       ),
       PrintHistoryEntry(
-        id: 2, title: 'Vocabulary.pdf', summary: null, pages: 1, copies: 1, requestedBy: 'Jasur', role: 'admin',
-        status: 'queued', error: null, createdAt: DateTime(2026, 10, 19, 9, 10),
+        id: 2,
+        title: 'Vocabulary.pdf',
+        summary: null,
+        pages: 1,
+        copies: 1,
+        requestedBy: 'Jasur',
+        role: 'admin',
+        status: 'queued',
+        error: null,
+        createdAt: DateTime(2026, 10, 19, 9, 10),
       ),
       PrintHistoryEntry(
-        id: 3, title: 'Old.pdf', summary: null, pages: 1, copies: 1, requestedBy: 'Jasur', role: 'admin',
-        status: 'failed', error: 'Qog\'oz tugadi', createdAt: DateTime(2026, 10, 19, 8, 0),
+        id: 3,
+        title: 'Old.pdf',
+        summary: null,
+        pages: 1,
+        copies: 1,
+        requestedBy: 'Jasur',
+        role: 'admin',
+        status: 'failed',
+        error: 'Qog\'oz tugadi',
+        createdAt: DateTime(2026, 10, 19, 8, 0),
       ),
     ];
   }
@@ -55,6 +86,18 @@ class _FakeStation extends PrintStation {
 
   @override
   Future<void> start() async {}
+
+  @override
+  Future<void> setColor(bool? value) async {
+    colorOverride = value;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> setDuplex(bool? value) async {
+    duplexOverride = value;
+    notifyListeners();
+  }
 
   @override
   Future<void> setEnabled(bool value) async {
@@ -88,7 +131,11 @@ class _FakeStation extends PrintStation {
   Future<void> refreshPrinters() async {}
 }
 
-Future<void> _pump(WidgetTester tester, _FakeStation station, {double width = 900}) async {
+Future<void> _pump(
+  WidgetTester tester,
+  _FakeStation station, {
+  double width = 900,
+}) async {
   tester.view.physicalSize = Size(width, 1000);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
@@ -96,7 +143,10 @@ Future<void> _pump(WidgetTester tester, _FakeStation station, {double width = 90
   await tester.pumpWidget(
     ProviderScope(
       overrides: [printStationProvider.overrideWithValue(station)],
-      child: MaterialApp(theme: AppTheme.light(), home: const Scaffold(body: PrintStationTab())),
+      child: MaterialApp(
+        theme: AppTheme.light(),
+        home: const Scaffold(body: PrintStationTab()),
+      ),
     ),
   );
   await tester.pumpAndSettle();
@@ -105,7 +155,9 @@ Future<void> _pump(WidgetTester tester, _FakeStation station, {double width = 90
 void main() {
   setUpAll(loadAppFonts);
 
-  testWidgets('the station is off until it is switched on, and then says so', (tester) async {
+  testWidgets('the station is off until it is switched on, and then says so', (
+    tester,
+  ) async {
     final station = _FakeStation();
     await _pump(tester, station);
     expect(find.text('O\'chiq'), findsOneWidget);
@@ -117,17 +169,20 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('the printer is chosen from the PC\'s printers, the default first picked', (tester) async {
-    final station = _FakeStation();
-    await _pump(tester, station);
-    expect(find.text('Hall'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('print-printer')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Office').last);
-    await tester.pumpAndSettle();
-    expect(station.printer, 'Office');
-    await tester.pumpWidget(const SizedBox());
-  });
+  testWidgets(
+    'the printer is chosen from the PC\'s printers, the default first picked',
+    (tester) async {
+      final station = _FakeStation();
+      await _pump(tester, station);
+      expect(find.text('Hall'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('print-printer')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Office').last);
+      await tester.pumpAndSettle();
+      expect(station.printer, 'Office');
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 
   testWidgets('a missing printing program is shown', (tester) async {
     final station = _FakeStation()..problem = 'SumatraPDF topilmadi.';
@@ -137,7 +192,9 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('the test page can be printed and says how it went', (tester) async {
+  testWidgets('the test page can be printed and says how it went', (
+    tester,
+  ) async {
     final station = _FakeStation()..testResult = '«Hall» printeri xato berdi.';
     await _pump(tester, station);
     await tester.tap(find.byKey(const ValueKey('print-test')));
@@ -147,21 +204,40 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('who printed what is listed; only a waiting job can be cancelled', (tester) async {
-    final station = _FakeStation();
-    await _pump(tester, station);
-    expect(find.text('Headway Unit 3.pdf'), findsOneWidget);
-    expect(find.textContaining('Madina Karimova'), findsOneWidget);
-    expect(find.text('Yuborildi'), findsOneWidget);
-    expect(find.text('Navbatda'), findsOneWidget);
-    expect(find.text('Qog\'oz tugadi'), findsOneWidget);
-    expect(find.byKey(const ValueKey('print-cancel-1')), findsNothing);
-    expect(find.byKey(const ValueKey('print-cancel-3')), findsNothing);
-    await tester.tap(find.byKey(const ValueKey('print-cancel-2')));
-    await tester.pumpAndSettle();
-    expect(station.cancelled, [2]);
-    await tester.pumpWidget(const SizedBox());
-  });
+  testWidgets(
+    'who printed what is listed; only a waiting job can be cancelled',
+    (tester) async {
+      final station = _FakeStation();
+      await _pump(tester, station);
+      expect(find.text('Headway Unit 3.pdf'), findsOneWidget);
+      expect(find.textContaining('Madina Karimova'), findsOneWidget);
+      expect(find.text('Yuborildi'), findsOneWidget);
+      expect(find.text('Navbatda'), findsOneWidget);
+      expect(find.text('Qog\'oz tugadi'), findsOneWidget);
+      expect(find.byKey(const ValueKey('print-cancel-1')), findsNothing);
+      expect(find.byKey(const ValueKey('print-cancel-3')), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('print-cancel-2')));
+      await tester.pumpAndSettle();
+      expect(station.cancelled, [2]);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'what the printer can do is shown as detected and can be set by hand',
+    (tester) async {
+      final station = _FakeStation();
+      await _pump(tester, station);
+      expect(find.text('Avtomatik (yo\'q)'), findsNWidgets(2));
+      await tester.tap(find.byKey(const ValueKey('print-color')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ha').last);
+      await tester.pumpAndSettle();
+      expect(station.colorOverride, true);
+      expect(station.duplexOverride, isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 
   testWidgets('a narrow window does not overflow', (tester) async {
     await _pump(tester, _FakeStation(), width: 420);

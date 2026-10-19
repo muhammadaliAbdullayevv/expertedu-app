@@ -26,7 +26,9 @@ class _Recording implements PrintDriver {
   final List<List<int>> contents = <List<int>>[];
 
   @override
-  Future<List<PrinterInfo>> printers() async => const <PrinterInfo>[PrinterInfo('Test printer')];
+  Future<List<PrinterInfo>> printers() async => const <PrinterInfo>[
+    PrinterInfo('Test printer'),
+  ];
 
   @override
   Future<String?> problem() async => null;
@@ -39,26 +41,32 @@ class _Recording implements PrintDriver {
 }
 
 void main() {
-  test('takes the queued job, gets its PDF, "prints" it and reports', () async {
-    final dir = Directory.systemTemp.createTempSync('station_e2e');
-    final driver = _Recording();
-    final station = PrintStation(
-      api: ApiClient(_Tokens()),
-      driver: driver,
-      signedIn: () => true,
-      configDirectory: () async => dir,
-      tempDirectory: () async => dir,
-    );
-    await station.start();
-    await station.setEnabled(true); // says "I'm here" and takes the job
-    expect(driver.printed, hasLength(1), reason: station.status);
-    final request = driver.printed.single;
-    expect((request.copies, request.duplex, request.color), (2, true, false));
-    expect(driver.contents.single, File(_expected).readAsBytesSync());
-    await station.loadHistory();
-    expect(station.history.first.status, 'done');
-    expect(station.history.first.title, 'Headway.pdf');
-    station.dispose();
-    dir.deleteSync(recursive: true);
-  }, skip: _token.isEmpty ? 'needs a running API (see the top of this file)' : null);
+  test(
+    'takes the queued job, gets its PDF, "prints" it and reports',
+    () async {
+      final dir = Directory.systemTemp.createTempSync('station_e2e');
+      final driver = _Recording();
+      final station = PrintStation(
+        api: ApiClient(_Tokens()),
+        driver: driver,
+        signedIn: () => true,
+        configDirectory: () async => dir,
+        tempDirectory: () async => dir,
+      );
+      await station.start();
+      await station.setEnabled(true); // says "I'm here" and takes the job
+      expect(driver.printed, hasLength(1), reason: station.status);
+      final request = driver.printed.single;
+      expect((request.copies, request.duplex, request.color), (2, true, false));
+      expect(driver.contents.single, File(_expected).readAsBytesSync());
+      await station.loadHistory();
+      expect(station.history.first.status, 'done');
+      expect(station.history.first.title, 'Headway.pdf');
+      station.dispose();
+      dir.deleteSync(recursive: true);
+    },
+    skip: _token.isEmpty
+        ? 'needs a running API (see the top of this file)'
+        : null,
+  );
 }

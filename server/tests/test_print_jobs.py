@@ -190,3 +190,33 @@ async def test_the_bot_key_is_needed_for_the_bots_side(world, monkeypatch):
     assert (await anon.get("/bot/print/options", params=person(TEACHER_TG))).status_code == 401
     assert (await anon.get("/bot/print/finished")).status_code == 401
     await anon.aclose()
+
+
+# --- what the printer can do --------------------------------------------------------------------------------------
+
+
+async def test_the_station_reports_what_its_printer_can_do_and_the_bot_sees_it(world, bot):
+    first = (await bot.get("/bot/print/options", params=person(TEACHER_TG))).json()["branches"][0]
+    assert (first["printer"], first["color"], first["duplex"], first["queued"]) == (None, None, None, 0)
+
+    await world.a1.post("/print/next", params={"printer": "Canon MF110", "color": "false", "duplex": "false"})
+    await queue(bot)
+    seen = (await bot.get("/bot/print/options", params=person(TEACHER_TG))).json()["branches"][0]
+    assert (seen["printer"], seen["color"], seen["duplex"], seen["queued"], seen["online"]) == ("Canon MF110", False, False, 1, True)
+
+    # Unknown stays unknown: a station that cannot tell does not claim "no".
+    await world.a1.post("/print/next", params={"printer": "Canon MF110"})
+    again = (await bot.get("/bot/print/options", params=person(TEACHER_TG))).json()["branches"][0]
+    assert (again["color"], again["duplex"]) == (None, None)
+
+
+async def test_a_printer_known_not_to_do_colour_or_two_sides_is_not_asked_to(world, bot):
+    await world.a1.post("/print/next", params={"printer": "Canon", "color": "false", "duplex": "false"})
+    job = (await queue(bot, color="true", duplex="true")).json()["id"]
+    row = await world.pool.fetchrow("select color, duplex from print_jobs where id = $1", job)
+    assert (row["color"], row["duplex"]) == (False, False)
+
+    await world.a1.post("/print/next", params={"printer": "Canon", "color": "true", "duplex": "true"})
+    job = (await queue(bot, color="true", duplex="true")).json()["id"]
+    row = await world.pool.fetchrow("select color, duplex from print_jobs where id = $1", job)
+    assert (row["color"], row["duplex"]) == (True, True)
