@@ -467,8 +467,10 @@ class DirectIppPrintDriver implements PrintDriver {
     return null;
   }
 
-  /// Ghostscript's arguments: A4, 600 dpi (what such printers list for PWG
-  /// raster), grayscale, each page fitted to the sheet.
+  /// Ghostscript's arguments: A4, 600 dpi (what such printers list for PWG raster), each page fitted
+  /// to the sheet, as 8-bit grey (`sgray_8`, colour space 18). It has to be that: `-sColorModel=sgray`
+  /// is ignored by this device and gives 1-bit "black = 1" pages, which a printer that lists only
+  /// `sgray_8` / `srgb_8` reads the wrong way round -- the whole page comes out black.
   static List<String> rasterArguments(String pdf, String output) => <String>[
     '-q',
     '-dNOPAUSE',
@@ -479,7 +481,8 @@ class DirectIppPrintDriver implements PrintDriver {
     '-sPAPERSIZE=a4',
     '-dFIXEDMEDIA',
     '-dPDFFitPage',
-    '-sColorModel=sgray',
+    '-dcupsColorSpace=18',
+    '-dcupsBitsPerColor=8',
     '-sOutputFile=$output',
     pdf,
   ];

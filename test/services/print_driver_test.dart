@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:expert_edu_center/services/printing/print_driver.dart';
 import 'package:expert_edu_center/services/printing/test_page.dart';
@@ -298,7 +299,8 @@ void main() {
           containsAll([
             '-sDEVICE=pwgraster',
             '-sPAPERSIZE=a4',
-            '-sColorModel=sgray',
+            '-dcupsColorSpace=18',
+            '-dcupsBitsPerColor=8',
             '-r600',
             '/tmp/job.pdf',
           ]),
@@ -477,6 +479,42 @@ void main() {
       },
     );
   });
+
+  test(
+    'REAL Ghostscript: the raster is 8-bit grey with white paper as 255 (what the printer reads)',
+    () async {
+      final found = await Process.run('which', const <String>['gs']);
+      if (found.exitCode != 0) {
+        markTestSkipped('Ghostscript not installed');
+        return;
+      }
+      final dir = Directory.systemTemp.createTempSync('raster_test');
+      try {
+        final pdf = File('${dir.path}/page.pdf')
+          ..writeAsBytesSync(testPagePdf('P', DateTime(2026)));
+        final out = '${dir.path}/page.pwg';
+        final result = await Process.run(
+          'gs',
+          DirectIppPrintDriver.rasterArguments(pdf.path, out),
+        );
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        final bytes = File(out).readAsBytesSync();
+        expect(String.fromCharCodes(bytes.sublist(0, 4)), 'RaS2');
+        final header = ByteData.sublistView(bytes, 4, 4 + 1796);
+        // PWG raster header: BitsPerPixel at 388, ColorSpace at 400 (18 = sGray; 3 = "K", black = 1 -- the wrong one).
+        expect((header.getUint32(388), header.getUint32(400)), (8, 18));
+        // The first line of the page (blank paper) starts with a run of 255: white.
+        final firstLine = 4 + 1796;
+        expect(
+          bytes[firstLine + 2],
+          0xFF,
+          reason: 'blank paper must be 255, not 0',
+        );
+      } finally {
+        dir.deleteSync(recursive: true);
+      }
+    },
+  );
 
   test('the test page is a well-formed one-page PDF', () {
     final bytes = testPagePdf(
