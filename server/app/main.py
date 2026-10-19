@@ -15,6 +15,7 @@ from .routes import (
     auth,
     bot,
     bot_groups,
+    print_jobs,
     branches,
     counts,
     dashboard,
@@ -83,6 +84,7 @@ app.include_router(branches.router)
 # The Telegram bot has its own key, not a login or a branch (see routes/bot.py).
 app.include_router(bot.router)
 app.include_router(bot_groups.router)
+app.include_router(print_jobs.bot_router)
 # Everything below runs inside a branch scope: get_scope is a dependency of
 # every one of these routers, so the scope is always known while the request
 # is served (tests/test_branches.py checks no route escapes this).
@@ -107,3 +109,4 @@ app.include_router(staff.router, **_scoped)
 app.include_router(timetable.router, **_scoped)
 app.include_router(finance.router, **_scoped)
 app.include_router(photos.router, **_scoped)
+app.include_router(print_jobs.router, **_scoped)
