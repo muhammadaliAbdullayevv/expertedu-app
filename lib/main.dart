@@ -5,6 +5,7 @@ import 'app/router/app_router.dart';
 import 'app/theme/app_theme.dart';
 import 'core/extensions/build_context_x.dart';
 import 'core/widgets/update_banner.dart';
+import 'services/printing/print_station.dart';
 import 'services/updates/app_update_controller.dart';
 
 void main() {
@@ -18,6 +19,8 @@ class MyApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final router = ref.watch(appRouterProvider);
     ref.watch(appUpdateControllerProvider);
+    // The PC with the printer takes the Telegram print jobs (Settings -> Printer); idle everywhere else.
+    ref.watch(printStationProvider);
     return MaterialApp.router(
       onGenerateTitle: (context) => context.strings.appName,
       theme: AppTheme.light(),

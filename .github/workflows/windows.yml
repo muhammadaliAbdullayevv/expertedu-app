@@ -35,6 +35,24 @@ jobs:
       - run: flutter test
       - run: flutter build windows --release
 
+      # Silent printing for the Telegram print station (Settings -> Printer): SumatraPDF's portable
+      # exe, checked against a pinned hash, sits beside the app in tools\ and goes into the installer.
+      # (GPLv3, unmodified, run as a separate program; source: github.com/sumatrapdfreader/sumatrapdf)
+      - name: Bundle SumatraPDF
+        shell: pwsh
+        run: |
+          $version = "3.6.1"
+          $zip = Join-Path $env:RUNNER_TEMP "sumatra.zip"
+          Invoke-WebRequest "https://www.sumatrapdfreader.org/dl/rel/$version/SumatraPDF-$version-64.zip" -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne "98b33a518d42986856d225064b0cd2d3643ecf78cbf84ab873d26cc51877a544") { throw "SumatraPDF hash mismatch: $hash" }
+          $unzipped = Join-Path $env:RUNNER_TEMP "sumatra"
+          Expand-Archive $zip -DestinationPath $unzipped
+          $tools = "build\windows\x64\runner\Release\tools"
+          New-Item -ItemType Directory -Force $tools | Out-Null
+          Copy-Item (Join-Path $unzipped "SumatraPDF-$version-64.exe") (Join-Path $tools "SumatraPDF.exe")
+          "SumatraPDF $version (GPLv3), unmodified, used to print. Source: https://github.com/sumatrapdfreader/sumatrapdf" | Set-Content (Join-Path $tools "SumatraPDF-README.txt")
+
       # The installer (windows/installer/expert_edu_center.iss) -- what
       # staff install, and what the app downloads to update itself.
       - name: Build installer

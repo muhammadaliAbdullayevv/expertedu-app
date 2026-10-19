@@ -73,13 +73,13 @@ async def test_the_station_takes_the_oldest_job_once_and_prints_it(world, bot):
     second = (await queue(bot, copies=1)).json()
     assert (first["ahead"], second["ahead"]) == (0, 1)
 
-    job = await world.a1.get("/print/next", params={"printer": "HP LaserJet"})
+    job = await world.a1.post("/print/next", params={"printer": "HP LaserJet"})
     assert job.status_code == 200, job.text
     body = job.json()
     assert (body["id"], body["copies"], body["pages"], body["requested_by"], body["landscape"]) == (first["id"], 2, 4, "Madina", True)
     # The next call gets the second job, not the first again.
-    assert (await world.a1.get("/print/next")).json()["id"] == second["id"]
-    assert (await world.a1.get("/print/next")).status_code == 204
+    assert (await world.a1.post("/print/next")).json()["id"] == second["id"]
+    assert (await world.a1.post("/print/next")).status_code == 204
 
     pdf = await world.a1.get(f"/print/{first['id']}/file")
     assert pdf.content == PDF and pdf.headers["content-type"] == "application/pdf"
@@ -93,23 +93,23 @@ async def test_the_station_takes_the_oldest_job_once_and_prints_it(world, bot):
 
 async def test_a_station_only_gets_its_own_branchs_jobs(world, bot):
     job = (await queue(bot)).json()
-    assert (await world.a2.get("/print/next")).status_code == 204
+    assert (await world.a2.post("/print/next")).status_code == 204
     assert (await world.a2.get(f"/print/{job['id']}/file")).status_code == 404
     assert (await world.a2.post(f"/print/{job['id']}/result", json={"ok": True})).status_code == 404
     assert (await world.a2.post(f"/print/{job['id']}/cancel")).status_code == 404
-    assert (await world.a1.get("/print/next")).json()["id"] == job["id"]
+    assert (await world.a1.post("/print/next")).json()["id"] == job["id"]
 
 
 async def test_the_owners_station_works_for_the_branch_chosen_in_the_header(world, bot):
     job = (await queue(bot, tg=999, is_owner="true", name="Ega", branch=world.b2)).json()
     at_b2 = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", headers={**world.owner.headers, "X-Branch": str(world.b2)})
-    assert (await at_b2.get("/print/next")).json()["id"] == job["id"]
+    assert (await at_b2.post("/print/next")).json()["id"] == job["id"]
     await at_b2.aclose()
 
 
 async def test_the_bot_knows_whether_the_printer_pc_is_on(world, bot):
     assert (await queue(bot)).json()["online"] is False
-    await world.a1.get("/print/next")
+    await world.a1.post("/print/next")
     assert (await queue(bot)).json()["online"] is True
     options = (await bot.get("/bot/print/options", params=person(TEACHER_TG))).json()
     assert options["branches"][0]["online"] is True
@@ -123,8 +123,8 @@ async def test_the_bot_knows_whether_the_printer_pc_is_on(world, bot):
 async def test_the_person_is_told_once_how_it_went(world, bot):
     ok = (await queue(bot, chat=11)).json()["id"]
     bad = (await queue(bot, chat=22)).json()["id"]
-    await world.a1.get("/print/next")
-    await world.a1.get("/print/next")
+    await world.a1.post("/print/next")
+    await world.a1.post("/print/next")
     await world.a1.post(f"/print/{ok}/result", json={"ok": True})
     await world.a1.post(f"/print/{bad}/result", json={"ok": False, "error": "Qog'oz tugadi"})
 
@@ -142,12 +142,12 @@ async def test_a_job_the_printer_pc_never_took_expires(world, bot):
     told = (await bot.get("/bot/print/finished")).json()
     assert [(j["id"], j["status"]) for j in told] == [(job, "expired")]
     assert await world.pool.fetchval("select data from print_jobs where id = $1", job) is None
-    assert (await world.a1.get("/print/next")).status_code == 204
+    assert (await world.a1.post("/print/next")).status_code == 204
 
 
 async def test_a_job_a_silent_station_took_is_given_up_on(world, bot):
     job = (await queue(bot)).json()["id"]
-    await world.a1.get("/print/next")
+    await world.a1.post("/print/next")
     await world.pool.execute("update print_jobs set claimed_at = now() - interval '20 minutes' where id = $1", job)
     told = (await bot.get("/bot/print/finished")).json()
     assert [(j["id"], j["status"]) for j in told] == [(job, "failed")]
@@ -160,11 +160,11 @@ async def test_the_sender_can_cancel_until_the_printer_starts(world, bot):
     job = (await queue(bot)).json()["id"]
     assert (await bot.post(f"/bot/print/{job}/cancel", params=person(OTHER_TG))).status_code == 409  # not theirs
     assert (await bot.post(f"/bot/print/{job}/cancel", params=person(TEACHER_TG))).status_code == 204
-    assert (await world.a1.get("/print/next")).status_code == 204
+    assert (await world.a1.post("/print/next")).status_code == 204
     assert (await bot.get("/bot/print/finished")).json() == []  # they did it themselves: no message
 
     started = (await queue(bot)).json()["id"]
-    await world.a1.get("/print/next")
+    await world.a1.post("/print/next")
     assert (await bot.post(f"/bot/print/{started}/cancel", params=person(TEACHER_TG))).status_code == 409
 
 

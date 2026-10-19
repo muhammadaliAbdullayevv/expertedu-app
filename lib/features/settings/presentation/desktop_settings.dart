@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'print_station_tab.dart';
 import '../../branches/presentation/branches_tab.dart';
 import '../../branches/presentation/choose_branch.dart';
 import '../../../app/theme/app_theme.dart';
@@ -41,7 +42,7 @@ class DesktopSettings extends ConsumerWidget {
     return DefaultTabController(
       // Rebuilt from scratch if the tab count changes (another account).
       key: ValueKey<bool>(isOwner),
-      length: isOwner ? 4 : 2,
+      length: isOwner ? 5 : 3,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -66,6 +67,7 @@ class DesktopSettings extends ConsumerWidget {
                 const Tab(text: 'Guruhlar'),
                 if (isOwner) const Tab(text: 'Filiallar'),
                 if (isOwner) const Tab(text: 'Xodimlar'),
+                const Tab(text: 'Printer'),
                 const Tab(text: 'Hisob'),
               ],
             ),
@@ -76,6 +78,7 @@ class DesktopSettings extends ConsumerWidget {
                 const _GroupsTab(),
                 if (isOwner) const BranchesTab(),
                 if (isOwner) const StaffTab(),
+                const PrintStationTab(),
                 Align(
                   alignment: Alignment.topCenter,
                   child: ConstrainedBox(

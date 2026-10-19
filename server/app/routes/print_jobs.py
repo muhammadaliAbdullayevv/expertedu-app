@@ -202,7 +202,7 @@ class StationJob(BaseModel):
     requested_by: str
 
 
-@router.get("/next", response_model=StationJob | None)
+@router.post("/next", response_model=StationJob | None)
 async def next_job(printer: str | None = Query(None, max_length=200), scope: Scope = Depends(get_scope)):
     """The station's every-few-seconds call: it counts as "on", and takes the oldest waiting job (204 when none)."""
     branch = _branch(scope)
