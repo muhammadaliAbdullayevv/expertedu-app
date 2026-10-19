@@ -41,12 +41,8 @@ class PrintFailure implements Exception {
 typedef RunProcess =
     Future<ProcessResult> Function(String exe, List<String> args);
 
-Future<ProcessResult> runProcess(String exe, List<String> args) => Process.run(
-  exe,
-  args,
-  stdoutEncoding: utf8,
-  stderrEncoding: utf8,
-);
+Future<ProcessResult> runProcess(String exe, List<String> args) =>
+    Process.run(exe, args, stdoutEncoding: utf8, stderrEncoding: utf8);
 
 /// The PC's printers and a way to send a PDF to one. The print station works
 /// through this, so the queue logic can be tested without a printer.
@@ -146,7 +142,10 @@ class WindowsPrintDriver implements PrintDriver {
     return <PrinterInfo>[
       for (final item in items)
         if (item is Map && item['Name'] is String)
-          PrinterInfo(item['Name'] as String, isDefault: item['Default'] == true),
+          PrinterInfo(
+            item['Name'] as String,
+            isDefault: item['Default'] == true,
+          ),
     ];
   }
 
@@ -179,46 +178,66 @@ class WindowsPrintDriver implements PrintDriver {
     2 => 'Faylni ochib bo\'lmadi.',
     3 => 'Bu hujjatni chop etish taqiqlangan.',
     4 => '«$printer» printeri topilmadi.',
-    5 => '«$printer» printeri xato berdi (o\'chiq yoki ulanmagan bo\'lishi mumkin).',
+    5 =>
+      '«$printer» printeri xato berdi (o\'chiq yoki ulanmagan bo\'lishi mumkin).',
     6 => 'Chop etish tizim tomonidan taqiqlangan.',
-    _ => 'Chop etish bajarilmadi (kod $code). Printer nomi va ulanishini tekshiring.',
+    _ =>
+      'Chop etish bajarilmadi (kod $code). Printer nomi va ulanishini tekshiring.',
   };
 }
 
-/// Linux (CUPS): `lpstat` lists the printers, `lp` prints. Used where the app
+/// Linux (CUPS): `lpstat` lists the installed printers, `lp` prints. Used where the app
 /// runs on Linux; the center's print PC is Windows.
+///
+/// Only *installed* printers count (`lpstat -p`). A printer that is merely
+/// discovered on the network (`lpstat -e` says "network") has no queue: `lp`
+/// answers "No such file or directory" for it, so it is not offered.
 class CupsPrintDriver implements PrintDriver {
-  CupsPrintDriver({RunProcess? run}) : _run = run ?? runProcess;
+  CupsPrintDriver({RunProcess? run, bool Function(String path)? exists})
+    : _run = run ?? runProcess,
+      _exists = exists ?? ((path) => File(path).existsSync());
 
   final RunProcess _run;
+  final bool Function(String path) _exists;
 
-  @override
-  Future<String?> problem() async {
+  Future<ProcessResult?> _try(String exe, List<String> args) async {
     try {
-      final result = await _run('lpstat', const <String>['-r']);
-      return result.exitCode == 0 ? null : 'CUPS (chop etish xizmati) ishlamayapti.';
+      return await _run(exe, args);
     } on ProcessException {
-      return 'CUPS topilmadi (lp/lpstat o\'rnatilmagan).';
+      return null;
     }
   }
 
   @override
-  Future<List<PrinterInfo>> printers() async {
-    final ProcessResult names;
-    try {
-      names = await _run('lpstat', const <String>['-e']);
-    } on ProcessException {
-      return const <PrinterInfo>[];
+  Future<String?> problem() async {
+    final running = await _try('lpstat', const <String>['-r']);
+    if (running == null) return 'CUPS topilmadi (lp/lpstat o\'rnatilmagan).';
+    if (running.exitCode != 0) return 'CUPS (chop etish xizmati) ishlamayapti.';
+    if ((await printers()).isNotEmpty) return null;
+    final seen = await _try('lpstat', const <String>['-e']);
+    if (seen != null &&
+        seen.exitCode == 0 &&
+        '${seen.stdout}'.trim().isNotEmpty) {
+      return 'Printer tarmoqda topildi, lekin tizimga qo\'shilmagan. '
+          'Uni tizim sozlamalaridan (Printers) qo\'shing.';
     }
-    if (names.exitCode != 0) return const <PrinterInfo>[];
+    return null;
+  }
+
+  @override
+  Future<List<PrinterInfo>> printers() async {
+    final list = await _try('lpstat', const <String>['-p']);
+    if (list == null || list.exitCode != 0) return const <PrinterInfo>[];
     var defaultName = '';
-    final d = await _run('lpstat', const <String>['-d']);
-    final match = RegExp(r':\s*(\S.*)$').firstMatch('${d.stdout}'.trim());
+    final d = await _try('lpstat', const <String>['-d']);
+    final match = RegExp(
+      r':\s*(\S.*)$',
+    ).firstMatch('${d?.stdout ?? ''}'.trim());
     if (match != null) defaultName = match.group(1)!.trim();
     return <PrinterInfo>[
-      for (final line in LineSplitter.split('${names.stdout}'))
-        if (line.trim().isNotEmpty)
-          PrinterInfo(line.trim(), isDefault: line.trim() == defaultName),
+      for (final line in LineSplitter.split('${list.stdout}'))
+        if (RegExp(r'^printer\s+(\S+)').firstMatch(line) case final m?)
+          PrinterInfo(m.group(1)!, isDefault: m.group(1) == defaultName),
     ];
   }
 
@@ -237,14 +256,19 @@ class CupsPrintDriver implements PrintDriver {
 
   @override
   Future<void> print(String printer, PrintRequest request) async {
-    final ProcessResult result;
-    try {
-      result = await _run('lp', arguments(printer, request));
-    } on ProcessException {
+    final result = await _try('lp', arguments(printer, request));
+    if (result == null) {
       throw const PrintFailure('CUPS topilmadi (lp o\'rnatilmagan).');
     }
     if (result.exitCode != 0) {
       final why = '${result.stderr}'.trim();
+      // The file is there, so "no such file" is about the printer, not the PDF.
+      if (why.contains('No such file or directory') && _exists(request.path)) {
+        throw PrintFailure(
+          '«$printer» printeri tizimga qo\'shilmagan (faqat tarmoqda topilgan). '
+          'Uni tizim sozlamalaridan qo\'shing.',
+        );
+      }
       throw PrintFailure(
         why.isEmpty ? 'Chop etish bajarilmadi (kod ${result.exitCode}).' : why,
       );

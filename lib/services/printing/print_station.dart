@@ -323,10 +323,7 @@ class PrintStation extends ChangeNotifier {
     if (name == null) return 'Avval printerni tanlang.';
     File? file;
     try {
-      file = await _writeTemp(
-        'test.pdf',
-        testPagePdf(name, DateTime.now()),
-      );
+      file = await _writeTemp('test.pdf', testPagePdf(name, DateTime.now()));
       await driver.print(name, PrintRequest(path: file.path));
       return null;
     } on PrintFailure catch (e) {
@@ -345,7 +342,10 @@ class PrintStation extends ChangeNotifier {
   Future<void> loadHistory() async {
     if (!signedIn()) return;
     try {
-      final json = await api.get('/print', query: <String, String>{'limit': '30'});
+      final json = await api.get(
+        '/print',
+        query: <String, String>{'limit': '30'},
+      );
       history = <PrintHistoryEntry>[
         for (final item in (json as List))
           PrintHistoryEntry.fromJson((item as Map).cast<String, dynamic>()),

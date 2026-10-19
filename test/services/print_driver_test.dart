@@ -11,12 +11,17 @@ ProcessResult _ok([String out = '', int code = 0, String err = '']) =>
 void main() {
   group('Windows (SumatraPDF)', () {
     test('PowerShell lists one printer as an object, several as a list', () {
-      final one = WindowsPrintDriver.parsePrinters('{"Name":"HP LaserJet","Default":true}');
+      final one = WindowsPrintDriver.parsePrinters(
+        '{"Name":"HP LaserJet","Default":true}',
+      );
       expect(one.map((p) => (p.name, p.isDefault)), [('HP LaserJet', true)]);
       final many = WindowsPrintDriver.parsePrinters(
         '[{"Name":"Microsoft Print to PDF","Default":false},{"Name":"Canon \u0414\u0430","Default":true}]',
       );
-      expect(many.map((p) => p.name), ['Microsoft Print to PDF', 'Canon \u0414\u0430']);
+      expect(many.map((p) => p.name), [
+        'Microsoft Print to PDF',
+        'Canon \u0414\u0430',
+      ]);
       expect(many[1].isDefault, isTrue);
       expect(WindowsPrintDriver.parsePrinters('  '), isEmpty);
     });
@@ -25,64 +30,85 @@ void main() {
       String s(PrintRequest r) => WindowsPrintDriver.settings(r);
       expect(s(const PrintRequest(path: 'a.pdf')), '1x,simplex,monochrome');
       expect(
-        s(const PrintRequest(path: 'a.pdf', copies: 3, duplex: true, color: true)),
+        s(
+          const PrintRequest(
+            path: 'a.pdf',
+            copies: 3,
+            duplex: true,
+            color: true,
+          ),
+        ),
         '3x,duplexlong,color',
       );
     });
 
-    test('it prints silently to the chosen printer with those settings', () async {
-      final calls = <(String, List<String>)>[];
-      final driver = WindowsPrintDriver(
-        run: (exe, args) async {
-          calls.add((exe, args));
-          return _ok();
-        },
-        executable: r'C:\App\expert_edu_center.exe',
-        environment: const <String, String>{},
-        exists: (path) => path.endsWith(r'tools\SumatraPDF.exe') || path.endsWith('tools/SumatraPDF.exe'),
-      );
-      await driver.print(
-        'HP LaserJet 400',
-        const PrintRequest(path: r'C:\Temp\job.pdf', copies: 2, duplex: true),
-      );
-      final (exe, args) = calls.single;
-      expect(exe, endsWith('SumatraPDF.exe'));
-      expect(args, [
-        '-print-to',
-        'HP LaserJet 400',
-        '-print-settings',
-        '2x,duplexlong,monochrome',
-        '-silent',
-        r'C:\Temp\job.pdf',
-      ]);
-    });
+    test(
+      'it prints silently to the chosen printer with those settings',
+      () async {
+        final calls = <(String, List<String>)>[];
+        final driver = WindowsPrintDriver(
+          run: (exe, args) async {
+            calls.add((exe, args));
+            return _ok();
+          },
+          executable: r'C:\App\expert_edu_center.exe',
+          environment: const <String, String>{},
+          exists: (path) =>
+              path.endsWith(r'tools\SumatraPDF.exe') ||
+              path.endsWith('tools/SumatraPDF.exe'),
+        );
+        await driver.print(
+          'HP LaserJet 400',
+          const PrintRequest(path: r'C:\Temp\job.pdf', copies: 2, duplex: true),
+        );
+        final (exe, args) = calls.single;
+        expect(exe, endsWith('SumatraPDF.exe'));
+        expect(args, [
+          '-print-to',
+          'HP LaserJet 400',
+          '-print-settings',
+          '2x,duplexlong,monochrome',
+          '-silent',
+          r'C:\Temp\job.pdf',
+        ]);
+      },
+    );
 
-    test('SumatraPDF is looked for beside the app first, then where it installs', () {
-      final driver = WindowsPrintDriver(
-        run: (_, _) async => _ok(),
-        executable: '/app/expert_edu_center.exe',
-        environment: const <String, String>{'ProgramFiles': '/pf', 'LOCALAPPDATA': '/local'},
-        exists: (_) => false,
-      );
-      final found = driver.sumatraCandidates;
-      expect(found.first, contains('tools'));
-      expect(found.any((p) => p.startsWith('/pf')), isTrue);
-      expect(found.any((p) => p.startsWith('/local')), isTrue);
-    });
+    test(
+      'SumatraPDF is looked for beside the app first, then where it installs',
+      () {
+        final driver = WindowsPrintDriver(
+          run: (_, _) async => _ok(),
+          executable: '/app/expert_edu_center.exe',
+          environment: const <String, String>{
+            'ProgramFiles': '/pf',
+            'LOCALAPPDATA': '/local',
+          },
+          exists: (_) => false,
+        );
+        final found = driver.sumatraCandidates;
+        expect(found.first, contains('tools'));
+        expect(found.any((p) => p.startsWith('/pf')), isTrue);
+        expect(found.any((p) => p.startsWith('/local')), isTrue);
+      },
+    );
 
-    test('no SumatraPDF: a plain explanation, and printing fails with it', () async {
-      final driver = WindowsPrintDriver(
-        run: (_, _) async => _ok(),
-        executable: '/app/x.exe',
-        environment: const <String, String>{},
-        exists: (_) => false,
-      );
-      expect(await driver.problem(), contains('SumatraPDF'));
-      await expectLater(
-        driver.print('P', const PrintRequest(path: 'a.pdf')),
-        throwsA(isA<PrintFailure>()),
-      );
-    });
+    test(
+      'no SumatraPDF: a plain explanation, and printing fails with it',
+      () async {
+        final driver = WindowsPrintDriver(
+          run: (_, _) async => _ok(),
+          executable: '/app/x.exe',
+          environment: const <String, String>{},
+          exists: (_) => false,
+        );
+        expect(await driver.problem(), contains('SumatraPDF'));
+        await expectLater(
+          driver.print('P', const PrintRequest(path: 'a.pdf')),
+          throwsA(isA<PrintFailure>()),
+        );
+      },
+    );
 
     test('its exit codes are explained', () {
       expect(WindowsPrintDriver.failureMessage(0, 'P'), isNull);
@@ -100,7 +126,13 @@ void main() {
       );
       await expectLater(
         driver.print('Gone', const PrintRequest(path: 'a.pdf')),
-        throwsA(isA<PrintFailure>().having((e) => e.message, 'message', contains('Gone'))),
+        throwsA(
+          isA<PrintFailure>().having(
+            (e) => e.message,
+            'message',
+            contains('Gone'),
+          ),
+        ),
       );
     });
 
@@ -121,53 +153,139 @@ void main() {
   group('Linux (CUPS)', () {
     test('lp gets the copies, sides and colour', () {
       expect(
-        CupsPrintDriver.arguments('Office', const PrintRequest(path: '/t/a.pdf', copies: 2, duplex: true, color: true)),
+        CupsPrintDriver.arguments(
+          'Office',
+          const PrintRequest(
+            path: '/t/a.pdf',
+            copies: 2,
+            duplex: true,
+            color: true,
+          ),
+        ),
         [
-          '-d', 'Office', '-n', '2', '-o', 'sides=two-sided-long-edge', '-o', 'print-color-mode=color', '/t/a.pdf',
+          '-d',
+          'Office',
+          '-n',
+          '2',
+          '-o',
+          'sides=two-sided-long-edge',
+          '-o',
+          'print-color-mode=color',
+          '/t/a.pdf',
         ],
       );
       expect(
-        CupsPrintDriver.arguments('Office', const PrintRequest(path: '/t/a.pdf')),
+        CupsPrintDriver.arguments(
+          'Office',
+          const PrintRequest(path: '/t/a.pdf'),
+        ),
         contains('sides=one-sided'),
       );
     });
 
-    test('the printers and the default one are read from lpstat', () async {
+    test('only installed printers are listed, the default marked', () async {
       final driver = CupsPrintDriver(
-        run: (exe, args) async => args.first == '-e'
-            ? _ok('Office\nPDF\n')
-            : _ok('system default destination: PDF\n'),
+        run: (exe, args) async => switch (args.first) {
+          '-p' => _ok(
+            'printer Office is idle.  enabled since Mon\nprinter PDF is idle.  enabled since Mon\n',
+          ),
+          '-d' => _ok('system default destination: PDF\n'),
+          _ => _ok(),
+        },
       );
       final printers = await driver.printers();
-      expect(printers.map((p) => (p.name, p.isDefault)), [('Office', false), ('PDF', true)]);
+      expect(printers.map((p) => (p.name, p.isDefault)), [
+        ('Office', false),
+        ('PDF', true),
+      ]);
+      expect(await driver.problem(), isNull);
+    });
+
+    test(
+      'a printer that is only discovered on the network is not offered, and why is said',
+      () async {
+        final driver = CupsPrintDriver(
+          run: (exe, args) async => switch (args.first) {
+            '-r' => _ok('scheduler is running'),
+            '-p' => _ok('', 1, 'lpstat: No destinations added.'),
+            '-e' => _ok('Canon_MF110_910\n'),
+            _ => _ok('', 1),
+          },
+        );
+        expect(await driver.printers(), isEmpty);
+        expect(await driver.problem(), contains('tizimga qo\'shilmagan'));
+      },
+    );
+
+    test('CUPS not running is explained', () async {
+      final driver = CupsPrintDriver(run: (exe, args) async => _ok('', 1));
+      expect(await driver.problem(), contains('ishlamayapti'));
+    });
+
+    test('"no such file" for a PDF that exists is about the printer', () async {
+      final driver = CupsPrintDriver(
+        run: (_, _) async => _ok('', 1, 'lp: No such file or directory'),
+        exists: (_) => true,
+      );
+      await expectLater(
+        driver.print('Canon_MF110_910', const PrintRequest(path: '/tmp/a.pdf')),
+        throwsA(
+          isA<PrintFailure>().having(
+            (e) => e.message,
+            'message',
+            contains('tizimga qo\'shilmagan'),
+          ),
+        ),
+      );
     });
 
     test('a failed lp is explained with what it said', () async {
-      final driver = CupsPrintDriver(run: (_, _) async => _ok('', 1, 'lp: The printer or class does not exist.'));
+      final driver = CupsPrintDriver(
+        run: (_, _) async =>
+            _ok('', 1, 'lp: The printer or class does not exist.'),
+      );
       await expectLater(
         driver.print('X', const PrintRequest(path: 'a.pdf')),
-        throwsA(isA<PrintFailure>().having((e) => e.message, 'message', contains('does not exist'))),
+        throwsA(
+          isA<PrintFailure>().having(
+            (e) => e.message,
+            'message',
+            contains('does not exist'),
+          ),
+        ),
       );
     });
   });
 
   test('the test page is a well-formed one-page PDF', () {
-    final bytes = testPagePdf('HP LaserJet (Hall) \\ \u0416', DateTime(2026, 10, 19, 9, 5));
+    final bytes = testPagePdf(
+      'HP LaserJet (Hall) \\ \u0416',
+      DateTime(2026, 10, 19, 9, 5),
+    );
     final text = latin1.decode(bytes);
     expect(text, startsWith('%PDF-1.4'));
     expect(text, contains('Expert Edu Center'));
     expect(text, contains('2026-10-19 09:05'));
     expect(text, contains(r'HP LaserJet \(Hall\) \\ ?'));
     // The cross-reference table points at every object, and startxref at the table.
-    final startxref = int.parse(RegExp(r'startxref\n(\d+)').firstMatch(text)!.group(1)!);
+    final startxref = int.parse(
+      RegExp(r'startxref\n(\d+)').firstMatch(text)!.group(1)!,
+    );
     expect(text.substring(startxref), startsWith('xref'));
-    final offsets = RegExp(r'(\d{10}) 00000 n').allMatches(text).map((m) => int.parse(m.group(1)!)).toList();
+    final offsets = RegExp(
+      r'(\d{10}) 00000 n',
+    ).allMatches(text).map((m) => int.parse(m.group(1)!)).toList();
     expect(offsets, hasLength(5));
     for (var i = 0; i < offsets.length; i++) {
       expect(text.substring(offsets[i]), startsWith('${i + 1} 0 obj'));
     }
-    final length = int.parse(RegExp(r'/Length (\d+)').firstMatch(text)!.group(1)!);
-    final body = text.substring(text.indexOf('stream\n') + 7, text.indexOf('\nendstream'));
+    final length = int.parse(
+      RegExp(r'/Length (\d+)').firstMatch(text)!.group(1)!,
+    );
+    final body = text.substring(
+      text.indexOf('stream\n') + 7,
+      text.indexOf('\nendstream'),
+    );
     expect(body.length, length);
   });
 }
