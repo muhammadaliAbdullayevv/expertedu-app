@@ -5,10 +5,14 @@ import 'package:flutter/foundation.dart';
 
 /// A printer the computer knows.
 class PrinterInfo {
-  const PrinterInfo(this.name, {this.isDefault = false});
+  const PrinterInfo(this.name, {this.isDefault = false, this.uri});
 
   final String name;
   final bool isDefault;
+
+  /// Set for a printer found on the network that has no system queue: its IPP
+  /// address, which the direct route prints to.
+  final String? uri;
 }
 
 /// What to print: a PDF file with its copies and sides/colour choices.
@@ -59,7 +63,7 @@ abstract class PrintDriver {
   static PrintDriver forPlatform() {
     return defaultTargetPlatform == TargetPlatform.windows
         ? WindowsPrintDriver()
-        : CupsPrintDriver();
+        : LinuxPrintDriver();
   }
 }
 
@@ -213,14 +217,6 @@ class CupsPrintDriver implements PrintDriver {
     final running = await _try('lpstat', const <String>['-r']);
     if (running == null) return 'CUPS topilmadi (lp/lpstat o\'rnatilmagan).';
     if (running.exitCode != 0) return 'CUPS (chop etish xizmati) ishlamayapti.';
-    if ((await printers()).isNotEmpty) return null;
-    final seen = await _try('lpstat', const <String>['-e']);
-    if (seen != null &&
-        seen.exitCode == 0 &&
-        '${seen.stdout}'.trim().isNotEmpty) {
-      return 'Printer tarmoqda topildi, lekin tizimga qo\'shilmagan. '
-          'Uni tizim sozlamalaridan (Printers) qo\'shing.';
-    }
     return null;
   }
 
@@ -273,5 +269,181 @@ class CupsPrintDriver implements PrintDriver {
         why.isEmpty ? 'Chop etish bajarilmadi (kod ${result.exitCode}).' : why,
       );
     }
+  }
+}
+
+/// Printers found on the local network (Bonjour/IPP) that print without any
+/// system queue: the PDF is turned into PWG raster pages by Ghostscript and sent
+/// as an IPP Print-Job with `ipptool`. Some printers cannot answer CUPS's
+/// "all attributes" question, so CUPS cannot install them -- but they do take
+/// PWG raster. (Black and white, one side: what such a basic printer does.)
+class DirectIppPrintDriver implements PrintDriver {
+  DirectIppPrintDriver({RunProcess? run}) : _run = run ?? runProcess;
+
+  final RunProcess _run;
+
+  /// The addresses seen by the last [printers] call, by display name.
+  final Map<String, String> _uris = <String, String>{};
+
+  Future<ProcessResult?> _try(String exe, List<String> args) async {
+    try {
+      return await _run(exe, args);
+    } on ProcessException {
+      return null;
+    }
+  }
+
+  /// "Canon MF110/910|ipp://host.local:631/ipp/print" lines from `ippfind`.
+  static List<(String, String)> parseFound(String output) {
+    final found = <(String, String)>[];
+    for (final line in LineSplitter.split(output)) {
+      final at = line.lastIndexOf('|');
+      if (at <= 0) continue;
+      final name = line.substring(0, at).trim();
+      final uri = line.substring(at + 1).trim();
+      if (name.isNotEmpty && uri.startsWith('ipp')) found.add((name, uri));
+    }
+    return found;
+  }
+
+  @override
+  Future<List<PrinterInfo>> printers() async {
+    final result = await _try('ippfind', const <String>[
+      '-T',
+      '4',
+      '-x',
+      'echo',
+      '{service_name}|{service_uri}',
+      ';',
+    ]);
+    if (result == null || result.exitCode != 0) return const <PrinterInfo>[];
+    _uris.clear();
+    final list = <PrinterInfo>[];
+    for (final (name, uri) in parseFound('${result.stdout}')) {
+      final shown = '$name (tarmoq)';
+      if (_uris.containsKey(shown)) continue;
+      _uris[shown] = uri;
+      list.add(PrinterInfo(shown, uri: uri));
+    }
+    return list;
+  }
+
+  bool owns(String printer) => _uris.containsKey(printer);
+
+  @override
+  Future<String?> problem() async {
+    if (_uris.isEmpty) return null;
+    for (final tool in <String>['gs', 'ipptool']) {
+      final found = await _try('which', <String>[tool]);
+      if (found == null || found.exitCode != 0) {
+        return tool == 'gs'
+            ? 'Ghostscript (gs) o\'rnatilmagan: sudo dnf install ghostscript'
+            : 'ipptool o\'rnatilmagan: sudo dnf install cups-ipptool';
+      }
+    }
+    return null;
+  }
+
+  /// Ghostscript's arguments: A4, 600 dpi (what such printers list for PWG
+  /// raster), grayscale, each page fitted to the sheet.
+  static List<String> rasterArguments(String pdf, String output) => <String>[
+    '-q',
+    '-dNOPAUSE',
+    '-dBATCH',
+    '-dSAFER',
+    '-sDEVICE=pwgraster',
+    '-r600',
+    '-sPAPERSIZE=a4',
+    '-dFIXEDMEDIA',
+    '-dPDFFitPage',
+    '-sColorModel=sgray',
+    '-sOutputFile=$output',
+    pdf,
+  ];
+
+  /// `ipptool`'s arguments for sending a raster file as a print job.
+  static List<String> sendArguments(String raster, String uri) => <String>[
+    '-f',
+    raster,
+    '-d',
+    'filetype=image/pwg-raster',
+    '-t',
+    uri,
+    'print-job.test',
+  ];
+
+  @override
+  Future<void> print(String printer, PrintRequest request) async {
+    final uri = _uris[printer];
+    if (uri == null) throw PrintFailure('«$printer» printeri topilmadi.');
+    final raster = '${request.path}.pwg';
+    try {
+      final converted = await _try('gs', rasterArguments(request.path, raster));
+      if (converted == null) {
+        throw const PrintFailure(
+          'Ghostscript (gs) o\'rnatilmagan: sudo dnf install ghostscript',
+        );
+      }
+      if (converted.exitCode != 0) {
+        throw const PrintFailure('PDF ni chop etishga tayyorlab bo\'lmadi.');
+      }
+      // The printer has no "copies" it can be asked for here: one job per copy.
+      for (var copy = 0; copy < request.copies; copy++) {
+        final sent = await _try('ipptool', sendArguments(raster, uri));
+        if (sent == null) {
+          throw const PrintFailure(
+            'ipptool o\'rnatilmagan: sudo dnf install cups-ipptool',
+          );
+        }
+        if (sent.exitCode != 0 || !'${sent.stdout}'.contains('[PASS]')) {
+          throw PrintFailure(
+            '«$printer» printeri javob bermadi (yoqilganini va tarmoqqa '
+            'ulanganini tekshiring).',
+          );
+        }
+      }
+    } finally {
+      try {
+        File(raster).deleteSync();
+      } catch (_) {}
+    }
+  }
+}
+
+/// Linux: the printers CUPS has installed, plus the ones only found on the
+/// network (printed to directly). A printer both ways is offered once, as CUPS's.
+class LinuxPrintDriver implements PrintDriver {
+  LinuxPrintDriver({CupsPrintDriver? cups, DirectIppPrintDriver? direct})
+    : _cups = cups ?? CupsPrintDriver(),
+      _direct = direct ?? DirectIppPrintDriver();
+
+  final CupsPrintDriver _cups;
+  final DirectIppPrintDriver _direct;
+
+  static String _key(String name) =>
+      name.toLowerCase().replaceAll(RegExp(r'\(tarmoq\)|[^a-z0-9]'), '');
+
+  @override
+  Future<List<PrinterInfo>> printers() async {
+    final installed = await _cups.printers();
+    final seen = installed.map((p) => _key(p.name)).toSet();
+    final network = (await _direct.printers()).where(
+      (p) => !seen.contains(_key(p.name)),
+    );
+    return <PrinterInfo>[...installed, ...network];
+  }
+
+  @override
+  Future<String?> problem() async {
+    final direct = await _direct.problem();
+    if (direct != null) return direct;
+    if ((await printers()).isNotEmpty) return null;
+    return _cups.problem();
+  }
+
+  @override
+  Future<void> print(String printer, PrintRequest request) {
+    if (_direct.owns(printer)) return _direct.print(printer, request);
+    return _cups.print(printer, request);
   }
 }

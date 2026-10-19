@@ -202,18 +202,15 @@ void main() {
     });
 
     test(
-      'a printer that is only discovered on the network is not offered, and why is said',
+      'a printer only discovered on the network is not a CUPS printer',
       () async {
         final driver = CupsPrintDriver(
           run: (exe, args) async => switch (args.first) {
-            '-r' => _ok('scheduler is running'),
             '-p' => _ok('', 1, 'lpstat: No destinations added.'),
-            '-e' => _ok('Canon_MF110_910\n'),
             _ => _ok('', 1),
           },
         );
         expect(await driver.printers(), isEmpty);
-        expect(await driver.problem(), contains('tizimga qo\'shilmagan'));
       },
     );
 
@@ -255,6 +252,151 @@ void main() {
         ),
       );
     });
+  });
+
+  group('Linux, printers only found on the network (direct IPP)', () {
+    const found = 'Canon MF110/910|ipp://Canon005d73.local:631/ipp/print\n';
+
+    test('ippfind lines are read, odd ones skipped', () {
+      expect(
+        DirectIppPrintDriver.parseFound(
+          '$found\nnonsense\n|ipp://x\nName|http://no\n',
+        ),
+        [('Canon MF110/910', 'ipp://Canon005d73.local:631/ipp/print')],
+      );
+    });
+
+    test('they are listed with their address', () async {
+      final driver = DirectIppPrintDriver(run: (_, _) async => _ok(found));
+      final printers = await driver.printers();
+      expect(printers.single.name, 'Canon MF110/910 (tarmoq)');
+      expect(printers.single.uri, 'ipp://Canon005d73.local:631/ipp/print');
+      expect(driver.owns('Canon MF110/910 (tarmoq)'), isTrue);
+    });
+
+    test(
+      'a PDF is rastered as A4 grayscale and sent as one IPP job per copy',
+      () async {
+        final calls = <(String, List<String>)>[];
+        final driver = DirectIppPrintDriver(
+          run: (exe, args) async {
+            calls.add((exe, args));
+            return exe == 'ipptool'
+                ? _ok('print-job.test  [PASS]')
+                : _ok(found);
+          },
+        );
+        await driver.printers();
+        calls.clear();
+        await driver.print(
+          'Canon MF110/910 (tarmoq)',
+          const PrintRequest(path: '/tmp/job.pdf', copies: 2),
+        );
+        expect(calls.map((c) => c.$1), ['gs', 'ipptool', 'ipptool']);
+        expect(
+          calls.first.$2,
+          containsAll([
+            '-sDEVICE=pwgraster',
+            '-sPAPERSIZE=a4',
+            '-sColorModel=sgray',
+            '-r600',
+            '/tmp/job.pdf',
+          ]),
+        );
+        expect(calls.first.$2, contains('-sOutputFile=/tmp/job.pdf.pwg'));
+        expect(calls[1].$2, [
+          '-f',
+          '/tmp/job.pdf.pwg',
+          '-d',
+          'filetype=image/pwg-raster',
+          '-t',
+          'ipp://Canon005d73.local:631/ipp/print',
+          'print-job.test',
+        ]);
+      },
+    );
+
+    test('a printer that does not answer is a PrintFailure', () async {
+      final driver = DirectIppPrintDriver(
+        run: (exe, args) async =>
+            exe == 'ipptool' ? _ok('print-job.test  [FAIL]', 1) : _ok(found),
+      );
+      await driver.printers();
+      await expectLater(
+        driver.print(
+          'Canon MF110/910 (tarmoq)',
+          const PrintRequest(path: '/tmp/job.pdf'),
+        ),
+        throwsA(
+          isA<PrintFailure>().having(
+            (e) => e.message,
+            'message',
+            contains('javob bermadi'),
+          ),
+        ),
+      );
+    });
+
+    test(
+      'a PDF Ghostscript cannot read is a PrintFailure and nothing is sent',
+      () async {
+        final sent = <String>[];
+        final driver = DirectIppPrintDriver(
+          run: (exe, args) async {
+            sent.add(exe);
+            return exe == 'gs' ? _ok('', 1) : _ok(found);
+          },
+        );
+        await driver.printers();
+        sent.clear();
+        await expectLater(
+          driver.print(
+            'Canon MF110/910 (tarmoq)',
+            const PrintRequest(path: '/tmp/job.pdf'),
+          ),
+          throwsA(isA<PrintFailure>()),
+        );
+        expect(sent, ['gs']);
+      },
+    );
+
+    test('missing Ghostscript is explained', () async {
+      final driver = DirectIppPrintDriver(
+        run: (exe, args) async => switch (exe) {
+          'ippfind' => _ok(found),
+          'which' => _ok('', args.first == 'gs' ? 1 : 0),
+          _ => _ok(),
+        },
+      );
+      await driver.printers();
+      expect(await driver.problem(), contains('ghostscript'));
+    });
+
+    test(
+      'the Linux driver offers CUPS printers and network ones, a printer found both ways once',
+      () async {
+        final driver = LinuxPrintDriver(
+          cups: CupsPrintDriver(
+            run: (exe, args) async => args.first == '-p'
+                ? _ok(
+                    'printer Canon_MF110_910 is idle.\nprinter Office is idle.\n',
+                  )
+                : _ok(),
+          ),
+          direct: DirectIppPrintDriver(
+            run: (_, _) async => _ok(
+              '$found'
+              'HP LaserJet|ipp://hp.local:631/ipp/print\n',
+            ),
+          ),
+        );
+        expect((await driver.printers()).map((p) => p.name), [
+          'Canon_MF110_910',
+          'Office',
+          'HP LaserJet (tarmoq)',
+        ]);
+      },
+    );
   });
 
   test('the test page is a well-formed one-page PDF', () {
