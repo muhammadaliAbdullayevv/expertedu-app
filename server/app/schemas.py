@@ -275,6 +275,7 @@ class CreateEnrollmentRequest(BaseModel):
     student_id: int
     group_id: int
     joined_at: date
+    custom_fee: int | None = None
 
 
 class Enrollment(BaseModel):
@@ -285,6 +286,13 @@ class Enrollment(BaseModel):
     status: str
     ended_at: date | None
     created_at: datetime
+    custom_fee: int | None = None
+    discount_kind: str | None = None
+    discount_value: int | None = None
+
+
+class UpdateEnrollmentFeeRequest(BaseModel):
+    custom_fee: int | None = None
 
 
 class RosterEntry(BaseModel):
@@ -559,6 +567,7 @@ class CreateStudentWithEnrollmentRequest(BaseModel):
     first_month: str | None = None
     discount_kind: str | None = None
     discount_value: int | None = None
+    custom_fee: int | None = None
     parent_phone: str | None = None
     heard_from: str | None = None
     note: str | None = None
@@ -919,6 +928,7 @@ class EnrollLeadRequest(BaseModel):
     first_month: str | None = None
     discount_kind: str | None = None
     discount_value: int | None = None
+    custom_fee: int | None = None
     first_payment_amount: int | None = None
     first_payment_method: str | None = None
 
@@ -1410,6 +1420,10 @@ class ProfileGroup(BaseModel):
     schedule: list["ScheduleSlot"] = []
     attendance: ProfileAttendance
     homework: ProfileHomework = ProfileHomework()
+    custom_fee: int | None = None
+    group_fee: int | None = None
+    discount_kind: str | None = None
+    discount_value: int | None = None
 
 
 class ProfilePayment(BaseModel):
@@ -1482,6 +1496,7 @@ class ActivityItem(BaseModel):
 class AddToGroupRequest(BaseModel):
     group_id: int
     joined_at: date
+    custom_fee: int | None = None
     first_payment_amount: int | None = None
     first_payment_method: str | None = None
 
@@ -1534,6 +1549,7 @@ class TransferRequest(BaseModel):
     from_group_id: int
     to_group_id: int
     note: str | None = None
+    custom_fee: int | None = None
 
 
 class ActionResult(BaseModel):

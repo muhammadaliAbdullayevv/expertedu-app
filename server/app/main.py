@@ -1,11 +1,13 @@
 import asyncio
 import logging
+import os
 import time
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.gzip import GZipMiddleware
 
 from . import db
 from .deps import get_scope
@@ -40,6 +42,18 @@ from .routes import (
 )
 
 _UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
+# The built web app (the Flutter project's build/web), served from the same address as the API.
+_WEB_DIR = Path(os.environ.get("WEB_DIR") or Path(__file__).resolve().parent.parent / "web")
+
+
+class WebApp(StaticFiles):
+    """The web app's files. Always revalidated (ETag), so a new version shows on the next load instead of a
+    stale one sitting in the browser's cache."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 @asynccontextmanager
@@ -60,6 +74,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Expert Edu Center API", lifespan=lifespan)
+# The web app is ~11 MB raw (CanvasKit, main.dart.js): compressed it is a third of that on a phone.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 _slow = logging.getLogger("expertedu.slow")
 
@@ -110,3 +126,7 @@ app.include_router(timetable.router, **_scoped)
 app.include_router(finance.router, **_scoped)
 app.include_router(photos.router, **_scoped)
 app.include_router(print_jobs.router, **_scoped)
+
+# Last: anything that is not an API route is the web app (index.html at "/", its scripts and assets).
+if _WEB_DIR.is_dir():
+    app.mount("/", WebApp(directory=str(_WEB_DIR), html=True), name="web")

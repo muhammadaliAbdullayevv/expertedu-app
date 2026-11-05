@@ -707,6 +707,7 @@ async def enroll_lead(
             first_month=payload.first_month,
             discount_kind=payload.discount_kind,
             discount_value=payload.discount_value,
+            custom_fee=payload.custom_fee,
         )
         if first_payment:
             await money.record_payment(

@@ -214,6 +214,10 @@ class ProfileGroup {
     this.subjectName,
     this.teacherName,
     required this.feeAmount,
+    this.customFee,
+    this.groupFee,
+    this.discountKind,
+    this.discountValue,
     required this.joinedAt,
     required this.status,
     this.endedAt,
@@ -231,6 +235,10 @@ class ProfileGroup {
   final String? subjectName;
   final String? teacherName;
   final int feeAmount;
+  final int? customFee;
+  final int? groupFee;
+  final String? discountKind;
+  final int? discountValue;
   final DateTime joinedAt;
   final String status;
 
@@ -256,6 +264,10 @@ class ProfileGroup {
     subjectName: json['subject_name'] as String?,
     teacherName: json['teacher_name'] as String?,
     feeAmount: json['fee_amount'] as int,
+    customFee: json['custom_fee'] as int?,
+    groupFee: json['group_fee'] as int?,
+    discountKind: json['discount_kind'] as String?,
+    discountValue: json['discount_value'] as int?,
     joinedAt: DateTime.parse(json['joined_at'] as String),
     status: json['status'] as String,
     endedAt: _dtOrNull(json['ended_at']),

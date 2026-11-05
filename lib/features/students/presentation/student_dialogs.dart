@@ -575,3 +575,199 @@ class _EditStudentDialogState extends ConsumerState<EditStudentDialog> {
     );
   }
 }
+
+/// "Oylik to'lov summasi": sets a student-specific monthly fee for this group.
+Future<bool?> showEditEnrollmentFeeDialog(
+  BuildContext context, {
+  required String studentName,
+  required ProfileGroup group,
+}) {
+  return showAdaptiveFormDialog<bool>(
+    context,
+    maxWidth: 460,
+    child: EditEnrollmentFeeDialog(studentName: studentName, group: group),
+  );
+}
+
+class EditEnrollmentFeeDialog extends ConsumerStatefulWidget {
+  const EditEnrollmentFeeDialog({
+    super.key,
+    required this.studentName,
+    required this.group,
+  });
+
+  final String studentName;
+  final ProfileGroup group;
+
+  @override
+  ConsumerState<EditEnrollmentFeeDialog> createState() =>
+      _EditEnrollmentFeeDialogState();
+}
+
+class _EditEnrollmentFeeDialogState
+    extends ConsumerState<EditEnrollmentFeeDialog> {
+  late final TextEditingController _feeController;
+  bool _useGroupFee = false;
+  bool _saving = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    final custom = widget.group.customFee;
+    _useGroupFee = custom == null;
+    final initial = custom ?? widget.group.feeAmount;
+    _feeController = TextEditingController(
+      text: ThousandsInputFormatter.format(initial),
+    );
+  }
+
+  @override
+  void dispose() {
+    _feeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    int? newFee;
+    if (!_useGroupFee) {
+      final parsed = ThousandsInputFormatter.unformat(_feeController.text);
+      if (parsed == null || parsed < 0) {
+        setState(() => _error = 'Summani to\'g\'ri kiriting.');
+        return;
+      }
+      newFee = parsed;
+    }
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await ref
+          .read(studentsRepositoryProvider)
+          .updateEnrollmentFee(widget.group.enrollmentId, newFee);
+      if (mounted) Navigator.of(context).pop(true);
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final g = widget.group;
+    final defaultGroupFee = g.groupFee ?? g.feeAmount;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.only(bottom: 22),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          DialogHeader(
+            title: 'O\'quvchi oylik to\'lovi',
+            subtitle: '${widget.studentName} · ${g.groupName}',
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                const InfoBox(
+                  'Bu to\'lov summasi faqat shu o\'quvchining shu guruhdagi to\'loviga ta\'sir qiladi. '
+                  'O\'quvchining boshqa guruhlariga ta\'sir qilmaydi.',
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.neutralBg,
+                    borderRadius: BorderRadius.circular(AppRadius.field),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: <Widget>[
+                      const Text(
+                        'Guruhning umumiy narxi:',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: AppColors.inkMuted,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Text(
+                        CurrencyFormatter.format(defaultGroupFee),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _useGroupFee,
+                  title: const Text('Guruhning umumiy narxidan foydalanish'),
+                  onChanged: (v) {
+                    setState(() {
+                      _useGroupFee = v ?? false;
+                      if (_useGroupFee) {
+                        _feeController.text =
+                            ThousandsInputFormatter.format(defaultGroupFee);
+                      }
+                    });
+                  },
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  key: const ValueKey('edit-custom-fee'),
+                  controller: _feeController,
+                  enabled: !_useGroupFee,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: <TextInputFormatter>[
+                    ThousandsInputFormatter(),
+                  ],
+                  decoration: const InputDecoration(
+                    labelText: 'Shu o\'quvchi uchun oylik narx (so\'m)',
+                    suffixText: 'so\'m',
+                  ),
+                  onSubmitted: (_) => _save(),
+                ),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Text(
+                      _error!,
+                      key: const ValueKey('fee-error'),
+                      style: const TextStyle(color: AppColors.dangerText),
+                    ),
+                  ),
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: <Widget>[
+                    OutlinedButton(
+                      onPressed: _saving
+                          ? null
+                          : () => Navigator.of(context).pop(),
+                      child: const Text('Bekor qilish'),
+                    ),
+                    const SizedBox(width: 10),
+                    FilledButton(
+                      key: const ValueKey('fee-save'),
+                      onPressed: _saving ? null : _save,
+                      child: const Text('Saqlash'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}

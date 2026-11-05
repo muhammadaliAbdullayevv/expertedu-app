@@ -397,6 +397,7 @@ async def create_student_with_enrollment(
                     first_month=payload.first_month,
                     discount_kind=payload.discount_kind,
                     discount_value=payload.discount_value,
+                    custom_fee=payload.custom_fee,
                 )
                 if first_payment:
                     await money.record_payment(
@@ -476,7 +477,13 @@ async def student_profile(student_id: int, scope: Scope = Depends(get_scope)):
         enrollments = await conn.fetch(
             f"""
             select e.id as enrollment_id, e.group_id, g.name as group_name, sub.name as subject_name,
-                   t.full_name as teacher_name, g.fee_amount, e.joined_at, e.status, e.ended_at,
+                   t.full_name as teacher_name,
+                   coalesce(e.custom_fee, g.fee_amount) as fee_amount,
+                   g.fee_amount as group_fee,
+                   e.custom_fee,
+                   e.discount_kind,
+                   e.discount_value,
+                   e.joined_at, e.status, e.ended_at,
                    eb.owed as balance
             from enrollments e
             join groups g on g.id = e.group_id
@@ -870,7 +877,7 @@ async def transfer_student(
                 raise HTTPException(status.HTTP_404_NOT_FOUND, "O'quvchi eski guruhda emas.")
             new, first_charge = await enroll(
                 conn, student_id=student_id, group_id=payload.to_group_id, joined_at=clock.today(),
-                created_by=user.id, log_event=False,
+                custom_fee=payload.custom_fee, created_by=user.id, log_event=False,
             )
             debt = await withdraw(conn, dict(old), user.id, "O'quvchi boshqa guruhga o'tdi")
             if old_group["branch_id"] == new_group["branch_id"]:
@@ -920,7 +927,7 @@ async def add_to_group(
             group = await require_group(conn, _open_scope(user, scope), payload.group_id)
             enrollment, first_charge = await enroll(
                 conn, student_id=student_id, group_id=payload.group_id, joined_at=payload.joined_at,
-                created_by=user.id,
+                custom_fee=payload.custom_fee, created_by=user.id,
             )
             if first_payment:
                 await money.record_payment(

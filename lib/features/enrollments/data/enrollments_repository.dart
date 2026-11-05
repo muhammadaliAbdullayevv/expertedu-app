@@ -115,6 +115,7 @@ class EnrollmentsRepository {
     required DateTime joinedAt,
     String? discountKind,
     int? discountValue,
+    int? customFee,
   }) async {
     final json =
         await _api.get(
@@ -126,10 +127,18 @@ class EnrollmentsRepository {
                   'discount_kind': discountKind,
                   'discount_value': '$discountValue',
                 },
+                if (customFee != null) 'custom_fee': '$customFee',
               },
             )
             as Map<String, dynamic>;
     return FirstChargePreview.fromJson(json);
+  }
+
+  Future<void> updateFee(int enrollmentId, int? customFee) {
+    return _api.patch(
+      '/enrollments/$enrollmentId/fee',
+      body: <String, dynamic>{'custom_fee': customFee},
+    );
   }
 
   Future<List<StudentEnrollment>> listForStudent(int studentId) async {

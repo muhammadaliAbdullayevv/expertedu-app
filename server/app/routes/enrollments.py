@@ -6,7 +6,7 @@ from .. import clock, db, student_events
 from ..scope import branch_filter, link_student, require_enrollment, require_group, require_student
 from ..money import rules, service as money
 from ..deps import CurrentUser, Scope, get_current_user, get_scope
-from ..schemas import CreateEnrollmentRequest, Enrollment, FirstChargePreview, StudentEnrollment
+from ..schemas import CreateEnrollmentRequest, Enrollment, FirstChargePreview, StudentEnrollment, UpdateEnrollmentFeeRequest
 
 router = APIRouter(prefix="/enrollments", tags=["enrollments"], dependencies=[Depends(get_current_user)])
 
@@ -42,6 +42,7 @@ async def enroll(
     first_month: str | None = None,
     discount_kind: str | None = None,
     discount_value: int | None = None,
+    custom_fee: int | None = None,
     log_event: bool = True,
 ) -> tuple[dict, int]:
     """Creates an enrollment and its first charge on `conn`, inside the
@@ -52,6 +53,9 @@ async def enroll(
     group = await conn.fetchrow("select * from groups where id = $1 for update", group_id)
     if group is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Guruh topilmadi.")
+
+    if custom_fee is not None and custom_fee < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Oylik to'lov summasi manfiy bo'lishi mumkin emas.")
 
     existing = await conn.fetchval(
         "select 1 from enrollments where student_id = $1 and group_id = $2 and status = 'active'",
@@ -64,11 +68,12 @@ async def enroll(
     # A full group still takes the student: the center decides, the seat count
     # simply goes over the capacity and the group stays full.
 
-    discount_kind, discount_value = validate_discount(discount_kind, discount_value, group["fee_amount"])
+    base_fee = custom_fee if custom_fee is not None else group["fee_amount"]
+    discount_kind, discount_value = validate_discount(discount_kind, discount_value, base_fee)
     row = await conn.fetchrow(
         """
-        insert into enrollments (student_id, group_id, joined_at, discount_kind, discount_value, created_by)
-        values ($1, $2, $3, $4, $5, $6)
+        insert into enrollments (student_id, group_id, joined_at, discount_kind, discount_value, custom_fee, created_by)
+        values ($1, $2, $3, $4, $5, $6, $7)
         returning *
         """,
         student_id,
@@ -76,6 +81,7 @@ async def enroll(
         joined_at,
         discount_kind,
         discount_value,
+        custom_fee,
         created_by,
     )
     amount = await money.issue_first_charge(conn, dict(row), dict(group), created_by, first_month)
@@ -111,6 +117,7 @@ async def create_enrollment(
                 student_id=payload.student_id,
                 group_id=payload.group_id,
                 joined_at=payload.joined_at,
+                custom_fee=payload.custom_fee,
                 created_by=user.id,
             )
     return Enrollment(**row)
@@ -122,6 +129,7 @@ async def first_charge_preview(
     joined_at: date,
     discount_kind: str | None = None,
     discount_value: int | None = None,
+    custom_fee: int | None = None,
     scope: Scope = Depends(get_scope),
 ):
     """Both possible first charges for a student starting in a group on
@@ -129,14 +137,15 @@ async def first_charge_preview(
     # The owner may be looking at a group of another branch than the one in view.
     lookup = Scope(scope.user, None, scope.write_branch()) if scope.user.is_owner else scope
     group = await require_group(db.pool(), lookup, group_id)
-    kind, value = validate_discount(discount_kind, discount_value, group["fee_amount"])
-    fee = rules.discounted_fee(group["fee_amount"], kind, value)
+    base = custom_fee if custom_fee is not None else group["fee_amount"]
+    kind, value = validate_discount(discount_kind, discount_value, base)
+    fee = rules.discounted_fee(base, kind, value)
     first = rules.billing_periods(group["billing_mode"], group["billing_day"], joined_at, joined_at)[0]
     # Days from the start to the next billing day, over the days of the
     # full cycle it falls in (a fixed-day group); anniversary groups never prorate.
     cycle_days = first.cycle_days if first.cycle_days else (first.end - first.start).days
     return FirstChargePreview(
-        monthly_fee=group["fee_amount"],
+        monthly_fee=base,
         discounted_fee=fee,
         period_start=first.end - rules.timedelta(days=cycle_days),
         period_end=first.end,
@@ -146,6 +155,48 @@ async def first_charge_preview(
         full_amount=fee,
         is_mid_cycle=first.prorated,
     )
+
+
+@router.patch("/{enrollment_id}/fee", response_model=Enrollment)
+async def update_enrollment_fee(
+    enrollment_id: int,
+    payload: UpdateEnrollmentFeeRequest,
+    user: CurrentUser = Depends(get_current_user),
+    scope: Scope = Depends(get_scope),
+):
+    """Sets or clears a student-specific monthly fee for this group.
+    Pass custom_fee=None to revert to the group's default fee."""
+    if payload.custom_fee is not None and payload.custom_fee < 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Oylik to'lov summasi manfiy bo'lishi mumkin emas.")
+
+    existing = await require_enrollment(db.pool(), scope, enrollment_id)
+    async with db.pool().acquire() as conn:
+        async with conn.transaction():
+            if existing["discount_kind"] == "amount" and existing["discount_value"]:
+                group = await conn.fetchrow("select fee_amount from groups where id = $1", existing["group_id"])
+                effective_base = payload.custom_fee if payload.custom_fee is not None else group["fee_amount"]
+                if existing["discount_value"] > effective_base:
+                    raise HTTPException(
+                        status.HTTP_400_BAD_REQUEST,
+                        "Mavjud chegirma yangi oylik to'lov summasidan oshib ketadi."
+                    )
+
+            row = await conn.fetchrow(
+                """
+                update enrollments
+                set custom_fee = $2
+                where id = $1
+                returning *
+                """,
+                enrollment_id,
+                payload.custom_fee,
+            )
+            await money.audit(
+                conn, user.id, "enrollment", enrollment_id, "update_fee",
+                before={"custom_fee": existing.get("custom_fee")},
+                after={"custom_fee": payload.custom_fee},
+            )
+    return Enrollment(**row)
 
 
 async def withdraw(conn, enrollment: dict, user_id: int | None, reason: str) -> int:

@@ -410,3 +410,76 @@ async def test_everything_on_the_profile_says_which_group_it_is_about(school):
     debt = {g["group_id"]: g["debt_since"] for g in p["groups"]}
     assert debt[school.g1] is not None and debt[school.g2] is not None
     assert date.fromisoformat(debt[school.g1]) < date.fromisoformat(debt[school.g2])
+
+
+async def test_per_student_group_specific_monthly_fee(school):
+    s = await school.student()
+    # Enroll in group 1 with a custom fee of 250 000 (group 1 default is 300 000)
+    r1 = await school.api.client.post(
+        "/enrollments",
+        json={"student_id": s, "group_id": school.g1, "joined_at": str(date.today()), "custom_fee": 250000},
+    )
+    assert r1.status_code == 201
+    e1 = r1.json()["id"]
+
+    # Enroll in group 2 without custom fee (group 2 default is 200 000)
+    r2 = await school.api.client.post(
+        "/enrollments",
+        json={"student_id": s, "group_id": school.g2, "joined_at": str(date.today())},
+    )
+    assert r2.status_code == 201
+    e2 = r2.json()["id"]
+
+    # Profile check: group 1 has custom fee 250k, group 2 has default 200k
+    p = await school.profile(s)
+    g1_prof = next(g for g in p["groups"] if g["group_id"] == school.g1)
+    g2_prof = next(g for g in p["groups"] if g["group_id"] == school.g2)
+    assert g1_prof["fee_amount"] == 250000
+    assert g1_prof["custom_fee"] == 250000
+    assert g1_prof["group_fee"] == 300000
+
+    assert g2_prof["fee_amount"] == 200000
+    assert g2_prof["custom_fee"] is None
+    assert g2_prof["group_fee"] == 200000
+
+    # Update group 1's fee to 280 000
+    r_patch = await school.api.client.patch(f"/enrollments/{e1}/fee", json={"custom_fee": 280000})
+    assert r_patch.status_code == 200
+    assert r_patch.json()["custom_fee"] == 280000
+
+    # Verify group 1 updated, but group 2 remained unchanged
+    p2 = await school.profile(s)
+    g1_p2 = next(g for g in p2["groups"] if g["group_id"] == school.g1)
+    g2_p2 = next(g for g in p2["groups"] if g["group_id"] == school.g2)
+    assert g1_p2["fee_amount"] == 280000
+    assert g1_p2["custom_fee"] == 280000
+
+    assert g2_p2["fee_amount"] == 200000
+    assert g2_p2["custom_fee"] is None
+
+    # Revert group 1's fee back to group default (null)
+    r_reset = await school.api.client.patch(f"/enrollments/{e1}/fee", json={"custom_fee": None})
+    assert r_reset.status_code == 200
+    assert r_reset.json()["custom_fee"] is None
+
+    p3 = await school.profile(s)
+    g1_p3 = next(g for g in p3["groups"] if g["group_id"] == school.g1)
+    assert g1_p3["fee_amount"] == 300000
+    assert g1_p3["custom_fee"] is None
+
+    # Test preview with custom_fee
+    prev = (await school.api.client.get(
+        f"/enrollments/first-charge-preview?group_id={school.g1}&joined_at={date.today()}&custom_fee=220000"
+    )).json()
+    assert prev["monthly_fee"] == 220000
+    assert prev["full_amount"] == 220000
+
+    # Test add-to-group with custom_fee
+    add_res = await school.api.client.post(
+        f"/students/{s}/add-to-group",
+        json={"group_id": school.g1, "joined_at": str(date.today()), "custom_fee": 180000},
+    )
+    # Already in group 1, so 409
+    assert add_res.status_code == 409
+
+

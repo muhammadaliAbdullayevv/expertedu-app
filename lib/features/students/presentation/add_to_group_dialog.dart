@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../core/formatters/currency_formatter.dart';
+import '../../../core/formatters/thousands_input_formatter.dart';
 import '../../../services/api/api_client.dart';
 import '../../admissions/data/qabul_models.dart';
 import '../../branches/application/branch_view.dart';
@@ -58,6 +60,7 @@ class AddToGroupDialog extends ConsumerStatefulWidget {
 
 class _AddToGroupDialogState extends ConsumerState<AddToGroupDialog> {
   final _search = TextEditingController();
+  final _feeController = TextEditingController();
   int _shown = groupPageSize;
   GroupMatch? _group;
   // 'today' | 'next' | 'custom'
@@ -85,12 +88,14 @@ class _AddToGroupDialogState extends ConsumerState<AddToGroupDialog> {
   @override
   void dispose() {
     _search.dispose();
+    _feeController.dispose();
     super.dispose();
   }
 
   void _pick(GroupMatch g) {
     setState(() {
       _group = g;
+      _feeController.text = ThousandsInputFormatter.format(g.feeAmount);
       _start = 'today';
       _nextLesson = null;
       _error = null;
@@ -110,10 +115,12 @@ class _AddToGroupDialogState extends ConsumerState<AddToGroupDialog> {
   void _loadPreview() {
     final g = _group;
     if (g == null) return;
+    final customVal = ThousandsInputFormatter.unformat(_feeController.text);
+    final fee = (customVal != null && customVal != g.feeAmount) ? customVal : null;
     setState(() {
       _preview = ref
           .read(enrollmentsRepositoryProvider)
-          .previewFirstCharge(groupId: g.groupId, joinedAt: _joinDate);
+          .previewFirstCharge(groupId: g.groupId, joinedAt: _joinDate, customFee: fee);
     });
   }
 
@@ -127,12 +134,15 @@ class _AddToGroupDialogState extends ConsumerState<AddToGroupDialog> {
     });
     try {
       final due = _due(g, p);
+      final customVal = ThousandsInputFormatter.unformat(_feeController.text);
+      final fee = (customVal != null && customVal != g.feeAmount) ? customVal : null;
       final added = await ref
           .read(studentsRepositoryProvider)
           .addToGroup(
             widget.profile.student.id,
             groupId: g.groupId,
             joinedAt: _joinDate,
+            customFee: fee,
             firstPaymentAmount: _payNow && due > 0 ? due : null,
             firstPaymentMethod: _payNow && due > 0 ? _method : null,
           );
@@ -246,6 +256,8 @@ class _AddToGroupDialogState extends ConsumerState<AddToGroupDialog> {
                   const SizedBox(height: 16),
                   _startDate(),
                   const SizedBox(height: 14),
+                  _monthlyFeeField(g),
+                  const SizedBox(height: 14),
                   _firstBill(g),
                   const SizedBox(height: 10),
                   _payNowRow(),
@@ -317,6 +329,28 @@ class _AddToGroupDialogState extends ConsumerState<AddToGroupDialog> {
               },
             ),
           ],
+        ),
+      ],
+    );
+  }
+
+  Widget _monthlyFeeField(GroupMatch g) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        const FieldCaption('O\'quvchi oylik to\'lov summasi'),
+        TextField(
+          key: const ValueKey('add-group-fee'),
+          controller: _feeController,
+          keyboardType: TextInputType.number,
+          inputFormatters: <TextInputFormatter>[ThousandsInputFormatter()],
+          decoration: InputDecoration(
+            labelText: 'Oylik narx (so\'m)',
+            suffixText: 'so\'m',
+            helperText:
+                'Guruhning asosiy narxi: ${CurrencyFormatter.format(g.feeAmount)}',
+          ),
+          onChanged: (_) => _loadPreview(),
         ),
       ],
     );

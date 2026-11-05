@@ -99,6 +99,7 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
   final _phone = TextEditingController();
+  final _customFee = TextEditingController();
   final _discount = TextEditingController();
   final _parentPhone = TextEditingController();
   final _note = TextEditingController();
@@ -168,6 +169,7 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
     for (final controller in <TextEditingController>[
       _name,
       _phone,
+      _customFee,
       _discount,
       _parentPhone,
       _note,
@@ -236,6 +238,11 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
       () async {
         final request = ++_previewRequest;
         final discount = _validDiscount;
+        final customVal = ThousandsInputFormatter.unformat(_customFee.text);
+        final customFee =
+            (customVal != null && customVal != group.feeAmount)
+                ? customVal
+                : null;
         try {
           final preview = await ref
               .read(enrollmentsRepositoryProvider)
@@ -244,6 +251,7 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
                 joinedAt: _startDate,
                 discountKind: discount?.kind,
                 discountValue: discount?.value,
+                customFee: customFee,
               );
           if (!mounted || request != _previewRequest) return;
           setState(() {
@@ -352,6 +360,9 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
     final payment = ThousandsInputFormatter.unformat(_payment.text) ?? 0;
     final discount = _validDiscount;
     final note = _note.text.trim();
+    final customVal = ThousandsInputFormatter.unformat(_customFee.text);
+    final customFee =
+        (customVal != null && customVal != group.feeAmount) ? customVal : null;
     setState(() => _saving = true);
     try {
       await ref
@@ -364,6 +375,7 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
             firstMonth: preview.isMidCycle ? _firstMonth! : 'prorated',
             discountKind: discount?.kind,
             discountValue: discount?.value,
+            customFee: customFee,
             parentPhone: _parentPhone.text.trim().isEmpty
                 ? null
                 : UzPhoneMaskFormatter.toApi(_parentPhone.text),
@@ -397,6 +409,11 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
     final payment = ThousandsInputFormatter.unformat(_payment.text) ?? 0;
     final discount = _validDiscount;
     final note = _note.text.trim();
+    final customVal = ThousandsInputFormatter.unformat(_customFee.text);
+    final customFee =
+        (customVal != null && _group != null && customVal != _group!.feeAmount)
+            ? customVal
+            : null;
     return <String, dynamic>{
       'full_name': _name.text.trim(),
       'phone': UzPhoneMaskFormatter.toApi(_phone.text),
@@ -411,6 +428,7 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
       'first_month': _preview!.isMidCycle ? _firstMonth! : 'prorated',
       'discount_kind': discount?.kind,
       'discount_value': discount?.value,
+      'custom_fee': customFee,
       'first_payment_amount': payment > 0 ? payment : null,
       'first_payment_method': payment > 0 ? _paymentMethod : null,
     };
@@ -544,6 +562,8 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
                         if (_group != null) ...<Widget>[
                           const SizedBox(height: 8),
                           _groupSummary(_group!),
+                          const SizedBox(height: 14),
+                          _customFeeField(_group!),
                         ],
                         const SizedBox(height: 14),
                         _startDateField(),
@@ -930,6 +950,8 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
             if (id == null) return;
             setState(() {
               _group = groups.firstWhere((g) => g.id == id);
+              _customFee.text =
+                  ThousandsInputFormatter.format(_group!.feeAmount);
               _preview = null;
               _firstMonth = null;
             });
@@ -998,6 +1020,25 @@ class _AddStudentFormState extends ConsumerState<_AddStudentForm> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _customFeeField(Group group) {
+    return TextFormField(
+      key: const ValueKey('add-student-custom-fee'),
+      controller: _customFee,
+      keyboardType: TextInputType.number,
+      inputFormatters: <TextInputFormatter>[ThousandsInputFormatter()],
+      decoration: InputDecoration(
+        labelText: 'O\'quvchi oylik to\'lov summasi',
+        suffixText: 'so\'m',
+        helperText:
+            'Guruhning asosiy narxi: ${CurrencyFormatter.format(group.feeAmount)}',
+      ),
+      onChanged: (_) {
+        setState(() {});
+        _schedulePreview();
+      },
     );
   }
 

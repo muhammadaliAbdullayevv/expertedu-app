@@ -237,6 +237,21 @@ class StudentPanelState extends ConsumerState<StudentPanel> {
     }
   }
 
+  Future<void> _editFee(StudentProfileData full, ProfileGroup g) async {
+    final saved = await showEditEnrollmentFeeDialog(
+      context,
+      studentName: full.student.fullName,
+      group: g,
+    );
+    if (saved == true && mounted) {
+      showSnack(
+        context,
+        '${full.student.fullName} uchun ${g.groupName} oylik to\'lovi yangilandi.',
+      );
+      _reload();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -282,6 +297,7 @@ class StudentPanelState extends ConsumerState<StudentPanel> {
                     profile: p,
                     onPay: (e) => _takePayment(p, enrollmentId: e),
                     onActivate: (g) => _activate(_full ?? p, g),
+                    onEditFee: (g) => _editFee(_full ?? p, g),
                   ),
                   1 => _Payments(
                     profile: p,
@@ -606,6 +622,7 @@ class _Overview extends StatelessWidget {
     required this.profile,
     required this.onPay,
     required this.onActivate,
+    this.onEditFee,
   });
 
   final StudentProfileData profile;
@@ -613,6 +630,7 @@ class _Overview extends StatelessWidget {
 
   /// "Guruhni faollashtirish" on a group he left.
   final ValueChanged<ProfileGroup> onActivate;
+  final ValueChanged<ProfileGroup>? onEditFee;
 
   @override
   Widget build(BuildContext context) {
@@ -630,11 +648,20 @@ class _Overview extends StatelessWidget {
               style: TextStyle(color: AppColors.inkMuted),
             ),
           ),
-        for (final g in active) _GroupCard(group: g),
+        for (final g in active)
+          _GroupCard(
+            group: g,
+            onEditFee: onEditFee != null ? () => onEditFee!(g) : null,
+          ),
         // The groups he left stay on his profile, faded, each with a button to
         // put him back.
         for (final g in frozen)
-          _GroupCard(group: g, frozen: true, onActivate: () => onActivate(g)),
+          _GroupCard(
+            group: g,
+            frozen: true,
+            onActivate: () => onActivate(g),
+            onEditFee: onEditFee != null ? () => onEditFee!(g) : null,
+          ),
         const SizedBox(height: 10),
         const Text('So\'nggi faollik', style: _caption),
         const SizedBox(height: 4),
@@ -654,13 +681,19 @@ class _Overview extends StatelessWidget {
 }
 
 class _GroupCard extends StatelessWidget {
-  const _GroupCard({required this.group, this.frozen = false, this.onActivate});
+  const _GroupCard({
+    required this.group,
+    this.frozen = false,
+    this.onActivate,
+    this.onEditFee,
+  });
 
   final ProfileGroup group;
 
   /// A group he left: drawn faded, with "Faollashtirish".
   final bool frozen;
   final VoidCallback? onActivate;
+  final VoidCallback? onEditFee;
 
   @override
   Widget build(BuildContext context) {
@@ -764,7 +797,66 @@ class _GroupCard extends StatelessWidget {
                 const SizedBox(height: 10),
                 Row(
                   children: <Widget>[
-                    fact('Oylik narx', CurrencyFormatter.format(g.feeAmount)),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Row(
+                            children: <Widget>[
+                              const Text('O\'quvchi oylik narxi', style: _caption),
+                              if (g.customFee != null) ...<Widget>[
+                                const SizedBox(width: 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 5,
+                                    vertical: 1,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.accentSoft,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: const Text(
+                                    'maxsus',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.accentText,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              if (!frozen && onEditFee != null) ...<Widget>[
+                                const SizedBox(width: 4),
+                                Tooltip(
+                                  message: 'Oylik to\'lov summasini o\'zgartirish',
+                                  child: InkWell(
+                                    key: ValueKey('edit-fee-${g.enrollmentId}'),
+                                    borderRadius: BorderRadius.circular(4),
+                                    onTap: onEditFee,
+                                    child: const Padding(
+                                      padding: EdgeInsets.all(2),
+                                      child: Icon(
+                                        Icons.edit_outlined,
+                                        size: 14,
+                                        color: AppColors.inkMuted,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            CurrencyFormatter.format(g.feeAmount),
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                     fact('Qo\'shilgan', dayMonth(g.joinedAt)),
                   ],
                 ),

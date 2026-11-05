@@ -153,6 +153,7 @@ class StudentsRepository {
     int id, {
     required int groupId,
     required DateTime joinedAt,
+    int? customFee,
     int? firstPaymentAmount,
     String? firstPaymentMethod,
   }) async {
@@ -162,12 +163,21 @@ class StudentsRepository {
               body: <String, dynamic>{
                 'group_id': groupId,
                 'joined_at': apiDate(joinedAt),
+                'custom_fee': customFee,
                 'first_payment_amount': firstPaymentAmount,
                 'first_payment_method': firstPaymentMethod,
               },
             )
             as Map<String, dynamic>;
     return AddedToGroup.fromJson(json);
+  }
+
+  /// Sets or resets the group-specific monthly fee for this enrollment.
+  Future<void> updateEnrollmentFee(int enrollmentId, int? customFee) {
+    return _api.patch(
+      '/enrollments/$enrollmentId/fee',
+      body: <String, dynamic>{'custom_fee': customFee},
+    );
   }
 
   /// "Arxivga o'tkazish": out of every group, everything kept. [note] is the
@@ -256,6 +266,7 @@ class StudentsRepository {
     required String firstMonth,
     String? discountKind,
     int? discountValue,
+    int? customFee,
     String? parentPhone,
     String? heardFrom,
     String? note,
@@ -273,6 +284,7 @@ class StudentsRepository {
                 'first_month': firstMonth,
                 'discount_kind': discountKind,
                 'discount_value': discountValue,
+                'custom_fee': customFee,
                 'parent_phone': parentPhone,
                 'heard_from': heardFrom,
                 'note': note,

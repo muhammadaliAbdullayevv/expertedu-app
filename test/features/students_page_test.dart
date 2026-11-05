@@ -329,6 +329,7 @@ class FakeStudents implements StudentsRepository {
     int id, {
     required int groupId,
     required DateTime joinedAt,
+    int? customFee,
     int? firstPaymentAmount,
     String? firstPaymentMethod,
   }) async {
@@ -391,6 +392,7 @@ class FakeEnrollments implements EnrollmentsRepository {
     required DateTime joinedAt,
     String? discountKind,
     int? discountValue,
+    int? customFee,
   }) async {
     previews.add(groupId);
     return FirstChargePreview(

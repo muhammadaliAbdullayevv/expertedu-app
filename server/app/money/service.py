@@ -146,8 +146,10 @@ async def create_charge(
 
 def _fee_parts(group, enrollment) -> tuple[int, int]:
     """(discounted fee, discount amount) for one enrollment of a group."""
-    fee = rules.discounted_fee(group["fee_amount"], enrollment["discount_kind"], enrollment["discount_value"])
-    return fee, group["fee_amount"] - fee
+    custom = enrollment.get("custom_fee") if isinstance(enrollment, dict) else enrollment["custom_fee"]
+    base_fee = custom if custom is not None else group["fee_amount"]
+    fee = rules.discounted_fee(base_fee, enrollment["discount_kind"], enrollment["discount_value"])
+    return fee, base_fee - fee
 
 
 async def issue_first_charge(conn, enrollment: dict, group: dict, user_id: int | None, mode: str | None = None) -> int:
@@ -162,6 +164,8 @@ async def issue_first_charge(conn, enrollment: dict, group: dict, user_id: int |
         prorate_first=prorate,
     )[0]
     fee, discount = _fee_parts(group, enrollment)
+    custom = enrollment.get("custom_fee") if isinstance(enrollment, dict) else enrollment["custom_fee"]
+    base_fee = custom if custom is not None else group["fee_amount"]
     amount = period.amount(fee)
     await create_charge(
         conn,
@@ -169,7 +173,7 @@ async def issue_first_charge(conn, enrollment: dict, group: dict, user_id: int |
         period_start=period.start,
         period_end=period.end,
         amount=amount,
-        base_fee=group["fee_amount"],
+        base_fee=base_fee,
         discount_amount=discount,
         is_prorated=period.prorated,
         user_id=user_id,
@@ -183,7 +187,7 @@ async def generate_charges(conn, as_of: date) -> int:
     workers. A cancelled charge is not made again."""
     rows = await conn.fetch(
         """
-        select e.id, e.joined_at, e.ended_at, e.discount_kind, e.discount_value,
+        select e.id, e.joined_at, e.ended_at, e.discount_kind, e.discount_value, e.custom_fee,
                g.fee_amount, g.billing_mode, g.billing_day, g.prorate_first_period
         from enrollments e join groups g on g.id = e.group_id
         where e.status = 'active' or e.ended_at is not null
@@ -211,13 +215,14 @@ async def generate_charges(conn, as_of: date) -> int:
                 continue
             if period.start < covered_until.get(row["id"], date.min):
                 continue
+            base_fee = row["custom_fee"] if row["custom_fee"] is not None else row["fee_amount"]
             charge_id = await create_charge(
                 conn,
                 enrollment_id=row["id"],
                 period_start=period.start,
                 period_end=period.end,
                 amount=period.amount(fee),
-                base_fee=row["fee_amount"],
+                base_fee=base_fee,
                 discount_amount=discount,
                 is_prorated=period.prorated,
             )
@@ -467,7 +472,7 @@ async def monthly_plan(conn, month: date, ids: list[int] | None = None) -> int:
     month_end = rules.next_month(month)
     rows = await conn.fetch(
         """
-        select e.id, e.joined_at, e.discount_kind, e.discount_value,
+        select e.id, e.joined_at, e.discount_kind, e.discount_value, e.custom_fee,
                g.fee_amount, g.billing_mode, g.billing_day, g.prorate_first_period
         from enrollments e join groups g on g.id = e.group_id
         where e.status = 'active' and ($1::bigint[] is null or g.branch_id = any($1::bigint[]))
@@ -484,7 +489,8 @@ async def monthly_plan(conn, month: date, ids: list[int] | None = None) -> int:
     }
     total = 0
     for row in rows:
-        fee = rules.discounted_fee(row["fee_amount"], row["discount_kind"], row["discount_value"])
+        base = row["custom_fee"] if row["custom_fee"] is not None else row["fee_amount"]
+        fee = rules.discounted_fee(base, row["discount_kind"], row["discount_value"])
         for period in rules.billing_periods(
             row["billing_mode"], row["billing_day"], row["joined_at"], month_end - timedelta(days=1),
             None, row["prorate_first_period"],

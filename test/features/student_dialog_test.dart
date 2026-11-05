@@ -98,6 +98,7 @@ class FakeEnrollments implements EnrollmentsRepository {
     required DateTime joinedAt,
     String? discountKind,
     int? discountValue,
+    int? customFee,
   }) async {
     previews.add((group: groupId, at: joinedAt));
     return FirstChargePreview(

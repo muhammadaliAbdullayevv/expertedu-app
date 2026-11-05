@@ -152,6 +152,7 @@ create table if not exists enrollments (
   discount_value bigint check (discount_value >= 0),
   created_by bigint references users(id),
   created_at timestamptz not null default now(),
+  custom_fee bigint check (custom_fee is null or custom_fee >= 0),
   constraint enrollments_discount_pair check ((discount_kind is null) = (discount_value is null)),
   constraint enrollments_discount_percent_max check (discount_kind is distinct from 'percent' or discount_value <= 100)
 );
