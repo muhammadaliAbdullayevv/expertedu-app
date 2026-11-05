@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
@@ -74,6 +75,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Expert Edu Center API", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 # The web app is ~11 MB raw (CanvasKit, main.dart.js): compressed it is a third of that on a phone.
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 
